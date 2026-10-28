@@ -1,0 +1,19 @@
+<resources>
+    <style name="OverMeshTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#e8b04f</item>
+        <item name="android:windowBackground">#0d1117</item>
+        <item name="android:colorBackground">#161b22</item>
+        <item name="android:textColorPrimary">#c9d1d9</item>
+        <item name="android:textColorSecondary">#8b949e</item>
+        <item name="android:alertDialogTheme">@style/OverMeshDialog</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="OverMeshDialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#e8b04f</item>
+        <item name="android:colorBackground">#161b22</item>
+        <item name="android:textColorPrimary">#c9d1d9</item>
+        <item name="android:textColorSecondary">#8b949e</item>
+        <item name="android:windowBackground">#161b22</item>
+    </style>
+</resources>

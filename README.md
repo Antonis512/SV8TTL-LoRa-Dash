@@ -1,0 +1,83 @@
+# SV8TTL LoRa Dash — Beta
+
+Standalone Android app for MeshCore and Meshtastic radios over Bluetooth or USB serial. No Windows computer or TCP radio connection is required. An independent adaptation based on [OverMesh Lite](https://github.com/Slofi/overmesh), not an official OverMesh release.
+
+Current version: **0.10.11 (38)**. Chat advert controls sit beside their respective MC columns and remain hidden for empty device slots. Config places Add Radio Connections directly after My Nodes; adverts are accessed from Chat.
+
+This repository contains source code. Debug APKs, signing keys, personal exports and research downloads are excluded. Physical radio testing is still required; see [PHONE-TESTS.md](PHONE-TESTS.md).
+
+Version **0.10.10 (37)** adopts the independent name **SV8TTL LoRa Dash**, with Beta displayed separately. About identifies the app as an Android adaptation based on OverMesh Lite and retains the original attribution and licenses. Launcher, notifications, exports and APK filenames use the new name. Install `SV8TTL-LoRa-Dash-debug.apk` as an update: application ID, signing configuration, saved data and backup compatibility are unchanged. Historical release notes below retain their original terminology.
+
+Update, 25 October (debug APK built on request): configurable Message Split enable/interval; independent information buttons in My Nodes and Sending options; Connect All Available busy indication; active-message bubbles above Send Next and a Finished progress state. MeshCore observation defaults to 5 seconds, begins at radio acceptance and reconciles late heard repeats. Existing saved timeout overrides remain unchanged. “Pause before next message (seconds)” names the separate post-result delay. Device verification remains pending.
+
+Version 0.10.1 (28) makes the MeshCore channel-chain observation timeout configurable in Config → Sending options (1–300 seconds, default **2 seconds**). The separate post-result settling gap remains 3 seconds by default. Send to multiple is now a Chat button between the Users pills, visible when enabled in Config. Message A−/A+ controls occupy their own bar immediately below in the centre column, in both channel and DM views. Existing active sends retain the timeout captured when they started.
+
+Version 0.10.0 (27) adds paged Chat history, streaming JSON backups with Last Heard and transactional imports, Connect All Available (USB/BLE), Last Heard sorting, configurable MeshCore DM attempts, persistent Send to multiple, pause/resume and MeshCore message splitting. See [implementation notes](IMPLEMENTATION-0.10.0.md) for controls, tested behavior and remaining phone checks. Physical radio behavior is not yet verified.
+
+Version 0.9.8 (25) gives Chat independent left/right device selections across all connected and saved radios, including two devices of the same family. Device selectors sit beside the dynamic MC/MT pills; channel selectors move to the second row. Empty selections have blank pills; offline selections have red pills and retain saved channel/DM history. Long-press DM to list saved conversations on each side, tap a name to continue, or long-press a name for Delete this Conversation / Cancel. DM drafts stay with their device and peer. The Config DM shortcut is removed; View Messages remains.
+
+Version 0.9.7 (24) closes the keyboard and restores the same chat layout after a send is queued; failed validation/queueing retains the draft. Meshtastic channel/DM reactions appear at the lower left of the original message. Received Unicode emoji are preserved; this app offers 👍 first, followed by digits 0–7. Reactions and packet references persist in schema 10 and JSON backup. Older messages without packet references cannot support reactions. MC loading now drains the entire radio queue instead of stopping after 50 reads, and a 30-second response stall reports a reconnect error rather than leaving a permanent loading indicator.
+
+BLE connections request missing permissions and Android's Bluetooth activation prompt before connecting; selected radios resume after activation is accepted. Turning Bluetooth off clears BLE connection states. Removing the app from Recents stops sessions and removes its running notification. My Nodes → View Messages remains available.
+
+Version 0.9.6 (23) implements the saved next-session checklist: Config startup without connected radios; delivery information below message bodies; offline per-device DM conversations in Chat; repeater-only path-name resolution; channel replies (MC mentions and MT packet references); themed native dialogs; confirmed Advert results; Config → About and bundled licenses; and a persistent 30-day Nodes visibility filter. Unknown last-heard times are hidden unless explicitly requested. Existing histories are preserved; the database upgrades to schema 9. See PHONE-TESTS.md for physical verification.
+
+Version 0.9.5 (22) fixes Send and composer font buttons taking keyboard focus, preserves the current chat/draft on unexpected disconnect, and adds an OK-only connection-loss warning. My Nodes marks connected radios in green. Unnamed contacts sort last; MT hardware IDs now use the protocol's full model table and omitted default roles resolve to Client when user information exists.
+
+MC channel sends now display Sent after radio acceptance; this does not claim recipient delivery. Heard Repeats appears below outgoing text and in its short-tap menu. Incoming channel Message Paths and outgoing Heard Repeats show captured paths, signal readings, and matching contact names. Up to 32 recent paths per message persist in history/JSON backup. This requires live raw packet logs and available channel keys; old missing observations and encrypted DM paths cannot be reconstructed. Short hashes may be ambiguous, and a heard repeat is not proof of recipient delivery.
+
+Config → Notifications offers optional background message previews, off by default. Enabling them requests notification permission on Android 13+. When enabled and allowed by Android, incoming channel messages and DMs show a native notification only while the app is in the background. Returning to the app clears the preview; there is no in-app message banner. Turning the option off also suppresses background message sounds; foreground message sounds retain their separate setting. Bluetooth and action errors use dialogs.
+
+The app requests Bluetooth permissions when needed, with Android USB permission for USB radios. Active connections use a connected-device foreground service and a separate running notification with a status icon. Notification visibility depends on permission/system settings. The service keeps existing sessions visible while backgrounded; it does not restart radios after process death or app closure.
+
+An independently developed Android adaptation based on [OverMesh Lite](https://github.com/Slofi/overmesh), incorporating original OverMesh assets. The app bundles the upstream Lite visual styling and runs it in an Android WebView. The phone can connect to multiple Meshtastic and MeshCore radios through Bluetooth Low Energy or USB serial. It does not require a Windows computer or a TCP radio connection.
+
+The WebView uses Android system bar insets to keep its header and bottom navigation clear of the phone's status and navigation controls, including gesture and three-button navigation.
+
+Version 0.9.4 matches the official MC DM composer: 150 UTF-8 bytes, including room for full extended retry behavior. The former 159/160-byte special fallback is removed; oversized drafts remain editable and are not silently truncated.
+
+Version 0.9.3 adds a persistent Heard repeats counter to outgoing MC channel bubbles. Counts come from matching received rebroadcast packets, not recipient ACKs or guessed hop counts. The message menu explains that receptions are not necessarily unique repeaters. Old history without tracking data displays unavailable.
+
+Version 0.9.2 adds automatic MeshCore DM retries, radio-suggested timing, route reset/flood fallback, attempt indicators and Stop retries. One logical message retains one bubble; acknowledgments from any attempt stop further sends. Meshtastic retains firmware-managed retries, and MeshCore channel sends remain single broadcasts. Retries stop on disconnect/app closure and do not restart after relaunch.
+
+Version 0.9.1 adds live UTF-8 byte counters and enforced limits: MT 200 bytes, MC DM 150 bytes (aligned with the official app in 0.9.4), MC channels 160 minus the radio-name bytes and two separator bytes. Greek letters and emoji consume multiple bytes. Oversized drafts are retained for editing. MC automatic DM retries were added in 0.9.2; see TODO.md for default retry budgets. Both DM types report recipient delivery only after a corresponding acknowledgment.
+
+Version 0.9.0 adds reliable message/contact gestures, reply and message action dialogs, delivery explanations and retry, outward/return trace views, an expanding composer, persistent text sizes, purple bold sender names, MC adverts, and reorganized Config menus. See [PHONE-TESTS.md](PHONE-TESTS.md) for radio validation and [LICENSING.md](LICENSING.md) for the provenance and independent-release checklist.
+
+Version 0.8.0 implements the saved resume checklist: incoming-message banners, `HH:MM - DD/MM/YYYY` with an explicit close button, individual and batch radio connection controls, corrected MT device names, short-name fallback for contacts, shared Chat/Nodes contact actions, channel CSV backup, and app navigation history for Android Back. Contact long presses suppress text selection and popups dismiss on outside taps. CSV export in contact menus appears only in DM Chat. Config → Channel backup exports only the selected connected device's reported channel, using messages saved on this phone.
+
+Version 0.7.0 added full JSON app backup and merge, larger message text, A−/A+ controls, wrapping and enlarged MC/MT lists. Multiple concurrent radio sessions, per-device histories, unread indicators, and notification sounds remain available. Names still require radio-supplied information; a node ID remains the fallback when neither a long nor short name has arrived.
+
+SV8TTL LoRa Dash is an independent beta app, not an official OverMesh release. The upstream MIT license and copyright notice are preserved in [LICENSE](LICENSE).
+
+## Available now
+
+- **Config:** Connect multiple radios through Bluetooth or USB serial. BLE scanning shows progress and can be stopped; its choices are filtered by advertised radio service or recognizable family name. Open My Nodes to tick known Meshtastic and MeshCore radios for connection and manage offline histories, removal, age based cleanup, JSON backup/import, and CSV export. Notification sounds are configured in a separate view and can be selected separately for MC, MT, and DM or shared, with one to three plays.
+- **Nodes:** Select a connected radio, then search by name/ID/role or filter by network, role, infrastructure/users, messageability, or app-local favorites. Tap a contact for actions; DM opens Chat ready to reply. Meshtastic hardware model, hops, and position appear when reported; MeshCore contacts report type, route hops, and advertised position.
+- **Node actions:** Direct message on either network. Meshtastic offers trace, node information and position requests; MeshCore offers receiver path discovery and an additional learned-repeater trace, and repeaters/sensors offer a status request. Map opens a phone map app when the contact has a position. Share sends text details to an Android share target. Direct messages are saved under the connected radio's identity.
+- **Chat:** DM and Channels pills glow while unread messages exist; the bottom Chat symbol also glows and persists across launches until messages are read. Both screens show independently selected devices on the left and right, with the conversation in the center. Either side can show MC or MT. Device selectors sit beside their dynamic network pills in the header. A second header row holds each channel selector, a Users pill that shows or hides its side list, and saved A−/A+ controls for message text. The conversation widens and uses larger text as lists are hidden. Each MC and MT side list has an Enlarge button that opens a half-width panel with larger touch targets and its own A−/A+ controls. Channels use names reported by that radio, show channels with new messages, and list messageable contacts. The DM screen offers reply, history cleanup, and CSV export. Received messages show the radio timestamp; hops appear when available. Long pressing a message from a loaded contact opens its node actions. Selected offline radios also show their saved history in Chat, using channel names previously reported by that radio. Long-press DM to browse saved conversations and long-press a name to delete its local conversation. MeshCore *sent* means radio acceptance, not remote delivery.
+
+My Nodes stores messages automatically on the phone. JSON export contains radio identity, channel names, message text, dates, Unix timestamps, peers, delivery status, unread state, and hops; import restores them. CSV is for external analysis. Messages from previous versions without a connected device identity are removed on upgrade. A radio-supplied timestamp of zero is displayed as unavailable.
+The per-node JSON backup remains available in My Nodes. Config → App backup exports all saved radios and settings into one file. Import never removes existing settings or messages on the receiving phone. Bluetooth permission and pairing remain device-specific; a radio may need to be scanned or paired on the new phone.
+
+The **Map** and **Log** tabs are visible to match the Lite navigation but their full data views are not supported yet. MeshCore contact advertisements do not include a hardware model, so the app shows contact type for them. MeshCore TR discovers the outward and return paths to the receiver without per-hop SNR. The additional learned-repeater trace reports SNR but requires a compatible learned route and does not measure a client's final link. Three-byte hashes are supported by discovery, not the repeater trace command. Unknown or ambiguous node hashes remain explicit. Message records that contain only hop counts cannot reconstruct full message paths. Full MeshCore status decoding remains pending. Background reception and the full desktop Config options remain pending. This is not a complete port of OverMesh's Flask backend or its `lite.js` behavior. The app uses an Android JavaScript bridge for its current features.
+
+## Install and test
+
+Install `SV8TTL-LoRa-Dash-debug.apk` from the project folder on an Android 8.0 or newer phone. This debug APK is signed with a development key. If Android refuses to update an older preview because of a signature mismatch, uninstall the older preview first (which erases that preview's app data).
+
+Open **Config**, connect radios, then open **Nodes** to check their inventories. In **Chat**, select a device from MC or MT, choose a reported channel, and send a short test message. Keep the app in the foreground during initial radio testing. Active sessions have a foreground service; removing the app from Recents stops those sessions. Multi-radio behavior, hop values, and both gesture and three-button navigation layouts require physical device testing.
+
+## Build
+
+Open this folder in Android Studio with Android SDK 36 and JDK 17 or newer, or run `gradlew.bat assembleDebug`. The installable APK is copied to `SV8TTL-LoRa-Dash-debug.apk` beside this README. Gradle also keeps its internal build output under `build/`. Gradle downloads the AndroidX WebKit and USB serial dependencies.
+
+The project root is the Android app module. The Android entry point is `src/main/java/MainActivity.java`; the bundled touch UI is in `src/main/assets/`. `overmesh-lite.css` and `background-topo.png` are copied from upstream OverMesh; `index.html`, `android.css`, and `android.js` adapt the presentation to the Android radio layer.
+
+## Contribution path
+
+Future ideas and open design questions are tracked in [To Do](TODO.md).
+
+First validate channel send/receive on both radio families and refine the Android adapter. The remaining feature work is tracked in TODO.md. This repository is an independent Android adaptation, not a GitHub fork of the full upstream application.
+
+The HTML/CSS/JavaScript interface is bundled in the APK and rendered by Android WebView. Java handles BLE, USB and phone storage. The app needs a working Android WebView provider, but does not launch or require a particular browser app for Chat. Core radio messaging works offline.

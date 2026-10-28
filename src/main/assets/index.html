@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'">
+  <title>SV8TTL LoRa Dash</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="overmesh-lite.css">
+  <link rel="stylesheet" href="android.css">
+</head>
+<body>
+<div id="app-topo-bg"></div>
+<div id="app-header">
+  <span id="hdr-title">SV8TTL LoRa Dash<small>Beta</small></span><div class="hdr-sep"></div>
+  <span id="hdr-radio-name">Android · offline</span>
+  <span id="hdr-time"></span><button id="app-close" type="button" aria-label="Close app" onclick="AndroidBridge.closeApp()">×</button>
+</div>
+
+<main id="tab-chat" class="tab-panel">
+  <div id="chat-header-bar">
+    <div class="chat-header-network"><button id="header-mc-pill" class="cpill" onclick="setNetwork('left')"></button><select id="chat-mc-device" class="header-channel" aria-label="Left chat device" onchange="selectChatDevice('left',this.value)"></select></div>
+    <div id="chat-mode-group"><button id="chat-dm-pill" class="cpill" onclick="openDmScreen()">DM</button><button id="chat-channels-pill" class="cpill" onclick="openChannelsScreen()">Channels</button></div>
+    <div class="chat-header-network right"><select id="chat-mt-device" class="header-channel" aria-label="Right chat device" onchange="selectChatDevice('right',this.value)"></select><button id="header-mt-pill" class="cpill" onclick="setNetwork('right')"></button></div>
+  </div>
+  <div id="chat-device-bar">
+    <div class="device-header-controls"><select id="header-mc-channel" class="header-channel" aria-label="Left channel" onchange="selectChannel('left',Number(this.value))"></select><button id="toggle-mc-users" class="cpill users-toggle" type="button" onclick="toggleUsersList('mc')">Users ▾</button></div>
+    <div class="chat-multi-controls"><button id="new-multi-send" class="cpill" type="button" onclick="AndroidBridge.newMultiSend()" hidden>Send to multiple</button></div>
+    <div class="device-header-controls right"><button id="toggle-mt-users" class="cpill users-toggle" type="button" onclick="toggleUsersList('mt')">Users ▾</button><select id="header-mt-channel" class="header-channel" aria-label="Right channel" onchange="selectChannel('right',Number(this.value))"></select></div>
+  </div>
+  <div id="chat-sync" role="status" aria-live="polite" hidden><span class="chat-sync-spinner"></span><span id="chat-sync-text">Loading messages…</span></div>
+  <div id="channels-screen" hidden>
+    <aside class="chat-side" id="channel-mc-side"></aside>
+    <section id="channels-center">
+    <div id="chat-font-bar" class="chat-font-controls" role="group" aria-label="Chat controls"><button id="chat-advert-left" type="button" onclick="showChatAdvert('left')" hidden>Adv</button><button id="chat-font-smaller" type="button" aria-label="Decrease message text size" onclick="changeChatFont(-1)">A−</button><span id="chat-font-size" aria-live="polite">13 px</span><button id="chat-font-larger" type="button" aria-label="Increase message text size" onclick="changeChatFont(1)">A+</button><button id="chat-advert-right" type="button" onclick="showChatAdvert('right')" hidden>Adv</button></div>
+      <div id="channel-chat-title">Choose a channel</div>
+      <div id="chat-messages"></div>
+      <div id="chat-empty">Connect a radio in Config, then choose a channel.</div>
+      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="chat-input-bar">
+        <textarea id="chat-input" class="form-input" placeholder="Message…" rows="1"></textarea>
+        <button id="chat-send" onclick="sendMsg()">Send</button>
+      </div>
+    </section>
+    <aside class="chat-side" id="channel-mt-side"></aside>
+  </div>
+  <div id="dm-screen" hidden>
+    <aside class="dm-side" id="dm-mc-side"></aside>
+    <section id="dm-center">
+      <div id="dm-chat-title">Choose a contact</div>
+      <div id="dm-chat-history"></div>
+      <div id="dm-chat-status" aria-live="polite"></div>
+      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><button id="dm-reply" onclick="replyDm()">Reply</button></div>
+    </section>
+    <aside class="dm-side" id="dm-mt-side"></aside>
+  </div>
+
+  <div id="side-zoom" class="side-zoom-overlay" role="dialog" aria-modal="true" aria-label="Enlarged user list" hidden>
+    <div id="side-zoom-panel" class="side-zoom-panel">
+      <div class="side-zoom-toolbar"><strong id="side-zoom-title">MC users</strong><button id="side-zoom-smaller" type="button" aria-label="Decrease list text size" onclick="changeSideZoom(-1)">A−</button><button id="side-zoom-larger" type="button" aria-label="Increase list text size" onclick="changeSideZoom(1)">A+</button><button id="side-zoom-close" type="button" aria-label="Close enlarged list" onclick="closeSideZoom()">×</button></div>
+      <div id="side-zoom-body" class="side-zoom-body"></div>
+    </div>
+  </div>
+</main>
+
+<main id="tab-nodes" class="tab-panel" hidden>
+  <div id="nodes-filter-bar">
+    <input id="nodes-search" class="form-input" type="search" placeholder="Search nodes and contacts…" oninput="renderNodes()">
+    <button class="fpill active" id="nodes-all" onclick="setNodeFilter('all')">All</button>
+    <button class="fpill" id="nodes-mc" onclick="setNodeFilter('mc')">MC</button>
+    <button class="fpill" id="nodes-mt" onclick="setNodeFilter('mt')">MT</button>
+    <button class="fpill" id="nodes-favorites" onclick="toggleFavorites()">★ Favorites</button>
+    <select id="nodes-kind" class="form-input" onchange="setNodeKind(this.value)"><option value="all">All</option><option value="infrastructure">Infrastructure</option><option value="users">Users</option></select>
+    <label class="node-hide-label">Sort <select id="nodes-sort" class="form-input" onchange="setNodeSort(this.value)"><option value="name">Name</option><option value="hops-asc">Hop count: lowest first</option><option value="hops-desc">Hop count: highest first</option><option value="heard-desc">Last Heard: newest first</option><option value="heard-asc">Last Heard: oldest first</option></select></label>
+    <select id="nodes-role" class="form-input" onchange="setNodeRole(this.value)"><option value="all">All roles</option></select>
+    <label class="node-device-label">MC <select id="nodes-mc-device" class="form-input" onchange="AndroidBridge.selectDevice('mc',this.value)"></select></label>
+    <label class="node-device-label">MT <select id="nodes-mt-device" class="form-input" onchange="AndroidBridge.selectDevice('mt',this.value)"></select></label>
+  </div>
+  <div class="node-filter-options">
+    <label class="node-hide-label"><input id="nodes-show-unknown" type="checkbox" onchange="renderNodes()">Show unknown last heard</label>
+  <label class="node-hide-label node-hide-line"><input id="nodes-hide-unmessageable" type="checkbox" onchange="renderNodes()">Hide unmessageable nodes</label>
+  </div>
+  <div id="nodes-summary"></div>
+  <div id="nodes-action-status" aria-live="polite"></div>
+  <div id="nodes-list"></div>
+</main>
+
+<main id="tab-map" class="tab-panel" hidden>
+  <div class="section-heading">Map</div>
+  <div class="empty-panel">Map positions are not available from this Android radio adapter yet.</div>
+</main>
+
+<main id="tab-log" class="tab-panel" hidden>
+  <div class="section-heading">Log</div>
+  <div class="empty-panel">The mission log is not implemented yet.</div>
+</main>
+
+<main id="tab-settings" class="tab-panel" hidden>
+  <div id="settings-content">
+    <div id="settings-sending-page" class="settings-subpage" hidden>
+    <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
+    <h2>Sending options</h2>
+    <div class="settings-shortcuts">
+      <button type="button" onclick="openSettingsWindow('multi')"><strong>Send to Multiple</strong><span>Destinations, pacing and chain progress</span></button>
+      <button type="button" onclick="openSettingsWindow('split')"><strong>Message Split</strong><span>Split long messages and set the interval</span></button>
+      <button type="button" onclick="openSettingsWindow('attempts')"><strong>MeshCore DM attempts</strong><span>Known-route and flood attempts</span></button>
+    </div>
+    </div>
+    <div id="settings-home">
+    <div class="settings-shortcuts">
+      <button type="button" onclick="showSettingsPage('nodes')"><strong>My Nodes</strong><span>Connect and manage known radios</span></button>
+      <button type="button" onclick="showSettingsPage('connections')"><strong>Add Radio Connections</strong><span>Add a radio using Bluetooth or USB</span></button>
+      <button type="button" onclick="showSettingsPage('sending')"><strong>Sending options</strong><span>Send to multiple · pause or continue a saved chain</span></button>
+      <button type="button" onclick="showSettingsPage('sounds')"><strong>Notifications</strong><span>Background notifications, sounds and repeats</span></button>
+      <button type="button" onclick="showSettingsPage('backup')"><strong>App backup</strong><span>Export or merge saved radios, messages and settings</span></button>
+      <button type="button" onclick="showSettingsPage('channel-backup')"><strong>Channel backup</strong><span>Export channel chat as CSV</span></button>
+      <button type="button" onclick="AndroidBridge.exportDebugLog()"><strong>Export debug log</strong><span>App diagnostics · up to 10 MB · excludes message bodies and keys</span></button>
+      <button type="button" onclick="showSettingsPage('about')"><strong>About</strong><span>Beta edition, credits and licenses</span></button>
+    </div>
+    </div>
+    <div id="settings-about-page" class="settings-subpage" hidden><button class="settings-back" onclick="showSettingsPage('home')">← Config</button><h2>SV8TTL LoRa Dash</h2><p id="about-version">Beta edition</p><p>By SV8TTL</p><p>An independently developed Android adaptation based on <a href="https://github.com/Slofi/overmesh">OverMesh Lite by Slofi</a>, incorporating original OverMesh assets. Not an official OverMesh release. This app is under development.</p><h3>Open-source licenses and notices</h3><pre id="about-notices"></pre></div>
+    <div id="settings-connections-page" class="settings-subpage" hidden>
+    <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
+    <h2>Add Radio Connections</h2>
+
+    <section class="radio-card"><strong>MeshCore</strong><div class="radio-state"><span id="mc-status">Disconnected</span><progress id="mc-progress" max="100" value="0" hidden></progress></div>
+      <div class="actions"><button onclick="AndroidBridge.connectBle('mc')">Scan new</button><button onclick="AndroidBridge.connectUsb('mc')">USB serial</button><button id="mc-disconnect" class="disconnect-btn" onclick="AndroidBridge.disconnect('mc')" hidden>Disconnect</button></div>
+      <button id="mc-stop-scan" class="stop-scan-btn" onclick="AndroidBridge.stopScanning('mc')" hidden>Stop scanning</button>
+    </section>
+    <section class="radio-card"><strong>Meshtastic</strong><div class="radio-state"><span id="mt-status">Disconnected</span><progress id="mt-progress" max="100" value="0" hidden></progress></div>
+      <div class="actions"><button onclick="AndroidBridge.connectBle('mt')">Scan new</button><button onclick="AndroidBridge.connectUsb('mt')">USB serial</button><button id="mt-disconnect" class="disconnect-btn" onclick="AndroidBridge.disconnect('mt')" hidden>Disconnect</button></div>
+      <button id="mt-stop-scan" class="stop-scan-btn" onclick="AndroidBridge.stopScanning('mt')" hidden>Stop scanning</button>
+    </section>
+    <p class="help">Connect known radios in My Nodes, or scan for new radios here. Multiple radios can stay connected.</p>
+    </div>
+    <div id="settings-sounds-page" class="settings-subpage" hidden>
+    <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
+    <h2>Notifications</h2>
+    <fieldset class="sound-frame"><legend>Background message notifications</legend>
+      <label class="config-switch"><input id="background-message-notifications" type="checkbox" onchange="AndroidBridge.setBackgroundMessageNotifications(this.checked)"> Show message previews when the app is in the background</label>
+      <p class="help">Off by default. Android permission is required. Message previews never appear over the app. Background message sounds also follow this switch.</p>
+      <p id="message-notifications-status" class="help" role="status"></p>
+      <button type="button" onclick="AndroidBridge.openMessageNotificationSettings()">Android notification settings</button>
+      <p class="help">The ongoing radio connection notification is managed separately by Android.</p>
+    </fieldset>
+    <fieldset class="sound-frame message-sound-frame"><legend>Message Notification sounds</legend>
+    <label class="config-switch"><input id="message-audio" type="checkbox" onchange="AndroidBridge.setAudioEnabled(this.checked)"> Play a sound for new messages</label>
+    <div class="sound-config">
+      <label>Sound setup <select id="sound-mode" class="form-input" onchange="AndroidBridge.setSoundMode(this.value)"><option value="separate">Different sounds for MC, MT and DM</option><option value="shared">Same sound for all messages</option></select></label>
+      <div id="sound-choices"></div>
+    </div></fieldset>
+    <fieldset class="sound-frame disconnect-sound-frame"><legend>Unexpected Disconnection of Device</legend>
+      <label class="config-switch"><input id="disconnect-audio" type="checkbox" onchange="AndroidBridge.setDisconnectAudioEnabled(this.checked)"> Play a sound when a device disconnects unexpectedly</label>
+      <div id="disconnect-sound-choice"></div>
+      <p class="help">Intentional disconnects and closing the app do not trigger this sound.</p>
+    </fieldset>
+    </div>
+    <div id="settings-my-nodes-page" class="settings-subpage" hidden>
+      <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
+      <h2>My Nodes</h2>
+      <div class="actions"><button id="connect-all-available" type="button" onclick="connectAllAvailable()">Connect All Available</button></div>
+      <div id="connect-available-status" role="status" aria-live="polite" hidden><progress aria-label="Discovering and connecting radios"></progress><span>Discovering and connecting available radios…</span></div>
+      <button type="button" class="info-toggle" aria-label="Information 1" aria-expanded="false" aria-controls="settings-my-nodes-page-help-1" onclick="toggleInformation(this)">i</button><p id="settings-my-nodes-page-help-1" class="help" hidden>Checks attached USB serial devices first, then discovers saved Bluetooth radios. Only saved radio identities are connected. Discovery does not guarantee connection.</p>
+      <button type="button" class="info-toggle" aria-label="Information 2" aria-expanded="false" aria-controls="settings-my-nodes-page-help-2" onclick="toggleInformation(this)">i</button><p id="settings-my-nodes-page-help-2" class="help" hidden>Connect an individual radio or tick any number of radios and press Connect Selected below.</p>
+      <div id="my-nodes-list"></div><div class="actions known-actions"><button id="connect-selected" type="button" onclick="connectSelected()">Connect Selected</button><button id="disconnect-selected" type="button" onclick="disconnectSelected()">Disconnect Selected</button><button id="disconnect-all" type="button" onclick="AndroidBridge.disconnectAll()">Disconnect all</button></div>
+
+
+      <div class="actions"><button onclick="AndroidBridge.chooseNodeExport()">Export node backup</button><button onclick="AndroidBridge.importNode()">Import node backup</button></div>
+    </div>
+    <div id="settings-channel-backup-page" class="settings-subpage" hidden>
+      <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
+      <h2>Channel backup</h2>
+      <label>Connected device <select id="backup-device" class="form-input" onchange="loadBackupChannels()"></select></label>
+      <label>Channel <select id="backup-channel" class="form-input" onchange="updateBackupExport()"></select></label>
+      <button id="backup-channel-export" type="button" disabled onclick="AndroidBridge.exportChannelCsv(el('backup-device').value,Number(el('backup-channel').value))">Export channel as CSV</button>
+      <p class="help">Exports this channel's saved messages on this phone. Channel names come from the connected radio.</p>
+    </div>
+    <div id="settings-backup-page" class="settings-subpage" hidden>
+      <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
+      <h2>App backup</h2>
+      <p class="help">Export all known radios, channel names, messages and app settings to one JSON file. Import adds missing data and keeps existing settings and histories on this phone.</p>
+      <div class="actions"><button type="button" onclick="AndroidBridge.exportAppBackup()">Export full backup</button></div>
+      <div class="actions"><button type="button" onclick="AndroidBridge.importAppBackup()">Import full backup</button></div>
+      <p class="help">A sound selected on another phone will be used only if it is available here. Bluetooth permission and pairing may still need to be set up on this phone.</p>
+    </div>
+  </div>
+</main>
+
+<dialog id="settings-window-multi" class="settings-window" aria-labelledby="settings-window-multi-title">
+  <div class="settings-window-header"><h2 id="settings-window-multi-title">Send to Multiple</h2><button type="button" class="window-x" aria-label="Close Send to Multiple" onclick="closeSettingsWindow('multi')">×</button></div>
+  <div class="settings-window-body">    <label class="config-switch"><input id="multi-send-enabled" type="checkbox" onchange="AndroidBridge.setMultiSendEnabled(this.checked)"> Enable Send to multiple</label>
+    <button type="button" class="info-toggle" aria-label="Information 1" aria-expanded="false" aria-controls="settings-sending-page-help-1" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-1" class="help" hidden>Send a message to selected contacts or channels through their own radios. Sequential sending waits for results; pause and continue a saved chain later. Disabling stops pending dispatch.</p>
+    <label>Pause before next message (seconds) <input class="form-input" id="send-settling" type="number" min="1" max="30" value="3" onchange="AndroidBridge.setSettlingSeconds(Number(this.value))"></label>
+    <button type="button" class="info-toggle" aria-label="Information 2" aria-expanded="false" aria-controls="settings-sending-page-help-2" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-2" class="help" hidden>Default 3 seconds after the result; this does not guarantee quiet radio traffic. Repeats do not prove recipient delivery.</p>
+    <label>MeshCore channel observation timeout (seconds) <input class="form-input" id="channel-observation" type="number" min="1" max="300" value="5" onchange="AndroidBridge.setChannelObservationSeconds(Number(this.value))"></label>
+    <button type="button" class="info-toggle" aria-label="Information 3" aria-expanded="false" aria-controls="settings-sending-page-help-3" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-3" class="help" hidden>Default 5 seconds. Wait for a heard repeat or this timeout, then pause before the next message. No repeat means delivery is unconfirmed. Applies to new channel sends in a chain. Start Send to multiple from the button between the Users pills in Chat.</p>
+    <div class="actions"><button onclick="AndroidBridge.destinationSets()">Destination sets</button></div>
+    <div class="actions"><button onclick="AndroidBridge.sendingChain()">Sending chain · pause / continue</button></div>
+</div>
+  <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('multi')">Close</button></div>
+</dialog>
+<dialog id="settings-window-split" class="settings-window" aria-labelledby="settings-window-split-title">
+  <div class="settings-window-header"><h2 id="settings-window-split-title">Message Split</h2><button type="button" class="window-x" aria-label="Close Message Split" onclick="closeSettingsWindow('split')">×</button></div>
+  <div class="settings-window-body">    <label class="config-switch"><input id="message-split-enabled" type="checkbox" onchange="AndroidBridge.setMessageSplitEnabled(this.checked)"> Enable Message Split</label>
+    <button type="button" class="info-toggle" aria-label="Information 4" aria-expanded="false" aria-controls="settings-sending-page-help-4" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-4" class="help" hidden>Split messages exceeding the radio limit into separate parts. Disabling rejects new oversized messages without removing your draft; already queued parts may finish.</p>
+    <label>Message Split interval (seconds) <input class="form-input" id="message-split-interval" type="number" min="1" max="300" value="1" onchange="AndroidBridge.setMessageSplitIntervalSeconds(Number(this.value))"></label>
+    <button type="button" class="info-toggle" aria-label="Information 5" aria-expanded="false" aria-controls="settings-sending-page-help-5" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-5" class="help" hidden>Wait for the previous part's result or observation timeout, then wait this interval (default 1 second). Radio retries must finish first. Send to multiple also respects the pause before the next message.</p>
+</div>
+  <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('split')">Close</button></div>
+</dialog>
+<dialog id="settings-window-attempts" class="settings-window" aria-labelledby="settings-window-attempts-title">
+  <div class="settings-window-header"><h2 id="settings-window-attempts-title">MeshCore DM attempts</h2><button type="button" class="window-x" aria-label="Close MeshCore DM attempts" onclick="closeSettingsWindow('attempts')">×</button></div>
+  <div class="settings-window-body">    <fieldset><legend>MeshCore DM attempts</legend>
+      <label>Known route <input class="form-input" id="mc-direct-attempts" type="number" min="1" max="10" value="4"></label>
+      <label>Flood <input class="form-input" id="mc-flood-attempts" type="number" min="1" max="10" value="4"></label>
+      <button onclick="AndroidBridge.setMeshCoreAttempts(Number(document.getElementById('mc-direct-attempts').value),Number(document.getElementById('mc-flood-attempts').value))">Save attempts</button>
+      <p class="help">Counts include the first transmission. Applies to new DMs on protocol version 4 or newer. Older radios retain their supported 2 + 1 attempts, or 3 floods without a known route.</p>
+    </fieldset></div>
+  <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('attempts')">Close</button></div>
+</dialog>
+<dialog id="settings-window-history" class="settings-window" aria-labelledby="settings-window-history-title">
+  <div class="settings-window-header"><h2 id="settings-window-history-title">Saved messages</h2><button type="button" class="window-x" aria-label="Close Saved messages" onclick="closeSettingsWindow('history')">×</button></div>
+  <div class="settings-window-body"><div id="my-node-history"></div></div>
+  <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('history')">Close</button></div>
+</dialog>
+<div id="dm-context" class="dm-context-overlay" role="dialog" aria-modal="true" hidden></div>
+<nav id="bottom-nav">
+  <button class="nav-btn" data-tab="map" onclick="switchTab('map')"><span class="nav-icon">◎</span><span>Map</span></button>
+  <button class="nav-btn" data-tab="nodes" onclick="switchTab('nodes')"><span class="nav-icon">⬡</span><span>Nodes</span></button>
+  <button id="nav-chat" class="nav-btn active" data-tab="chat" onclick="switchTab('chat')"><span class="nav-icon">◇</span><span>Chat</span></button>
+  <button class="nav-btn" data-tab="log" onclick="switchTab('log')"><span class="nav-icon">≡</span><span>Log</span></button>
+  <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')"><span class="nav-icon">⊞</span><span>Config</span></button>
+</nav>
+<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="android.js"></script>
+</body>
+</html>
+

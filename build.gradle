@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application' version '8.7.3'
+}
+
+android {
+    namespace 'org.overmesh.android'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'org.overmesh.android'
+        minSdk 26
+        targetSdk 36
+        versionCode 38
+        versionName '0.10.11'
+        testInstrumentationRunner 'org.overmesh.android.HistoryInstrumentation'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            output.outputFileName = "SV8TTL-LoRa-Dash-${variant.buildType.name}.apk"
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.github.mik3y:usb-serial-for-android:3.11.0'
+    implementation 'androidx.webkit:webkit:1.17.1'
+}
+
+tasks.register('copyDebugApk') {
+    dependsOn tasks.named('packageDebug')
+    def apk = layout.buildDirectory.file('outputs/apk/debug/SV8TTL-LoRa-Dash-debug.apk')
+    def rootApk = layout.projectDirectory.file('SV8TTL-LoRa-Dash-debug.apk')
+    inputs.file(apk)
+    outputs.file(rootApk)
+    doLast {
+        java.nio.file.Files.copy(apk.get().asFile.toPath(), rootApk.asFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+}
+afterEvaluate {
+    tasks.named('assembleDebug') { finalizedBy tasks.named('copyDebugApk') }
+}

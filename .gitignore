@@ -1,0 +1,17 @@
+.gradle/
+.idea/
+build/
+/*.apk
+local.properties
+*.iml
+
+# Local credentials, exports and tooling
+*.jks
+*.keystore
+*.p12
+*.pem
+.env
+.env.*
+!.env.example
+*.log
+node_modules/

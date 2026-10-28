@@ -1,0 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Original geometric lettering: LD above SV8TTL. No font dependency. -->
+    <path android:fillColor="#00000000" android:strokeColor="#E8B04F" android:strokeWidth="5.5" android:strokeLineJoin="round" android:strokeLineCap="round"
+        android:pathData="M30,32 L30,59 L47,59 M57,32 L57,59 L65,59 C74,59 78,54 78,46 C78,37 74,32 65,32 Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#E8B04F" android:strokeWidth="1.9" android:strokeLineJoin="round" android:strokeLineCap="round"
+        android:pathData="M35,68 L30,68 Q29,68 29,69 L29,71 Q29,72 30,72 L34,72 Q35,72 35,73 L35,75 Q35,76 34,76 L29,76 M38,68 L41,76 L44,68 M49,68 L51,68 Q53,68 53,70 Q53,72 51,72 L49,72 Q47,72 47,70 Q47,68 49,68 Z M49,72 L51,72 Q53,72 53,74 Q53,76 51,76 L49,76 Q47,76 47,74 Q47,72 49,72 Z M56,68 L62,68 M59,68 L59,76 M65,68 L71,68 M68,68 L68,76 M74,68 L74,76 L79,76" />
+</vector>

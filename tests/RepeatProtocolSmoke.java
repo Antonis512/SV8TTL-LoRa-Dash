@@ -48,6 +48,29 @@ public final class RepeatProtocolSmoke {
             byte[] repeat=log(1,1,hex("aa"),actual);mc.receive(repeat,events);mc.receive(repeat,events);
             check(heard.equals(List.of(id,id)),"Count repeat receptions, not unique paths or delivery ACKs");
             mc.cancelAll();mc.receive(repeat,events);check(heard.size()==2,"Old connection repeats ignored");
+            // Reproduce the reported 17-byte name / 138-byte text overflow.
+            byte[] reportedName="MC-Device123456789".getBytes(StandardCharsets.UTF_8);
+            byte[] oldCommand=new byte[7+138];oldCommand[0]=3;Arrays.fill(oldCommand,7,oldCommand.length,(byte)'a');
+            fixture.remember(99,oldCommand,reportedName,key);
+            byte[] oldPayload=(byte[])((Map<?,?>)f.get(fixture)).get(99L);
+            check(log(1,1,hex("aa"),oldPayload).length>176,"Old 138-byte part cannot return through companion RX log");
+            for(int nameLength=0;nameLength<=32;nameLength++) {
+                byte[] sender=new byte[nameLength];Arrays.fill(sender,(byte)'x');
+                byte[] identity=new byte[58+nameLength];identity[0]=5;System.arraycopy(sender,0,identity,58,nameLength);
+                mc.receive(identity,events);
+                String original="α😀Test ".repeat(70);
+                List<String> parts=MessageChunks.split(original,mc.textLimit(false));
+                check(String.join("",parts).equals(original.trim()),"Splitting preserves Unicode text");
+                for(String part:parts) {
+                    byte[] outgoing=mc.sendChannel(0,part);long token=mc.lastRequestId();
+                    fixture.remember(token,outgoing,sender,key);
+                    byte[] encrypted=(byte[])((Map<?,?>)f.get(fixture)).get(token);
+                    byte[] scoped=log(0,74,new byte[20],encrypted); // ten 2-byte hashes
+                    check(scoped.length<=176,"Scoped repeat must fit companion frame at every name length");
+                    check(fixture.match(scoped)==token,"Maximum-size split part still matches its repeat");
+                    mc.receive(new byte[]{0},events);
+                }
+            }
         } catch(ReflectiveOperationException e) {throw new AssertionError(e);}
         System.out.println("Heard-repeat tests passed: independent cipher vector, exact payload matching, path widths, scoped floods, malformed/foreign frames, lifecycle and protocol callback.");
     }

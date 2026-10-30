@@ -110,12 +110,21 @@
       <button type="button" onclick="showSettingsPage('nodes')"><strong>My Nodes</strong><span>Connect and manage known radios</span></button>
       <button type="button" onclick="showSettingsPage('connections')"><strong>Add Radio Connections</strong><span>Add a radio using Bluetooth or USB</span></button>
       <button type="button" onclick="showSettingsPage('sending')"><strong>Sending options</strong><span>Send to multiple · pause or continue a saved chain</span></button>
+      <button type="button" onclick="showSettingsPage('timeouts')"><strong>Request timeouts</strong><span>Signal Quality, Ping and traceroute</span></button>
       <button type="button" onclick="showSettingsPage('sounds')"><strong>Notifications</strong><span>Background notifications, sounds and repeats</span></button>
       <button type="button" onclick="showSettingsPage('backup')"><strong>App backup</strong><span>Export or merge saved radios, messages and settings</span></button>
       <button type="button" onclick="showSettingsPage('channel-backup')"><strong>Channel backup</strong><span>Export channel chat as CSV</span></button>
       <button type="button" onclick="AndroidBridge.exportDebugLog()"><strong>Export debug log</strong><span>App diagnostics · up to 10 MB · excludes message bodies and keys</span></button>
+      <button type="button" onclick="checkForUpdates()"><strong>Check for Updates</strong><span>Get the latest SV8TTL LoRa Dash from GitHub</span></button>
       <button type="button" onclick="showSettingsPage('about')"><strong>About</strong><span>Beta edition, credits and licenses</span></button>
     </div>
+    </div>
+    <div id="settings-timeouts-page" class="settings-subpage" hidden>
+      <button class="settings-back" onclick="showSettingsPage('home')">← Config</button>
+      <h2>Request timeouts</h2><p class="help">Seconds to wait for a response. Changes apply to new requests. Default: 60 seconds each.</p>
+      <label>Signal Quality <input id="timeout-signal" type="number" min="5" max="600" value="60" onchange="saveRequestTimeout('signal',this)"> seconds</label>
+      <label>Ping <input id="timeout-ping" type="number" min="5" max="600" value="60" onchange="saveRequestTimeout('ping',this)"> seconds</label>
+      <label>Traceroute <input id="timeout-trace" type="number" min="5" max="600" value="60" onchange="saveRequestTimeout('trace',this)"> seconds</label>
     </div>
     <div id="settings-about-page" class="settings-subpage" hidden><button class="settings-back" onclick="showSettingsPage('home')">← Config</button><h2>SV8TTL LoRa Dash</h2><p id="about-version">Beta edition</p><p>By SV8TTL</p><p>An independently developed Android adaptation based on <a href="https://github.com/Slofi/overmesh">OverMesh Lite by Slofi</a>, incorporating original OverMesh assets. Not an official OverMesh release. This app is under development.</p><h3>Open-source licenses and notices</h3><pre id="about-notices"></pre></div>
     <div id="settings-connections-page" class="settings-subpage" hidden>
@@ -202,8 +211,8 @@
   <div class="settings-window-header"><h2 id="settings-window-split-title">Message Split</h2><button type="button" class="window-x" aria-label="Close Message Split" onclick="closeSettingsWindow('split')">×</button></div>
   <div class="settings-window-body">    <label class="config-switch"><input id="message-split-enabled" type="checkbox" onchange="AndroidBridge.setMessageSplitEnabled(this.checked)"> Enable Message Split</label>
     <button type="button" class="info-toggle" aria-label="Information 4" aria-expanded="false" aria-controls="settings-sending-page-help-4" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-4" class="help" hidden>Split messages exceeding the radio limit into separate parts. Disabling rejects new oversized messages without removing your draft; already queued parts may finish.</p>
-    <label>Message Split interval (seconds) <input class="form-input" id="message-split-interval" type="number" min="1" max="300" value="1" onchange="AndroidBridge.setMessageSplitIntervalSeconds(Number(this.value))"></label>
-    <button type="button" class="info-toggle" aria-label="Information 5" aria-expanded="false" aria-controls="settings-sending-page-help-5" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-5" class="help" hidden>Wait for the previous part's result or observation timeout, then wait this interval (default 1 second). Radio retries must finish first. Send to multiple also respects the pause before the next message.</p>
+    <label>Message Split interval (seconds) <input class="form-input" id="message-split-interval" type="number" min="1" max="300" value="5" onchange="AndroidBridge.setMessageSplitIntervalSeconds(Number(this.value))"></label>
+    <button type="button" class="info-toggle" aria-label="Information 5" aria-expanded="false" aria-controls="settings-sending-page-help-5" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-5" class="help" hidden>Wait for the previous part's result or observation timeout, then wait this interval (default 5 seconds). Radio retries must finish first. Send to multiple also respects the pause before the next message.</p>
 </div>
   <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('split')">Close</button></div>
 </dialog>
@@ -216,6 +225,11 @@
       <p class="help">Counts include the first transmission. Applies to new DMs on protocol version 4 or newer. Older radios retain their supported 2 + 1 attempts, or 3 floods without a known route.</p>
     </fieldset></div>
   <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('attempts')">Close</button></div>
+</dialog>
+<dialog id="settings-window-update" class="settings-window" aria-labelledby="settings-window-update-title">
+  <div class="settings-window-header"><h2 id="settings-window-update-title">Check for Updates</h2><button type="button" class="window-x" aria-label="Close Check for Updates" onclick="closeSettingsWindow('update')">×</button></div>
+  <div class="settings-window-body"><p id="update-message" role="status" aria-live="polite">Checking GitHub…</p></div>
+  <div class="settings-window-footer"><button id="update-confirm" type="button" hidden onclick="AndroidBridge.downloadUpdate()">Update</button><button type="button" onclick="closeSettingsWindow('update')">Close</button></div>
 </dialog>
 <dialog id="settings-window-history" class="settings-window" aria-labelledby="settings-window-history-title">
   <div class="settings-window-header"><h2 id="settings-window-history-title">Saved messages</h2><button type="button" class="window-x" aria-label="Close Saved messages" onclick="closeSettingsWindow('history')">×</button></div>
@@ -230,7 +244,7 @@
   <button class="nav-btn" data-tab="log" onclick="switchTab('log')"><span class="nav-icon">≡</span><span>Log</span></button>
   <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')"><span class="nav-icon">⊞</span><span>Config</span></button>
 </nav>
-<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="android.js"></script>
+<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="android.js"></script><script src="signal-history.js"></script>
 </body>
 </html>
 

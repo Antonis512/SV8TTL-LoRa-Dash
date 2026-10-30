@@ -2,6 +2,10 @@ package org.overmesh.android;
 
 /** Local display of LocalStats wire fields; missing measurements stay unknown. */
 final class SignalQuality {
+    static String statistics(byte[] bytes) {
+        String text=describe(bytes,null,null,-1);
+        return text.substring(0,text.indexOf("\nResponse reception at your radio")).trim();
+    }
     static String describe(byte[] bytes,Float snr,Integer rssi,int hops) {
         StringBuilder text=new StringBuilder("Node statistics\n");
         ProtoWire.Reader r=new ProtoWire.Reader(bytes);boolean noise=false;

@@ -3,7 +3,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 public final class MessageChunksSmoke {
     public static void main(String[] args) {
-        for(int limit:new int[]{150,200}) for(String text:new String[]{"αβγ ".repeat(100),"👍🏽hello ".repeat(30),"👨‍👩‍👧‍👦 ".repeat(30),"e\u0301".repeat(100),"🇬🇷".repeat(100)}) {
+        for(int limit:new int[]{126,138,150,200}) for(String text:new String[]{"αβγ ".repeat(100),"👍🏽hello ".repeat(30),"👨‍👩‍👧‍👦 ".repeat(30),"e\u0301".repeat(100),"🇬🇷".repeat(100)}) {
             List<String> parts=MessageChunks.split(text,limit);
             if(!String.join("",parts).equals(text.trim()))throw new AssertionError("Lost text");
             for(String part:parts) {

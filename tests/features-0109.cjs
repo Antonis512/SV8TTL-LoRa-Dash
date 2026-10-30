@@ -33,8 +33,8 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  await page.setViewportSize({width:390,height:780});await page.screenshot({path:'build/chat-0109.png'});
  await page.evaluate(()=>{switchTab('nodes');el('nodes-show-unknown').checked=true;el('nodes-hide-unmessageable').checked=false;renderNodes();});
  assert.deepEqual(await page.locator('.android-node').evaluateAll(ns=>ns.map(n=>n.dataset.nodeKey).sort()),['mc:ffffffffffff','mt:!11111111']);
- await page.evaluate(()=>{openedNode='mt:!11111111';renderNodes();});await page.getByRole('button',{name:'Signal Quality',exact:true}).click();assert.deepEqual(await page.evaluate(()=>calls.at(-1)),['nodeAction','mt','!11111111','signal','']);
+ await page.evaluate(()=>{openedNode='mt:!11111111';renderNodes();});await page.getByRole('button',{name:'Signal Quality',exact:true}).click();assert.deepEqual(await page.evaluate(()=>calls.at(-1)),['signalHistory','MT-Device1','!11111111',false]);
  assert(!/\b(AM|PM)\b/.test(await page.locator('#nodes-list').innerText()),'24-hour node timestamps even in US locale');
- await page.evaluate(()=>{openedNode='mc:ffffffffffff';renderNodes();});await page.getByRole('button',{name:'Ping',exact:true}).click();await page.getByRole('button',{name:'Ping · 1-byte ID',exact:true}).click();assert.deepEqual(await page.evaluate(()=>calls.at(-1)),['nodeAction','MC-Device1','ffffffffffff','ping','1']);
+ await page.evaluate(()=>{el('dm-context').hidden=true;openedNode='mc:ffffffffffff';renderNodes();});await page.getByRole('button',{name:'Ping',exact:true}).click();await page.getByRole('button',{name:'Ping · 1-byte ID',exact:true}).click();assert.deepEqual(await page.evaluate(()=>calls.at(-1)),['nodeAction','MC-Device1','ffffffffffff','ping','1']);
  assert.deepEqual(errors,[]);console.log('24h nodes, own-radio filtering, Signal Quality, Ping and per-column adverts passed');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

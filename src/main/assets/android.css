@@ -296,3 +296,19 @@ button.reaction-chip { color:var(--text); cursor:pointer; font:inherit; }
 #chat-font-larger { grid-column:4; }
 #chat-advert-right { grid-column:5; justify-self:end; }
 #chat-font-bar > * { grid-row:1; }
+
+#signal-history { width:min(720px,100%); }
+#signal-history h2 { font-size:17px; margin:0; }
+#signal-history h3 { font-size:14px; margin:8px 0; }
+.signal-tools { display:flex; flex-wrap:wrap; gap:6px; }
+.signal-tools > * { flex:1 1 140px; min-width:0; }
+.signal-plot svg { display:block; width:100%; height:auto; min-height:100px; }
+.signal-record { padding:8px; border:1px solid var(--border); border-radius:5px; font-size:12px; }
+.signal-record p { margin:5px 0; }
+.signal-record pre { white-space:pre-wrap; font:inherit; line-height:1.5; }
+.signal-record summary { cursor:pointer; }
+.signal-clear-confirm { display:flex; flex-direction:column; gap:6px; }
+
+.signal-request-status:not(:empty) { padding:12px; border:1px solid var(--accent); border-radius:6px; color:var(--accent); font-weight:bold; }
+#settings-timeouts-page label { display:block; margin:18px 0; }
+#settings-timeouts-page input { width:90px; margin:0 8px; padding:8px; }

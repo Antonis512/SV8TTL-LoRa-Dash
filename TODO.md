@@ -1,6 +1,7 @@
 # To Do
 
 - [ ] Use options from ATAK apps
+- [ ] Add a search bar in the Chat column.
 
 25 October update (debug APK built on request): My Nodes/Sending options help toggles, Connect All Available busy indicator, Message Split enable/interval, “Pause before next message (seconds)”, 5-second default MC observation starting at acceptance, late-repeat report reconciliation, active-only progress bubbles above Send Next and Finished heading. Java/app-test compilation and browser regression checks pass; phone/radio verification remains pending. Existing saved observation timeout values are preserved.
 

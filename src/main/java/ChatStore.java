@@ -36,7 +36,7 @@ final class ChatStore extends SQLiteOpenHelper {
         final String name;
         SavedChannel(int index, String name) { this.index=index; this.name=name; }
     }
-    ChatStore(Context context) { super(context, "chat-history.db", null, 12); setWriteAheadLoggingEnabled(true); }
+    ChatStore(Context context) { super(context, "chat-history.db", null, 13); setWriteAheadLoggingEnabled(true); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, radio TEXT NOT NULL, " +
                 "node_id TEXT NOT NULL DEFAULT '', channel INTEGER NOT NULL, sender TEXT NOT NULL, " +
@@ -45,6 +45,7 @@ final class ChatStore extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX messages_node ON messages(radio,node_id,channel,id)");
         createRadioTables(db);
         createHistoryIndex(db);
+        createSignalHistory(db);
     }
     private void createHistoryIndex(SQLiteDatabase db) {
         db.execSQL("CREATE INDEX IF NOT EXISTS messages_history ON messages(radio,node_id,peer,channel,received_at,id)");
@@ -58,6 +59,7 @@ final class ChatStore extends SQLiteOpenHelper {
                 "channel INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY(radio,node_id,channel))");
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if(oldVersion<13)createSignalHistory(db);
         if(oldVersion<10) db.execSQL("ALTER TABLE messages ADD COLUMN reaction INTEGER NOT NULL DEFAULT 0");
         if(oldVersion<9) {
             createRadioTables(db);
@@ -84,6 +86,28 @@ final class ChatStore extends SQLiteOpenHelper {
         if (oldVersion < 11) createHistoryIndex(db);
         if (oldVersion < 12) db.execSQL("CREATE TABLE IF NOT EXISTS pending_backup_settings(id INTEGER PRIMARY KEY,body TEXT NOT NULL)");
     }
+    private void createSignalHistory(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS signal_history(id INTEGER PRIMARY KEY AUTOINCREMENT,node_id TEXT NOT NULL,peer TEXT NOT NULL,body TEXT NOT NULL)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS signal_peer ON signal_history(node_id,peer,id)");
+    }
+    void saveSignal(String ownId,String peer,String body) {
+        if(ownId.isEmpty())return;
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
+        try {
+            ContentValues values=new ContentValues();values.put("node_id",ownId);values.put("peer",peer);values.put("body",body);
+            db.insertOrThrow("signal_history",null,values);
+            db.execSQL("DELETE FROM signal_history WHERE node_id=? AND peer=? AND id NOT IN (SELECT id FROM signal_history WHERE node_id=? AND peer=? ORDER BY id DESC LIMIT 1000)",new Object[]{ownId,peer,ownId,peer});
+            db.setTransactionSuccessful();
+        } finally {db.endTransaction();}
+    }
+    org.json.JSONArray signals(String ownId,String peer) {
+        org.json.JSONArray rows=new org.json.JSONArray();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT body FROM signal_history WHERE node_id=? AND peer=? ORDER BY id DESC LIMIT 1000",new String[]{ownId,peer})) {
+            while(c.moveToNext())try{rows.put(new org.json.JSONObject(c.getString(0)));}catch(org.json.JSONException ignored){}
+        }
+        return rows;
+    }
+    void clearSignals(String ownId,String peer) {getWritableDatabase().delete("signal_history","node_id=? AND peer=?",new String[]{ownId,peer});}
     void pendingSettings(String json) {ContentValues v=new ContentValues();v.put("id",1);v.put("body",json);getWritableDatabase().insertWithOnConflict("pending_backup_settings",null,v,SQLiteDatabase.CONFLICT_REPLACE);}
     String pendingSettings() {try(Cursor c=getReadableDatabase().rawQuery("SELECT body FROM pending_backup_settings WHERE id=1",null)){return c.moveToFirst()?c.getString(0):null;}}
     void clearPendingSettings(){getWritableDatabase().delete("pending_backup_settings","id=1",null);}
@@ -257,6 +281,7 @@ final class ChatStore extends SQLiteOpenHelper {
             db.delete("messages","radio=? AND node_id=?",args);
             db.delete("channel_names","radio=? AND node_id=?",args);
             db.delete("node_heard","radio=? AND node_id=?",args);
+            if("mt".equals(radio))db.delete("signal_history","node_id=?",new String[]{id});
             db.delete("known_radios","radio=? AND id=?",args);
             db.setTransactionSuccessful();
         } finally { db.endTransaction(); }

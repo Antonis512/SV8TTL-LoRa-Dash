@@ -39,13 +39,15 @@ public final class RadioActionsSmoke {
         rejects(()->mc.sendChannel(0,"hello"),"MC must wait for own radio name");
         byte[] name="ΑΒ😀 ".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         byte[] self=new byte[58+name.length];self[0]=5;System.arraycopy(name,0,self,58,name.length);mc.receive(self,events);
-        check(mc.textLimit(false)==149&&mc.textLimit(true)==150,"MC limits include exact UTF-8 radio name and separator");
-        mc.sendChannel(0,"a".repeat(149));mc.receive(new byte[]{0},events);
-        rejects(()->mc.sendChannel(0,"a".repeat(150)),"MC channel must not silently truncate");
+        check(mc.textLimit(false)==128&&mc.textLimit(true)==138,"MC limits include UTF-8 name, timestamp, type and separator");
+        mc.sendChannel(0,"a".repeat(128));mc.receive(new byte[]{0},events);
+        rejects(()->mc.sendChannel(0,"a".repeat(129)),"MC channel must not exceed encrypted feedback budget");
         byte[] contact=new byte[148];contact[0]=3;Arrays.fill(contact,1,33,(byte)0xbb);mc.receive(contact,events);
-        mc.nodeCommand("dm","bbbbbbbbbbbb","😀".repeat(37)+"aa",0);mc.expireRequest(mc.lastRequestId());
-        rejects(()->mc.nodeCommand("dm","bbbbbbbbbbbb","😀".repeat(37)+"aaa",0),"MC DM byte overflow");
+        mc.nodeCommand("dm","bbbbbbbbbbbb","😀".repeat(34)+"aa",0);mc.expireRequest(mc.lastRequestId());
+        rejects(()->mc.nodeCommand("dm","bbbbbbbbbbbb","😀".repeat(34)+"aaa",0),"MC DM byte overflow");
         rejects(()->mc.sendChannel(0,"a\0b"),"MC C-string truncation");
+        byte[] longName=new byte[90];longName[0]=5;Arrays.fill(longName,58,90,(byte)'x');mc.receive(longName,events);
+        check(mc.textLimit(false)==105,"Long sender names still impose a lower channel budget");
         deliveries.clear();
     }
     public static void main(String[] args) {

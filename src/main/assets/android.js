@@ -148,7 +148,8 @@ function switchTab(tab) {
   if (tab === 'chat') AndroidBridge.markRead(network);
 }
 function showSettingsPage(page) {
-  settingsPage=['home','nodes','sounds','backup','channel-backup','connections','about','sending'].includes(page)?page:'home';
+  settingsPage=['home','nodes','sounds','backup','channel-backup','connections','about','sending','timeouts'].includes(page)?page:'home';
+  el('settings-timeouts-page').hidden=settingsPage!=='timeouts';
   el('settings-sending-page').hidden=settingsPage!=='sending';
   el('settings-home').hidden=settingsPage!=='home';
   el('settings-about-page').hidden=settingsPage!=='about';
@@ -171,6 +172,15 @@ function closeSettingsWindow(name) {
   if(name==='history')pendingSavedView=null;
   el('settings-window-'+name).close();
 }
+function checkForUpdates() {
+  onUpdateStatus('checking','Checking GitHub for a newer version…');
+  openSettingsWindow('update');
+  AndroidBridge.checkForUpdates();
+}
+window.onUpdateStatus=function(status,message) {
+  el('update-message').textContent=message;
+  el('update-confirm').hidden=status!=='available';
+};
 el('settings-window-history').addEventListener('cancel',()=>{pendingSavedView=null;});
 function viewSavedMessages(radio,id) {
   pendingSavedView={radio,id};savedNode=null;
@@ -418,7 +428,7 @@ function nodeDetails(radio, entry) {
       nodeButton(actions, 'TR', 'tr', radio, entry);
       nodeButton(actions, 'Req info', 'req', radio, entry);
       nodeButton(actions, 'Req position', 'pos', radio, entry);
-      nodeButton(actions, 'Signal Quality', 'signal', radio, entry);
+
     } else {
       if(['Repeater','Room server'].includes(entry.role))nodeButton(actions,'Ping','ping',radio,entry,()=>showPingOptions(radio,entry));
       nodeButton(actions, 'TR', 'tr', radio, entry);
@@ -431,6 +441,7 @@ function nodeDetails(radio, entry) {
     nodeButton(actions, 'Share', 'share', radio, entry);
     details.appendChild(actions);
   }
+  if(radioType(radio)==='mt')nodeButton(details,'Signal Quality','',radio,entry,()=>openSignalHistory(state[radio].key,entry.id));
   if(state[radio].lastTrace?.target===entry.id) nodeButton(details,'Last trace','',radio,entry,()=>onTraceResult(state[radio].lastTrace));
   return details;
 }
@@ -816,7 +827,7 @@ window.onRadioState = function (next) {
   if(state&&['left','right'].some(slot=>state[slot]?.historyRevision!==next[slot]?.historyRevision))historyPages.clear();
   state = next;
   el('message-split-enabled').checked=next.messageSplitEnabled!==false;
-  if(document.activeElement!==el('message-split-interval'))el('message-split-interval').value=next.messageSplitIntervalSeconds??1;
+  if(document.activeElement!==el('message-split-interval'))el('message-split-interval').value=next.messageSplitIntervalSeconds??5;
   el('connect-all-available').disabled=!!next.connectingAvailable;
   el('connect-available-status').hidden=!next.connectingAvailable;
   el('multi-send-enabled').checked=!!next.multiSendEnabled;el('new-multi-send').disabled=!next.multiSendEnabled;el('new-multi-send').hidden=!next.multiSendEnabled;
@@ -836,6 +847,7 @@ window.onRadioState = function (next) {
     if(kind==='dm') { openDmScreen(); return; }
     openChannelsScreen(); return;
   }
+  for(const kind of ['signal','ping','trace'])if(document.activeElement!==el('timeout-'+kind))el('timeout-'+kind).value=next.requestTimeouts?.[kind]??60;
   el('mc-status').textContent = next.mc.state;
   el('mt-status').textContent = next.mt.state;
   for (const id of ['mc', 'mt']) {
@@ -967,3 +979,5 @@ function connectAllAvailable() {
   el('connect-available-status').hidden=false;
   AndroidBridge.connectAllAvailable();
 }
+
+function saveRequestTimeout(kind,input){if(!input.checkValidity()||!Number.isInteger(Number(input.value))){input.reportValidity();return;}AndroidBridge.setRequestTimeout(kind,Number(input.value));}

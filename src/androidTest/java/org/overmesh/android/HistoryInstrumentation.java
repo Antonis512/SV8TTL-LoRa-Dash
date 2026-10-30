@@ -45,7 +45,15 @@ public final class HistoryInstrumentation extends Instrumentation {
             SQLiteDatabase db=store.getWritableDatabase();db.beginTransaction();
             try{store.save("mc","radio-a",0,"test","Must roll back","",5,false,"","");}finally{db.endTransaction();}
             check(store.load("mc","radio-a").size()==252,"Failed transaction rolls back");
-            db.setVersion(10);store.close();store=new ChatStore(context);check(store.load("mc","radio-a").size()==252&&store.getReadableDatabase().getVersion()==12,"v10 migration preserves history");
+            db.setVersion(10);store.close();store=new ChatStore(context);check(store.load("mc","radio-a").size()==252&&store.getReadableDatabase().getVersion()==13,"v10 migration preserves history");
+            store.saveSignal("mt-a","peer-a","{\"snr\":0}");store.saveSignal("mt-b","peer-a","{\"rssi\":-102}");
+            store.close();store=new ChatStore(context);
+            check(store.signals("mt-a","peer-a").length()==1&&store.signals("mt-a","peer-a").getJSONObject(0).getDouble("snr")==0,"Signal history survives reopen and retains zero");
+            check(store.signals("mt-a","peer-b").length()==0,"Signal history isolates remote peers");
+            for(int i=0;i<1005;i++)store.saveSignal("mt-a","peer-a","{\"time\":"+i+"}");
+            check(store.signals("mt-a","peer-a").length()==1000&&store.signals("mt-a","peer-a").getJSONObject(0).getInt("time")==1004,"Bounded signal history retains newest rows");
+            store.clearSignals("mt-a","peer-a");check(store.signals("mt-b","peer-a").length()==1,"Clear isolates receiver");
+            store.deleteRadio("mt","mt-b");check(store.signals("mt-b","peer-a").length()==0,"Removing radio removes signal history");
             check(store.eraseOlderThan("mc","radio-a",1100)==101,"Deletion includes unloaded records");check(store.load("mc","radio-a").get(0).id==unknown,"Unknown dates retained");
             File directory=new File(getTargetContext().getCacheDir(),"chain-regression");directory.mkdirs();
             SendChain chain=new SendChain(directory);chain.data=SendChain.empty().put("multiple",true).put("paused",false).put("items",new JSONArray().put(new JSONObject().put("state","active")).put(new JSONObject().put("state","pending")));chain.save();

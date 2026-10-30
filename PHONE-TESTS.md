@@ -205,3 +205,28 @@ Sending options now has three buttons opening separate windows: Send to Multiple
 - Chat: MC/MT, MT/MC, MC/MC, MT/MT, disconnected/saved choices; Adv must appear on the correct side of A−/A+, target that specific MC radio and disable when disconnected. Test channels and DMs.
 - Check portrait/landscape, keyboard open/closed, gesture and three-button navigation. Native insets handling is unchanged; physical-device checks are still required.
 
+
+
+## 0.10.12 — MT signal history
+
+- On an MT remote node, open Signal Quality. Ordinary directly received packets should populate SNR/RSSI graphs without a request. Verify against radio metadata, including 0 dB and negative values.
+- Relayed packets must say Last-hop reception and remain outside direct graphs. Missing/legacy hop information must be Unknown route. MQTT packets must not appear as RF measurements.
+- Request node statistics explicitly from the history window. Only a matching request ID and sender complete the request. Requested and unsolicited LocalStats are saved, separately from reception measurements. Unsupported remote requests report a timeout/error.
+- Restart the app and reopen the history. Select a second MT receiving device and confirm the histories remain independent. Test offline history and disabled request control.
+- Verify 24-hour dates, 24-hour/7-day/all filters, empty graphs, the clear confirmation and receiver-scoped deletion. Retention is 1,000 records per pair. App Backup currently does not include this history.
+- Check the history dialog with the keyboard open, display cutouts, gesture navigation and three-button navigation. Physical RF checks remain necessary.
+
+
+## 0.10.13 — requests and message size
+
+- Config → Request timeouts appears directly below Sending options. Defaults are 60 seconds for Signal Quality, Ping and traceroute independently; validate persistence and 5–600 second input limits. Existing requests retain their captured timeout.
+- Signal Quality: observe sending, written-to-radio/waiting, received result, routing error, USB/BLE write failure, disconnect and timeout. Reopen the same history while pending; status must survive reopening and duplicate requests must be blocked.
+- MC: confirm 138 UTF-8 bytes maximum per outgoing DM/channel part, and the lower channel limit for a long sender name. Check Greek and emoji split boundaries. Verify reception on an independent radio/repeater; missing heard-repeat feedback alone is not proof of non-delivery. Recreate previously prepared oversized chains if they hit the new validation limit.
+
+## 0.10.14 — encrypted channel budget
+
+- Supersedes the channel limit above: reconnect and prepare a new split message. With a 17-byte radio name, each channel part must contain at most 120 UTF-8 text bytes. Direct messages retain the 138-byte limit.
+- Send through the same channel used for the reported failure. Check both independent recipient reception and heard-repeat feedback; radio acceptance alone does not establish delivery. Confirm later parts advance after repeat feedback and still pause on unconfirmed timeout.
+- Repeat with Greek/emoji text, scoped floods and different path widths. The feedback budget reserves 20 path bytes; longer paths may still exceed the companion log ceiling. Cancel and recreate older prepared chains instead of retrying their oversized saved parts.
+Update flow: Install an older APK signed by the same debug key, then open Config → Check for Updates. Confirm that it appears directly above About, shows the available version in the app's dialog theme, and downloads only after Update is pressed. Android must request unknown-app installation permission if needed and then show its own installer approval. Test Cancel, offline/checksum failure, already-current version, a mismatched signing key, and both gesture and three-button navigation. In-place installation and data preservation still need a physical-phone check.
+

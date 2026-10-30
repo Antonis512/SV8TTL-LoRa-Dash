@@ -65,7 +65,7 @@ public final class RetryProtocolSmoke {
         try {r.radio.advert("zero");throw new AssertionError("Must reconnect after untagged response timeout");}catch(IllegalArgumentException expected) {}
         r=new Rig(4,true);r.send();firstId=r.radio.lastRequestId();r.accepted(42);r.send();secondId=r.radio.lastRequestId();r.now=15000;r.poll();
         check(!r.radio.automaticDeliveryPending(firstId)&&!r.radio.automaticDeliveryPending(secondId),"A stalled command resolves all waiting sends");
-        r=new Rig(4,true);r.radio.nodeCommand("dm","bbbbbbbbbbbb","a".repeat(150),0);r.accepted(42);
+        r=new Rig(4,true);r.radio.nodeCommand("dm","bbbbbbbbbbbb","a".repeat(138),0);r.accepted(42);
         check(r.states.get(0).contains("1/8"),"Maximum composer length retains full retry budget");
         r=new Rig(4,true);r.radio.sendChannel(0,"channel");r.ok();r.now=999999;check(r.poll()==null,"MC channel is not automatically repeated");
         MeshtasticProtocol mt=new MeshtasticProtocol();mt.sendChannel(0,"hello");check(mt.poll(r.events)==null,"MT retransmissions remain firmware-owned");

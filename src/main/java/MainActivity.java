@@ -18,6 +18,8 @@ import android.content.SharedPreferences;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageInfo;
+import android.content.pm.Signature;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -28,6 +30,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.net.Uri;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
@@ -52,6 +55,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.webkit.WebViewAssetLoader;
+import androidx.core.content.FileProvider;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -69,6 +73,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 
 public final class MainActivity extends Activity {
@@ -77,6 +82,10 @@ public final class MainActivity extends Activity {
     private static final int GREEN = 0xff17695c;
     private static final int DARK = 0xff173d36;
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final java.util.concurrent.ExecutorService updateWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
+    private AppUpdater.Version availableUpdate;
+    private File downloadedUpdate;
+    private boolean updateBusy, awaitingInstallPermission;
     private DebugLog debugLog;
     private static final int EXPORT_DEBUG_LOG=490;
     private void debug(String text) { if(debugLog!=null) debugLog.write(text); }
@@ -213,6 +222,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onResume() {
         super.onResume();debug("Lifecycle resume");if(closing)return;resumed=true;reconcileBleState();notificationText="";updateRunningNotification();displayConnectionWarning();publish();
+        if(awaitingInstallPermission){awaitingInstallPermission=false;if(Build.VERSION.SDK_INT<26||getPackageManager().canRequestPackageInstalls())installDownloadedUpdate();else updateStatus("error","Allow installs from this app in Android settings, then check for updates again.");}
     }
     @Override protected void onPause() {
         debug("Lifecycle pause");resumed=false;
@@ -291,8 +301,16 @@ public final class MainActivity extends Activity {
                     pendingTrace=0;
                     showTrace(this,new TraceResult(token,traceTarget,new ArrayList<>(),new ArrayList<>(),new ArrayList<>(),new ArrayList<>(),reason));
                 }
+                if(pendingSignal==token){pendingSignal=0;signalNotice(signalTarget,"Error sending request: "+reason,false);}
                 protocol.expireRequest(token);
-            } else if(entry!=null&&entry.delivery.equals("queued")) delivery(token,"sent_to_radio");
+            } else if(pendingSignal==token) signalNotice(signalTarget,"Request sent to radio. Waiting for response…",true);
+            else if(entry!=null&&entry.delivery.equals("queued")) delivery(token,"sent_to_radio");
+        }
+        long pendingSignal;
+        String signalTarget="",signalStatus="";
+        void signalNotice(String target,String message,boolean pending) {
+            signalTarget=target;signalStatus=message;
+            if(pageReady&&!closing)web.evaluateJavascript("window.onSignalRequestResult("+JSONObject.quote(key)+","+JSONObject.quote(target)+","+JSONObject.quote(message)+","+pending+")",null);
         }
         long pendingTrace;
         String traceTarget="",pendingTraceKind="tr";
@@ -479,6 +497,7 @@ public final class MainActivity extends Activity {
         }
 
         void markPendingUnconfirmed() {
+            if(pendingSignal!=0){protocol.expireRequest(pendingSignal);pendingSignal=0;signalNotice(signalTarget,"Request interrupted: radio disconnected.",false);}
             pendingPaths.clear();
             if(protocol!=null) protocol.cancelAll();
             if(pendingTrace!=0) showTrace(this,new TraceResult(pendingTrace,traceTarget,
@@ -615,12 +634,24 @@ public final class MainActivity extends Activity {
             int currentGeneration=generation;
             main.post(()->{if(generation!=currentGeneration) return;chatStore.heard(meshcore?"mc":"mt",ownId,id,seconds);publishRadioUpdate();});
         }
+        @Override public void signalSample(String target,long seconds,Float snr,Integer rssi,int hops,String stats,boolean requested,boolean mqtt) {
+            int currentGeneration=generation;
+            main.post(()->{if(generation!=currentGeneration||closing||ownId.isEmpty())return;
+                try {
+                    JSONObject sample=new JSONObject().put("time",seconds>0?seconds*1000:System.currentTimeMillis())
+                        .put("phoneTime",seconds<=0).put("hops",hops).put("stats",stats).put("requested",requested).put("mqtt",mqtt);
+                    if(snr!=null)sample.put("snr",snr);if(rssi!=null)sample.put("rssi",rssi);
+                    chatStore.saveSignal(ownId,target,sample.toString());
+                    if(pageReady)web.evaluateJavascript("window.onSignalSampleSaved("+JSONObject.quote(key)+","+JSONObject.quote(target)+")",null);
+                } catch(JSONException ignored){}
+            });
+        }
         @Override public void signalQuality(long requestId,String target,String result) {
             int currentGeneration=generation;
             main.post(()->{if(generation!=currentGeneration||closing)return;
-                NodeEntry contact=knownNodes.get(target);
-                new AlertDialog.Builder(MainActivity.this).setTitle("Signal Quality · "+(contact==null?target:contact.name))
-                    .setMessage(result).setPositiveButton("OK",null).show();
+                if(pendingSignal!=requestId)return;
+                pendingSignal=0;signalNotice(target,result,false);
+                nodeActionResult(result);
             });
         }
         @Override public void advertResult(String text,boolean success) {
@@ -906,6 +937,24 @@ public final class MainActivity extends Activity {
             if(target==null){target=new RadioSession(known.name,radio.equals("mc"));target.ownId=id;target.ownName=known.name;sessions.put(target.key,target);loadSessionHistory(target);}
             chatLeft=target;publish();if(pageReady)web.evaluateJavascript("window.openSavedChatView("+channel+")",null);
         });}
+        @JavascriptInterface public void signalHistory(String key,String peer,boolean clear) {
+            main.post(()->{
+                RadioSession s=session(key);if(s==null||s.meshcore||s.ownId.isEmpty()||peer==null||!peer.matches("![0-9a-fA-F]{8}"))return;
+                if(clear)chatStore.clearSignals(s.ownId,peer);
+                try {
+                    NodeEntry contact=s.knownNodes.get(peer);
+                    JSONObject result=new JSONObject().put("key",s.key).put("peer",peer).put("receiver",s.ownName)
+                        .put("name",contact==null?peer:contact.name).put("connected",s.connected&&!s.loading)
+                        .put("requestStatus",peer.equals(s.signalTarget)?s.signalStatus:"").put("requestPending",peer.equals(s.signalTarget)&&s.pendingSignal!=0)
+                        .put("rows",chatStore.signals(s.ownId,peer));
+                    if(pageReady&&!closing)web.evaluateJavascript("window.onSignalHistory("+result.toString()+")",null);
+                } catch(JSONException ignored){}
+            });
+        }
+        @JavascriptInterface public void setRequestTimeout(String kind,int seconds){main.post(()->{
+            if(!java.util.Arrays.asList("signal","ping","trace").contains(kind)||seconds<5||seconds>600){nodeActionResult("Choose a timeout from 5 to 600 seconds");return;}
+            getPreferences(0).edit().putInt("request_timeout_"+kind,seconds).apply();publish();
+        });}
         @JavascriptInterface public void connectAllAvailable(){main.post(MainActivity.this::connectAllAvailable);}
         @JavascriptInterface public void sendingChain(){main.post(()->showChain());}
         @JavascriptInterface public void newMultiSend(){main.post(()->chooseMultiSend());}
@@ -1163,6 +1212,8 @@ public final class MainActivity extends Activity {
                 } catch(Exception error) {nodeActionResult("Could not load app notices");}
             });
         }
+        @JavascriptInterface public void checkForUpdates() {main.post(MainActivity.this::checkForUpdates);}
+        @JavascriptInterface public void downloadUpdate() {main.post(MainActivity.this::downloadUpdate);}
         @JavascriptInterface public void selectChatDevice(String side,String radio,String key) {
             main.post(()->{
                 if(!side.equals("left")&&!side.equals("right"))return;
@@ -1736,6 +1787,7 @@ public final class MainActivity extends Activity {
             for(Map.Entry<String,?> entry:getPreferences(0).getAll().entrySet())if(entry.getKey().startsWith("node_name_")&&entry.getValue() instanceof String)
                 nodeNames.put(entry.getKey().substring("node_name_".length()),entry.getValue());
             data.put("nodeNames",nodeNames);
+            data.put("requestTimeouts",new JSONObject().put("signal",requestTimeoutSeconds("signal")).put("ping",requestTimeoutSeconds("ping")).put("trace",requestTimeoutSeconds("trace")));
             data.put("channelObservationSeconds",channelObservationSeconds());
             data.put("messageSplitEnabled",messageSplitEnabled()).put("messageSplitIntervalSeconds",splitIntervalMs()/1000);
             data.put("connectingAvailable",connectingAvailable);
@@ -1921,6 +1973,14 @@ public final class MainActivity extends Activity {
     private void nodeAction(RadioSession session, String id, String action, String text) {
         if (session == null || id == null || action == null) return;
         debug(session.key+" node action="+action+" target="+id);
+        if("signal".equals(action)) {
+            if(session.meshcore||!session.connected||session.loading||session.ownId.isEmpty()||!session.knownNodes.containsKey(id)) {session.signalNotice(id,"Error: connect the MT radio and reload this contact first.",false);return;}
+            if(session.pendingSignal!=0){
+                if(id.equals(session.signalTarget))session.signalNotice(id,"Request already sent. Waiting for response…",true);
+                else if(pageReady)web.evaluateJavascript("window.onSignalRequestResult("+JSONObject.quote(session.key)+","+JSONObject.quote(id)+",'Another Signal Quality request is pending on this radio. Wait for its result.',false)",null);
+                return;
+            }
+        }
         if (session.ownId.isEmpty() || session.loading) { nodeActionResult("Wait for the radio to finish loading"); return; }
         NodeEntry entry = session.knownNodes.get(id);
         if (entry == null || !session.connected) { nodeActionResult("Connect the radio and reload this contact first"); return; }
@@ -1962,14 +2022,15 @@ public final class MainActivity extends Activity {
             byte[] payload = session.protocol.nodeCommand(action, id, text == null ? "" : text, entry.channel);
             if(isTrace) {
                 long token=session.protocol.lastRequestId(); int generation=session.generation;
+                int timeout=requestTimeoutSeconds("ping".equals(action)?"ping":"trace");
                 session.pendingTrace=token; session.traceTarget=id;session.pendingTraceKind=action;
                 showTracePending(session,token,id);
                 main.postDelayed(() -> {
                     if(session.generation!=generation||session.pendingTrace!=token) return;
                     session.protocol.expireRequest(token); session.pendingTrace=0;
                     showTrace(session,new TraceResult(token,id,new ArrayList<>(),new ArrayList<>(),new ArrayList<>(),new ArrayList<>(),
-                            "ping".equals(action)?"No Ping reply within 120 seconds. Zero-hop Ping requires a directly reachable repeater or repeating room server.":"No trace reply within 120 seconds. The route or destination may be unavailable."));
-                },120000);
+                            "ping".equals(action)?"No Ping reply within "+timeout+" seconds. Zero-hop Ping requires a directly reachable repeater or repeating room server.":"No trace reply within "+timeout+" seconds. The route or destination may be unavailable."));
+                },timeout*1000L);
             }
             if ("dm".equals(action)) {
                 ChatEntry message = new ChatEntry("You", text.trim(), true);
@@ -1979,13 +2040,17 @@ public final class MainActivity extends Activity {
                 session.directs.computeIfAbsent(id, ignored -> new ArrayList<>()).add(message);
                 session.track(message,session.protocol.lastRequestId());
             }
+            if("signal".equals(action)) {
+                session.pendingSignal=session.protocol.lastRequestId();
+                session.signalNotice(id,"Sending request to radio…",true);
+            }
             session.sendTracked(payload);
             if("signal".equals(action)) {
-                long token=session.protocol.lastRequestId();int generation=session.generation;
-                main.postDelayed(()->{if(session.generation==generation&&session.protocol.requestPending(token)) {
+                long token=session.protocol.lastRequestId();int generation=session.generation;int timeout=requestTimeoutSeconds("signal");
+                main.postDelayed(()->{if(session.generation==generation&&session.pendingSignal==token) {
                     session.protocol.expireRequest(token);
-                    session.signalQuality(token,id,"No Signal Quality response within 120 seconds. The node may be unreachable or its firmware may not support remote local-statistics requests.");
-                }},120000);
+                    session.signalQuality(token,id,"No response within "+timeout+" seconds. The node may be unreachable or its firmware may not support remote local-statistics requests.");
+                }},timeout*1000L);
             }
             if("dm".equals(action)) composeQueued(session,id,text.trim());
             if(session.meshcore&&!isTrace&&!"dm".equals(action)) {
@@ -1995,8 +2060,8 @@ public final class MainActivity extends Activity {
                 }},15000);
             }
             publish();
-            if(!isTrace&&!"dm".equals(action)) nodeActionResult(("signal".equals(action) ? "Signal Quality request" : action.toUpperCase()) + " sent to radio for " + entry.name);
-        } catch (IllegalArgumentException | ActivityNotFoundException error) { nodeActionResult(error.getMessage()); }
+            if(!isTrace&&!"dm".equals(action)) nodeActionResult(("signal".equals(action) ? "Node statistics request" : action.toUpperCase()) + " sent to radio for " + entry.name);
+        } catch (IllegalArgumentException | ActivityNotFoundException error) { if("signal".equals(action)){session.pendingSignal=0;session.signalNotice(id,"Error: "+error.getMessage(),false);}nodeActionResult(error.getMessage()); }
     }
 
     private void chainError(Exception error) {
@@ -2362,7 +2427,8 @@ public final class MainActivity extends Activity {
         }catch(Exception error){chainError(error);}
     }
     private boolean messageSplitEnabled(){return getPreferences(0).getBoolean("message_split_enabled",true);}
-    private long splitIntervalMs(){return 1000L*Math.max(1,Math.min(300,getPreferences(0).getInt("message_split_interval_seconds",1)));}
+    private int requestTimeoutSeconds(String kind){return Math.max(5,Math.min(600,getPreferences(0).getInt("request_timeout_"+kind,60)));}
+    private long splitIntervalMs(){return 1000L*Math.max(1,Math.min(300,getPreferences(0).getInt("message_split_interval_seconds",5)));}
     private List<String> messageParts(String text,int limit) {
         if(!messageSplitEnabled()&&text.getBytes(StandardCharsets.UTF_8).length>limit)
             throw new IllegalArgumentException("Message Split is disabled. Shorten the message or enable Message Split in Sending options.");
@@ -3076,6 +3142,76 @@ public final class MainActivity extends Activity {
     }
     private int dp(int n) { return Math.round(n * getResources().getDisplayMetrics().density); }
 
+    private void updateStatus(String status,String message) {
+        if(closing||web==null)return;
+        web.evaluateJavascript("window.onUpdateStatus("+JSONObject.quote(status)+","+JSONObject.quote(message)+")",null);
+    }
+
+    private void checkForUpdates() {
+        if(updateBusy)return;
+        updateBusy=true;availableUpdate=null;downloadedUpdate=null;
+        updateStatus("checking","Checking GitHub for a newer version…");
+        updateWorker.execute(()->{
+            try {
+                AppUpdater.Version latest=AppUpdater.check();
+                main.post(()->{
+                    updateBusy=false;if(closing)return;
+                    try {
+                        PackageInfo installed=getPackageManager().getPackageInfo(getPackageName(),0);
+                        long current=Build.VERSION.SDK_INT>=28?installed.getLongVersionCode():installed.versionCode;
+                        if(latest.code<=current)updateStatus("current","You have the latest version ("+installed.versionName+").");
+                        else {availableUpdate=latest;updateStatus("available","Version "+latest.name+" is available. Update from the SV8TTL LoRa Dash GitHub repository? Android will ask you to approve installation.");}
+                    }catch(Exception error){updateStatus("error","Could not read the installed app version.");}
+                });
+            }catch(Exception error){main.post(()->{updateBusy=false;updateStatus("error","Could not check GitHub: "+error.getMessage());});}
+        });
+    }
+
+    private void downloadUpdate() {
+        if(updateBusy||availableUpdate==null)return;
+        AppUpdater.Version version=availableUpdate;
+        availableUpdate=null;updateBusy=true;
+        updateStatus("downloading","Downloading and verifying version "+version.name+"…");
+        updateWorker.execute(()->{
+            try {
+                File apk=AppUpdater.download(version,getCacheDir());
+                if(!validUpdateApk(apk,version))throw new IllegalStateException("APK package, version or signing key does not match this app");
+                main.post(()->{updateBusy=false;if(closing)return;downloadedUpdate=apk;updateStatus("installing","Opening Android installer…");installDownloadedUpdate();});
+            }catch(Exception error){main.post(()->{updateBusy=false;updateStatus("error","Update failed: "+error.getMessage());});}
+        });
+    }
+
+    private boolean validUpdateApk(File apk,AppUpdater.Version version) throws Exception {
+        int flags=Build.VERSION.SDK_INT>=28?PackageManager.GET_SIGNING_CERTIFICATES:PackageManager.GET_SIGNATURES;
+        PackageInfo candidate=getPackageManager().getPackageArchiveInfo(apk.getAbsolutePath(),flags);
+        PackageInfo installed=getPackageManager().getPackageInfo(getPackageName(),flags);
+        if(candidate==null||!getPackageName().equals(candidate.packageName))return false;
+        long code=Build.VERSION.SDK_INT>=28?candidate.getLongVersionCode():candidate.versionCode;
+        if(code!=version.code||code<=(Build.VERSION.SDK_INT>=28?installed.getLongVersionCode():installed.versionCode))return false;
+        Signature[] candidateSignatures=Build.VERSION.SDK_INT>=28?candidate.signingInfo.getApkContentsSigners():candidate.signatures;
+        Signature[] installedSignatures=Build.VERSION.SDK_INT>=28?installed.signingInfo.getApkContentsSigners():installed.signatures;
+        return candidateSignatures!=null&&candidateSignatures.length>0&&java.util.Arrays.equals(candidateSignatures,installedSignatures);
+    }
+
+    private void installDownloadedUpdate() {
+        if(downloadedUpdate==null||!downloadedUpdate.isFile())return;
+        if(Build.VERSION.SDK_INT>=26&&!getPackageManager().canRequestPackageInstalls()) {
+            awaitingInstallPermission=true;
+            updateStatus("permission","Allow installs from this app in Android settings, then return here to continue.");
+            try {startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+getPackageName())));}
+            catch(ActivityNotFoundException error){awaitingInstallPermission=false;updateStatus("error","Open Android settings and allow installs from this app.");}
+            return;
+        }
+        try {
+            Uri uri=FileProvider.getUriForFile(this,"org.overmesh.android.updates",downloadedUpdate);
+            Intent intent=new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri,"application/vnd.android.package-archive");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(intent);
+            updateStatus("installing","Approve the update in Android's installer.");
+        }catch(Exception error){updateStatus("error","Could not open Android installer: "+error.getMessage());}
+    }
+
     @Override protected void onDestroy() {
         MessageNotifications.cancel(this);
         debug("Lifecycle closing");closing=true;pendingBleActions.clear();
@@ -3093,6 +3229,7 @@ public final class MainActivity extends Activity {
         pageReady = false;
         if (web != null) { web.removeJavascriptInterface("AndroidBridge"); web.destroy(); web = null; }
         historyWorker.execute(()->chatStore.close());historyWorker.shutdown();
+        updateWorker.shutdown();
         super.onDestroy();
     }
 }

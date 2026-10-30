@@ -20,6 +20,7 @@ interface RadioProtocol {
         default void delivery(long requestId, String state) {}
         default void trace(TraceResult result) {}
         default void signalQuality(long requestId,String target,String result) {}
+        default void signalSample(String target,long seconds,Float snr,Integer rssi,int hops,String stats,boolean requested,boolean mqtt) {}
         default void advertExport(String uri) {}
         default void directPacket(String id,String text,long time,int hops,long packetId,long replyId) {directMessage(id,text,time,hops);}
         default void reaction(int channel,String sender,String peer,String text,long time,long packetId,long replyId) {}
@@ -377,7 +378,7 @@ final class MeshtasticProtocol implements RadioProtocol {
     }
 
     private void readPacket(byte[] bytes, Events events) {
-        Float signalSnr=null;Integer signalRssi=null;
+        Float signalSnr=null;Integer signalRssi=null;boolean mqtt=false;
         ProtoWire.Reader r = new ProtoWire.Reader(bytes); long from = 0, to = 0, receivedAt = 0, packetId=0; int channel = 0, hopStart=-1, hopLimit=-1; byte[] decoded = null;
         while (r.next()) {
             if (r.field == 1) from = r.number();
@@ -390,10 +391,10 @@ final class MeshtasticProtocol implements RadioProtocol {
             else if (r.field == 12) signalRssi=(int)r.number();
             else if (r.field == 9) hopLimit=(int)r.number();
             else if (r.field == 15) hopStart=(int)r.number();
+            else if (r.field == 14) mqtt=r.number()!=0;
             else r.skip();
         }
-        if (decoded == null) return;
-        ProtoWire.Reader data = new ProtoWire.Reader(decoded); int port = 0; long requestId=0, replyId=0, emoji=0; boolean wantResponse=false; byte[] body = null;
+        ProtoWire.Reader data = new ProtoWire.Reader(decoded==null?new byte[0]:decoded); int port = 0; long requestId=0, replyId=0, emoji=0; boolean wantResponse=false,hasBitfield=false; byte[] body = null;
         while (data.next()) {
             if (data.field == 1) port = (int)data.number();
             else if (data.field == 2) body = data.bytes();
@@ -401,18 +402,34 @@ final class MeshtasticProtocol implements RadioProtocol {
             else if (data.field == 6) requestId=data.number();
             else if (data.field == 7) replyId=data.number()&0xffffffffL;
             else if (data.field == 8) emoji=data.number();
+            else if (data.field == 9) {hasBitfield=true;data.number();}
             else data.skip();
         }
         String sender = "!" + String.format("%08x", from);
         if(from!=myNode) events.lastHeard(sender,receivedAt);
         int hops=hopStart>=0 && hopLimit>=0 && hopStart>=hopLimit ? hopStart-hopLimit : -1;
-        if(port==67&&body!=null&&sender.equals(signalTargets.get(requestId))&&!wantResponse) {
+        // Old firmware omits hop_start: zero without a modern Data bitfield is not proof of direct RF.
+        int signalStart=hopStart<0&&hasBitfield?0:hopStart;
+        int signalLimit=hopLimit<0?0:hopLimit;
+        int signalHops=(signalStart>0||hasBitfield)&&signalStart>=signalLimit?signalStart-signalLimit:-1;
+        if(signalSnr!=null&&!Float.isFinite(signalSnr))signalSnr=null;
+        String statsText="";boolean requested=false;
+        if(port==67&&body!=null&&!wantResponse) {
             ProtoWire.Reader telemetry=new ProtoWire.Reader(body);byte[] stats=null;
-            while(telemetry.next()){if(telemetry.field==6)stats=telemetry.bytes();else telemetry.skip();}
-            if(stats!=null) {
-                String result=SignalQuality.describe(stats,signalSnr,signalRssi,hops);
-                signalTargets.remove(requestId);events.signalQuality(requestId,sender,result);
+            while(telemetry.next()) {
+                if(telemetry.field==6)stats=telemetry.bytes();
+                else telemetry.skip();
             }
+            if(stats!=null) {
+                statsText=SignalQuality.statistics(stats);
+                requested=sender.equals(signalTargets.get(requestId));
+            }
+        }
+        if(from!=0&&((from!=myNode&&!mqtt&&(signalSnr!=null||signalRssi!=null))||!statsText.isEmpty()))
+            events.signalSample(sender,receivedAt,from==myNode||mqtt?null:signalSnr,
+                from==myNode||mqtt?null:signalRssi,signalHops,statsText,requested,mqtt);
+        if(requested) {
+            signalTargets.remove(requestId);events.signalQuality(requestId,sender,"Node statistics received and saved.");
         }
         if (port == 1 && body != null) {
             if (from == myNode) return; // Already recorded as an outgoing message; an echo is not unread.
@@ -587,7 +604,7 @@ final class MeshCoreProtocol implements RadioProtocol {
         return null;
     }
     private int channelTextLimit;
-    @Override public int textLimit(boolean direct) { return direct ? 150 : channelTextLimit; }
+    @Override public int textLimit(boolean direct) { return direct ? 138 : channelTextLimit; }
     private boolean syncRequested;
     private boolean syncInFlight, channelsLoaded, initializing, syncStalled;
     private long loadDeadline;
@@ -659,7 +676,7 @@ final class MeshCoreProtocol implements RadioProtocol {
         if ("dm".equals(action)) {
             if(dmSends.size()>=32) throw new IllegalArgumentException("Wait for pending direct messages to finish");
             byte[] body = text.trim().getBytes(StandardCharsets.UTF_8);
-            if (text.indexOf('\0')>=0 || body.length == 0 || body.length > 150) throw new IllegalArgumentException("MeshCore DM must be 1–150 UTF-8 bytes, without NUL characters");
+            if (text.indexOf('\0')>=0 || body.length == 0 || body.length > 138) throw new IllegalArgumentException("MeshCore DM must be 1–138 UTF-8 bytes, without NUL characters");
             byte[] packet = new byte[13 + body.length]; packet[0] = 2;
             long now = Math.max(System.currentTimeMillis() / 1000,lastMessageTimestamp+1);
             lastMessageTimestamp=now;
@@ -746,7 +763,14 @@ final class MeshCoreProtocol implements RadioProtocol {
             if(packet.length>=58) {
                 int end=58; while(end<packet.length&&packet[end]!=0) end++;
                 advertName=java.util.Arrays.copyOfRange(packet,58,end);
-                channelTextLimit=Math.max(0,160-(end-58)-2);
+                // Keep ciphertext within 144 bytes (nine AES blocks). The 176-byte
+                // companion RX log then has room for its 3-byte prefix, 2-byte
+                // packet header, 3-byte group overhead, 4-byte scope and 20 path
+                // bytes. Larger packets can be transmitted but their repeats may
+                // never reach the app. Plaintext includes timestamp/type (5) and
+                // the exact UTF-8 sender name followed by ": " (2).
+                channelTextLimit=Math.max(0,144-5-advertName.length-2);
+                events.status("MeshCore channel budget: nameBytes="+advertName.length+", textBytes="+channelTextLimit+", encryptedBytes<=144");
             }
             if (packet.length >= 36) {
                 String name = packet.length > 58 ? new String(packet, 58, packet.length - 58, StandardCharsets.UTF_8).replace("\u0000", "").trim() : "MeshCore";

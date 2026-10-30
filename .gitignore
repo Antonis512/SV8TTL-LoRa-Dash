@@ -1,7 +1,8 @@
 .gradle/
 .idea/
 build/
-/*.apk
+*.apk
+!/updates/SV8TTL-LoRa-Dash-debug.apk
 local.properties
 *.iml
 

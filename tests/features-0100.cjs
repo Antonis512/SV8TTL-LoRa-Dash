@@ -12,6 +12,7 @@ const assert=require('node:assert/strict');const {pathToFileURL}=require('node:u
  });
  assert.equal(await page.locator('#multi-send-enabled').isChecked(),false);assert.equal(await page.locator('#new-multi-send').isDisabled(),true);
  assert.equal(await page.locator('#channel-observation').inputValue(),'5');
+ assert.equal(await page.locator('#message-split-interval').inputValue(),'5');
  await page.evaluate(()=>openSettingsWindow('multi'));
  const info=page.locator('#settings-window-multi .info-toggle');
  assert.equal(await info.count(),3);

@@ -1,5 +1,23 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 30 October 2026 — repository APK updates
+
+The user chose an APK file in the public source repository for in-app updates. The `updates/` directory now contains one debug APK and a checksum/version manifest, superseding the 28 October binary-exclusion choice for this one artifact. The update code is locally authored, adds no copied third-party code, and preserves the existing application ID and debug signing configuration. Android compares APK signatures during installation; this app also verifies the downloaded package, version and signing certificate before invoking the installer. Production release signing and a replacement license remain undecided. The existing provenance questions and all third-party notices remain recorded below.
+
+## 0.10.14 — MeshCore repeat-feedback packet budget
+
+Reviewed official MeshCore examples/companion_radio/MyMesh.cpp logRxRaw and self-info encoding, src/helpers/BaseSerialInterface.h (176-byte frame ceiling), and the existing encrypted channel layout. Channel budgeting now includes timestamp/type, UTF-8 sender prefix, AES block rounding, scope and a 20-byte repeat-path allowance. This addresses a feedback-size failure supported by the supplied device log, without treating radio acceptance as delivery. Implementation and regression tests are locally authored; no third-party source was copied. Existing notices and signing remain unchanged.
+
+## 0.10.13 — request feedback, timeouts and conservative MeshCore byte budget
+
+Reviewed upstream MeshCore BaseChatMesh.cpp sendGroupMessage and BaseChatMesh.h: MAX_TEXT_LEN is 160 and channel text is bounded by the UTF-8 sender-name prefix including the separator. Therefore 138 is not a universal firmware maximum. This app now deliberately caps MC user text at 138 bytes (or the smaller name-derived channel budget) for conservative operation on the reported network. No firmware source was copied. Timeout preferences and request-state presentation are locally authored. Existing notices remain unchanged.
+
+
+## 0.10.12 — signal history
+
+Direct packet history and LocalStats presentation were checked against the official Android SignalMetrics and CommonGetNodeDetailsUseCase behavior, and MeshPacket field meanings against the official mesh.proto reference. The SQLite history, SVG graphs, Java packet events and tests are locally authored; no official application implementation, chart library or generated protocol source was copied. Existing notices remain unchanged.
+
+
 ## 28 October 2026 — public source repository preparation
 
 The user authorized a public GitHub repository named SV8TTL-LoRa-Dash. This supersedes earlier statements that publication had not been authorized. Existing license texts and notices are retained unchanged; no replacement license or production signing scheme is introduced. Debug binaries, signing credentials, app data and research downloads are excluded from the source repository.

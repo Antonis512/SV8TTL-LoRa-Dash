@@ -2,9 +2,15 @@
 
 Standalone Android app for MeshCore and Meshtastic radios over Bluetooth or USB serial. No Windows computer or TCP radio connection is required. An independent adaptation based on [OverMesh Lite](https://github.com/Slofi/overmesh), not an official OverMesh release.
 
-Current version: **0.10.11 (38)**. Chat advert controls sit beside their respective MC columns and remain hidden for empty device slots. Config places Add Radio Connections directly after My Nodes; adverts are accessed from Chat.
+Current version: **0.10.15 (42)**. Config → Check for Updates checks the version file in this repository. A newer version prompts before download; the app verifies the APK and opens Android's installer for a second approval. MeshCore channel text reserves room for encrypted repeat feedback: the UTF-8 text limit is 137 minus the radio-name byte length (120 for a 17-byte name). Longer paths can still exceed that feedback limit; no repeat is not proof of failed delivery. Physical-radio validation remains required.
 
-This repository contains source code. Debug APKs, signing keys, personal exports and research downloads are excluded. Physical radio testing is still required; see [PHONE-TESTS.md](PHONE-TESTS.md).
+Version 0.10.13: Signal requests show sending, waiting, response and failure states. Config → Request timeouts provides separate Signal Quality, Ping and traceroute waits (60 seconds by default; 5–600 seconds).
+
+Version 0.10.12: MT Signal Quality opens persistent per-receiver/per-node history, direct-only SNR/RSSI graphs and separate node statistics. Receptions are collected automatically; unknown routes and relayed receptions stay outside the direct graphs. The newest 1,000 records are kept per pair, and signal history is currently excluded from App Backup.
+
+Version 0.10.11: Chat advert controls sit beside their respective MC columns and remain hidden for empty device slots. Config places Add Radio Connections directly after My Nodes; adverts are accessed from Chat.
+
+This repository contains source code and one update APK under `updates/`. Signing keys, personal exports and research downloads are excluded. Physical radio testing is still required; see [PHONE-TESTS.md](PHONE-TESTS.md).
 
 Version **0.10.10 (37)** adopts the independent name **SV8TTL LoRa Dash**, with Beta displayed separately. About identifies the app as an Android adaptation based on OverMesh Lite and retains the original attribution and licenses. Launcher, notifications, exports and APK filenames use the new name. Install `SV8TTL-LoRa-Dash-debug.apk` as an update: application ID, signing configuration, saved data and backup compatibility are unchanged. Historical release notes below retain their original terminology.
 
@@ -64,7 +70,7 @@ The **Map** and **Log** tabs are visible to match the Lite navigation but their 
 
 ## Install and test
 
-Install `SV8TTL-LoRa-Dash-debug.apk` from the project folder on an Android 8.0 or newer phone. This debug APK is signed with a development key. If Android refuses to update an older preview because of a signature mismatch, uninstall the older preview first (which erases that preview's app data).
+Install `SV8TTL-LoRa-Dash-debug.apk` from the project folder on an Android 8.0 or newer phone. Config → Check for Updates uses `updates/latest.json` and `updates/SV8TTL-LoRa-Dash-debug.apk` from this GitHub repository. An update requires a higher version code and the same signing certificate as the installed app. Android may ask you to allow installs from this app before showing its installer. This debug APK is signed with a development key; a signature mismatch cannot be fixed by the updater. Uninstalling an older preview erases its app data.
 
 Open **Config**, connect radios, then open **Nodes** to check their inventories. In **Chat**, select a device from MC or MT, choose a reported channel, and send a short test message. Keep the app in the foreground during initial radio testing. Active sessions have a foreground service; removing the app from Recents stops those sessions. Multi-radio behavior, hop values, and both gesture and three-button navigation layouts require physical device testing.
 

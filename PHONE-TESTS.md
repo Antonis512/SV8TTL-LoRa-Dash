@@ -1,5 +1,9 @@
 # Phone checks
 
+## 0.10.16 — preset messages
+
+In Config, confirm Preset Messages sits directly below Add Radio Connections. Add several messages, save, reopen and edit or remove them; confirm they survive restart and full App Backup export/import. In both channel Chat and DM Reply, focus the composer and confirm Presets appears above Send or Reply on the right. Selecting a preset must insert it at the cursor, preserve all existing draft text, update the UTF-8 byte count and never send automatically. Test with the keyboard open, multiline presets, long messages, gesture and three-button navigation. Physical-phone checks remain pending.
+
 ## 25 October changes — debug APK built; phone checks pending
 
 - Toggle each circled-i in My Nodes and Sending options twice; check independent show/hide, including saved history help. Start Connect All Available and verify immediate busy indication through USB permission, Bluetooth activation, scanning and connections; completion/rejection must clear it.

@@ -965,6 +965,21 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void setChannelObservationSeconds(int seconds){main.post(()->{if(seconds>=1&&seconds<=300)getPreferences(0).edit().putInt("mc_channel_observation_seconds",seconds).apply();publish();});}
         @JavascriptInterface public void setMessageSplitEnabled(boolean enabled){main.post(()->{getPreferences(0).edit().putBoolean("message_split_enabled",enabled).apply();publish();});}
         @JavascriptInterface public void setMessageSplitIntervalSeconds(int seconds){main.post(()->{if(seconds>=1&&seconds<=300)getPreferences(0).edit().putInt("message_split_interval_seconds",seconds).apply();publish();});}
+        @JavascriptInterface public void savePresetMessages(String json){main.post(()->{
+            try {
+                JSONArray messages=new JSONArray(json);
+                if(messages.length()>50)throw new IllegalArgumentException("Maximum 50 messages");
+                for(int i=0;i<messages.length();i++) {
+                    String value=messages.getString(i);
+                    if(value.trim().isEmpty()||value.length()>4096)throw new IllegalArgumentException("Messages must contain 1–4096 characters");
+                }
+                if(!getPreferences(0).edit().putString("preset_messages",messages.toString()).commit())throw new IOException("Could not save messages");
+                publish();
+                if(web!=null)web.evaluateJavascript("window.onPresetMessagesSaved(true,'Preset messages saved')",null);
+            } catch(Exception error) {
+                if(web!=null)web.evaluateJavascript("window.onPresetMessagesSaved(false,"+JSONObject.quote(error.getMessage())+")",null);
+            }
+        });}
         @JavascriptInterface public void setSettlingSeconds(int seconds){main.post(()->{if(seconds>=1&&seconds<=30)getPreferences(0).edit().putInt("send_settling_seconds",seconds).apply();publish();});}
         @JavascriptInterface public void setMeshCoreAttempts(int direct,int flood) {
             main.post(()->{
@@ -1790,6 +1805,8 @@ public final class MainActivity extends Activity {
             data.put("requestTimeouts",new JSONObject().put("signal",requestTimeoutSeconds("signal")).put("ping",requestTimeoutSeconds("ping")).put("trace",requestTimeoutSeconds("trace")));
             data.put("channelObservationSeconds",channelObservationSeconds());
             data.put("messageSplitEnabled",messageSplitEnabled()).put("messageSplitIntervalSeconds",splitIntervalMs()/1000);
+            try {data.put("presetMessages",new JSONArray(getPreferences(0).getString("preset_messages","[]")));}
+            catch(JSONException ignored){data.put("presetMessages",new JSONArray());}
             data.put("connectingAvailable",connectingAvailable);
             data.put("settlingSeconds",getPreferences(0).getInt("send_settling_seconds",3));
             JSONArray myNodes = new JSONArray();

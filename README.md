@@ -2,7 +2,7 @@
 
 Standalone Android app for MeshCore and Meshtastic radios over Bluetooth or USB serial. No Windows computer or TCP radio connection is required. An independent adaptation based on [OverMesh Lite](https://github.com/Slofi/overmesh), not an official OverMesh release.
 
-Current version: **0.10.15 (42)**. Config → Check for Updates checks the version file in this repository. A newer version prompts before download; the app verifies the APK and opens Android's installer for a second approval. MeshCore channel text reserves room for encrypted repeat feedback: the UTF-8 text limit is 137 minus the radio-name byte length (120 for a 17-byte name). Longer paths can still exceed that feedback limit; no repeat is not proof of failed delivery. Physical-radio validation remains required.
+Current version: **0.10.16 (43)**. Config → Preset Messages saves reusable text, and Presets in the expanded Chat and Reply editors inserts a chosen message without removing the draft or sending it. Presets are included in a full App Backup. Config → Check for Updates checks the version file in this repository, verifies a newer APK and opens Android's installer after user approval. Physical-radio validation remains required.
 
 Version 0.10.13: Signal requests show sending, waiting, response and failure states. Config → Request timeouts provides separate Signal Quality, Ping and traceroute waits (60 seconds by default; 5–600 seconds).
 

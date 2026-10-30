@@ -1,5 +1,9 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 0.10.16 — preset messages
+
+Preset storage, editing and composer insertion are locally authored. No third-party code or assets were added. The existing application ID, debug signing configuration, attribution, dependency notices and provenance questions remain unchanged.
+
 ## 30 October 2026 — repository APK updates
 
 The user chose an APK file in the public source repository for in-app updates. The `updates/` directory now contains one debug APK and a checksum/version manifest, superseding the 28 October binary-exclusion choice for this one artifact. The update code is locally authored, adds no copied third-party code, and preserves the existing application ID and debug signing configuration. Android compares APK signatures during installation; this app also verifies the downloaded package, version and signing certificate before invoking the installer. Production release signing and a replacement license remain undecided. The existing provenance questions and all third-party notices remain recorded below.

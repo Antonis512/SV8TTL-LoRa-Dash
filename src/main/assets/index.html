@@ -38,7 +38,7 @@
       <div id="chat-empty">Connect a radio in Config, then choose a channel.</div>
       <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="chat-input-bar">
         <textarea id="chat-input" class="form-input" placeholder="Message…" rows="1"></textarea>
-        <button id="chat-send" onclick="sendMsg()">Send</button>
+        <div class="composer-actions"><button class="preset-picker-button" type="button" onclick="openPresetPicker('chat-input')">Presets</button><button id="chat-send" onclick="sendMsg()">Send</button></div>
       </div>
     </section>
     <aside class="chat-side" id="channel-mt-side"></aside>
@@ -49,7 +49,7 @@
       <div id="dm-chat-title">Choose a contact</div>
       <div id="dm-chat-history"></div>
       <div id="dm-chat-status" aria-live="polite"></div>
-      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><button id="dm-reply" onclick="replyDm()">Reply</button></div>
+      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><div class="composer-actions"><button class="preset-picker-button" type="button" onclick="openPresetPicker('dm-input')">Presets</button><button id="dm-reply" onclick="replyDm()">Reply</button></div></div>
     </section>
     <aside class="dm-side" id="dm-mt-side"></aside>
   </div>
@@ -109,6 +109,7 @@
     <div class="settings-shortcuts">
       <button type="button" onclick="showSettingsPage('nodes')"><strong>My Nodes</strong><span>Connect and manage known radios</span></button>
       <button type="button" onclick="showSettingsPage('connections')"><strong>Add Radio Connections</strong><span>Add a radio using Bluetooth or USB</span></button>
+      <button type="button" onclick="showSettingsPage('presets')"><strong>Preset Messages</strong><span>Save messages for Chat and replies</span></button>
       <button type="button" onclick="showSettingsPage('sending')"><strong>Sending options</strong><span>Send to multiple · pause or continue a saved chain</span></button>
       <button type="button" onclick="showSettingsPage('timeouts')"><strong>Request timeouts</strong><span>Signal Quality, Ping and traceroute</span></button>
       <button type="button" onclick="showSettingsPage('sounds')"><strong>Notifications</strong><span>Background notifications, sounds and repeats</span></button>
@@ -118,6 +119,14 @@
       <button type="button" onclick="checkForUpdates()"><strong>Check for Updates</strong><span>Get the latest SV8TTL LoRa Dash from GitHub</span></button>
       <button type="button" onclick="showSettingsPage('about')"><strong>About</strong><span>Beta edition, credits and licenses</span></button>
     </div>
+    </div>
+    <div id="settings-presets-page" class="settings-subpage" hidden>
+      <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
+      <h2>Preset Messages</h2>
+      <p class="help">Save message text here, then insert it from Presets in Chat. Selecting a preset will not send it or replace your draft.</p>
+      <div id="preset-editor-list"></div>
+      <div class="actions"><button type="button" onclick="addPresetEditor()">Add new</button><button type="button" onclick="savePresetEditors()">Save</button></div>
+      <p id="preset-save-status" class="help" role="status" aria-live="polite"></p>
     </div>
     <div id="settings-timeouts-page" class="settings-subpage" hidden>
       <button class="settings-back" onclick="showSettingsPage('home')">← Config</button>
@@ -230,6 +239,11 @@
   <div class="settings-window-header"><h2 id="settings-window-update-title">Check for Updates</h2><button type="button" class="window-x" aria-label="Close Check for Updates" onclick="closeSettingsWindow('update')">×</button></div>
   <div class="settings-window-body"><p id="update-message" role="status" aria-live="polite">Checking GitHub…</p></div>
   <div class="settings-window-footer"><button id="update-confirm" type="button" hidden onclick="AndroidBridge.downloadUpdate()">Update</button><button type="button" onclick="closeSettingsWindow('update')">Close</button></div>
+</dialog>
+<dialog id="settings-window-presets" class="settings-window" aria-labelledby="settings-window-presets-title">
+  <div class="settings-window-header"><h2 id="settings-window-presets-title">Preset Messages</h2><button type="button" class="window-x" aria-label="Close Presets" onclick="closeSettingsWindow('presets')">×</button></div>
+  <div id="preset-choice-list" class="settings-window-body"></div>
+  <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('presets')">Close</button></div>
 </dialog>
 <dialog id="settings-window-history" class="settings-window" aria-labelledby="settings-window-history-title">
   <div class="settings-window-header"><h2 id="settings-window-history-title">Saved messages</h2><button type="button" class="window-x" aria-label="Close Saved messages" onclick="closeSettingsWindow('history')">×</button></div>

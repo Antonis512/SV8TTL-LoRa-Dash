@@ -328,7 +328,7 @@ for(const input of document.querySelectorAll('#chat-input,#dm-input')) {
 window.addEventListener('resize',()=>document.querySelectorAll('#chat-input,#dm-input').forEach(resizeComposer));
 
 // Keep the editor and Android IME focused while tapping composer controls.
-for(const button of document.querySelectorAll('#chat-send,#dm-reply,.composer-font-tools button')) {
+for(const button of document.querySelectorAll('#chat-send,#dm-reply,.composer-font-tools button,.preset-picker-button')) {
   button.addEventListener('pointerdown',event=>{if(document.activeElement?.matches('#chat-input,#dm-input')) event.preventDefault();});
   button.addEventListener('mousedown',event=>{if(document.activeElement?.matches('#chat-input,#dm-input')) event.preventDefault();});
 }

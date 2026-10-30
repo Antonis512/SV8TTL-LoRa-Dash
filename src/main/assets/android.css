@@ -225,6 +225,18 @@ input,textarea,[contenteditable="true"] { user-select:text; -webkit-user-select:
 .composer-font-tools { display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:5px; padding:4px; border-top:1px solid var(--border); font-size:10px; flex-shrink:0; }
 .composer-font-tools button { min-width:32px; min-height:30px; background:var(--bg3); color:var(--accent); border:1px solid var(--border); border-radius:5px; }
 #chat-input-bar,#dm-compose { align-items:flex-end; }
+.composer-actions { display:flex; flex-direction:column; align-items:stretch; gap:5px; flex-shrink:0; }
+.composer-actions button { min-height:36px; border:1px solid var(--accent); border-radius:5px; background:var(--accent-dim); color:var(--accent); font-weight:700; padding:4px 7px; }
+.composer-actions button:disabled { opacity:.45; }
+.preset-picker-button { display:none; }
+.composing .preset-picker-button { display:block; }
+#preset-editor-list { display:flex; flex-direction:column; gap:12px; }
+.preset-editor { border:1px solid var(--border); border-radius:8px; background:var(--bg2); padding:10px; }
+.preset-editor-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; color:var(--accent); }
+.preset-editor-heading button { border:1px solid var(--border); border-radius:5px; background:var(--bg3); color:var(--accent); min-height:32px; }
+.preset-editor textarea { box-sizing:border-box; width:100%; min-height:80px; resize:vertical; }
+.preset-choice { display:block; width:100%; text-align:left; margin:0 0 8px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.preset-choice strong { display:block; margin-bottom:3px; }
 #chat-input,#dm-input { font-size:var(--composer-font,15px) !important; line-height:1.4; min-height:44px; max-height:min(220px,32dvh); padding:8px; resize:none; box-sizing:border-box; overflow-y:auto; }
 .composing #channels-screen,.composing #dm-screen { grid-template-columns:0 minmax(0,1fr) 0; }
 .composing .chat-side,.composing .dm-side { display:none; }

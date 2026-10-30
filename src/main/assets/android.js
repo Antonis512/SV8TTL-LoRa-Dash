@@ -148,10 +148,12 @@ function switchTab(tab) {
   if (tab === 'chat') AndroidBridge.markRead(network);
 }
 function showSettingsPage(page) {
-  settingsPage=['home','nodes','sounds','backup','channel-backup','connections','about','sending','timeouts'].includes(page)?page:'home';
+  settingsPage=['home','nodes','sounds','backup','channel-backup','connections','about','sending','timeouts','presets'].includes(page)?page:'home';
   el('settings-timeouts-page').hidden=settingsPage!=='timeouts';
   el('settings-sending-page').hidden=settingsPage!=='sending';
   el('settings-home').hidden=settingsPage!=='home';
+  el('settings-presets-page').hidden=settingsPage!=='presets';
+  if(settingsPage==='presets'){renderPresetEditors(state?.presetMessages||[]);el('preset-save-status').textContent='';}
   el('settings-about-page').hidden=settingsPage!=='about';
   if(settingsPage==='about') AndroidBridge.about();
   el('settings-connections-page').hidden=settingsPage!=='connections';
@@ -161,6 +163,59 @@ function showSettingsPage(page) {
   el('settings-channel-backup-page').hidden=settingsPage!=='channel-backup';
   if(settingsPage==='channel-backup') renderBackupDevices();
   el('settings-content').scrollTop=0;
+}
+function presetEditorValues(){return [...el('preset-editor-list').querySelectorAll('textarea')].map(input=>input.value);}
+function renderPresetEditors(values) {
+  const list=el('preset-editor-list');clear(list);
+  (values.length?values:['']).forEach((value,index)=>{
+    const row=node('div','preset-editor');
+    const heading=node('div','preset-editor-heading');
+    const label=node('strong','',`Message ${index+1}`);
+    const remove=node('button','','Remove');remove.type='button';remove.setAttribute('aria-label',`Remove message ${index+1}`);
+    remove.onclick=()=>{const next=presetEditorValues();next.splice(index,1);renderPresetEditors(next);el('preset-save-status').textContent='Unsaved changes';};
+    heading.append(label,remove);
+    const input=node('textarea','form-input');input.value=value;input.maxLength=4096;input.rows=3;
+    input.setAttribute('aria-label',`Message ${index+1}`);
+    input.addEventListener('input',()=>el('preset-save-status').textContent='Unsaved changes');
+    row.append(heading,input);list.appendChild(row);
+  });
+}
+function addPresetEditor() {
+  const values=presetEditorValues();
+  if(values.length>=50){el('preset-save-status').textContent='Maximum 50 messages';return;}
+  values.push('');renderPresetEditors(values);
+  el('preset-editor-list').lastElementChild.querySelector('textarea').focus();
+  el('preset-save-status').textContent='Unsaved changes';
+}
+function savePresetEditors() {
+  const values=presetEditorValues().map(value=>value.trim()).filter(Boolean);
+  AndroidBridge.savePresetMessages(JSON.stringify(values));
+}
+window.onPresetMessagesSaved=function(saved,message) {
+  el('preset-save-status').textContent=message;
+};
+let presetTarget=null;
+function openPresetPicker(inputId) {
+  const input=el(inputId),choices=state?.presetMessages||[];
+  presetTarget={inputId,position:input.selectionEnd};
+  const list=el('preset-choice-list');clear(list);
+  if(!choices.length)list.appendChild(node('p','help','No preset messages saved. Add them in Config → Preset Messages.'));
+  choices.forEach((text,index)=>{
+    const button=node('button','preset-choice');button.type='button';
+    button.append(node('strong','',`Message ${index+1}`),document.createTextNode(text));
+    button.onclick=()=>insertPreset(text);
+    list.appendChild(button);
+  });
+  openSettingsWindow('presets');
+}
+function insertPreset(text) {
+  const target=presetTarget;if(!target)return;
+  closeSettingsWindow('presets');presetTarget=null;
+  const input=el(target.inputId),position=Math.min(target.position,input.value.length);
+  const before=input.value.slice(0,position),after=input.value.slice(position);
+  const insertion=(before&&!/\s$/.test(before)?' ':'')+text+(after&&!/^\s/.test(after)?' ':'');
+  input.setRangeText(insertion,position,position,'end');
+  input.focus();input.dispatchEvent(new Event('input',{bubbles:true}));resizeComposer(input);
 }
 let pendingSavedView=null;
 function openSettingsWindow(name) {

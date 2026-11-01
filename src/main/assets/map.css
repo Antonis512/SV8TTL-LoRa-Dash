@@ -1,0 +1,65 @@
+#tab-map{overflow:auto;padding:10px 12px 70px;color:var(--text)}
+.map-top,.map-tool-nav,.map-filters,.map-inline,.map-item-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.map-top{justify-content:space-between;margin-bottom:8px}.map-top strong{font-size:18px}
+#tab-map .map-top .map-source-switch{border-color:var(--accent);background:var(--accent-dim)}
+.map-offline-choices{display:grid;gap:10px}
+.map-dialog .map-offline-choices button{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;min-height:64px;padding:12px;text-align:left}
+.map-offline-choices button strong{font-size:14px}
+.map-offline-choices button span{font-size:12px;color:var(--muted);font-weight:400}
+.map-filters{padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:7px}
+.map-filters label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);min-width:105px;flex:1}
+.map-filters select,.map-filters input{width:100%;min-width:0}
+#map-status{min-height:16px;color:var(--muted);font-size:12px;margin:5px 0}
+.map-canvas-wrap{position:relative}
+#offline-map{height:42vh;min-height:270px;max-height:65vh;border:1px solid var(--border);border-radius:8px;background:#172330;overflow:hidden}
+.map-empty-pack{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:flex;flex-direction:column;gap:5px;align-items:center;text-align:center;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);box-shadow:0 3px 14px #0008;font-size:12px}
+.map-empty-pack[hidden]{display:none}
+.map-empty-pack span{color:var(--muted)}
+#map-counts,#map-no-position{font-size:12px;color:var(--muted);margin:8px 0}
+#map-source{font-size:12px;color:var(--muted);margin:4px 0}
+#map-no-position-list{padding:8px;max-height:160px;overflow:auto}
+.map-tool-nav{padding:8px 0;flex-wrap:wrap}.map-tool-nav button{flex:1 1 100px;min-height:42px;white-space:normal;text-align:center}
+#tab-map .map-top button,#tab-map .map-filters button,#tab-map .map-tool-nav button,#tab-map .map-empty-pack button,#tab-map #map-tool-panel button,#tab-map .map-item-actions button,.map-dialog button{min-height:36px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--accent);font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+#tab-map .map-tool-nav button{min-height:42px}
+#tab-map .map-top button:active,#tab-map .map-filters button:active,#tab-map .map-tool-nav button:active,#tab-map .map-empty-pack button:active,#tab-map #map-tool-panel button:active,#tab-map .map-item-actions button:active,.map-dialog button:active{background:var(--accent-dim);border-color:var(--accent)}
+#tab-map .map-tool-nav button.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+#tab-map .map-empty-pack button{background:var(--accent-dim);border-color:var(--accent)}
+#tab-map button:disabled,.map-dialog button:disabled{opacity:.45;cursor:default}
+#tab-map button:focus-visible,.map-dialog button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#map-tool-panel{border:1px solid var(--border);border-radius:8px;padding:11px;min-height:80px}
+#map-tool-panel h3{margin:0 0 6px;font-size:15px}
+#map-tool-panel p,#map-tool-panel li{font-size:12px;line-height:1.45;color:var(--muted)}
+#map-tool-panel label{display:block;margin:7px 0;font-size:12px}
+#map-tool-panel input,#map-tool-panel select,#map-tool-panel textarea{display:block;width:100%;margin-top:3px}
+#map-tool-panel textarea{min-height:56px}
+#map-items{padding:7px 0}.map-item{border:1px solid var(--border);border-radius:7px;padding:8px;margin:6px 0;font-size:12px}.map-item small{color:var(--muted)}
+#map-pack-list>div{border-top:1px solid var(--border);padding:7px 0;font-size:12px}
+#map-pack-list h3{margin:0 0 6px}
+#map-pack-list>div strong,#map-pack-list>div small{display:block}
+#map-pack-list .map-pack-active{color:var(--accent);font-weight:600}
+#map-pack-list .map-pack-selected{border-left:3px solid var(--accent);padding-left:8px}
+.map-satellite-form{border:1px solid var(--border);border-radius:8px;padding:10px;margin:9px 0}
+.map-satellite-form label{display:block;font-size:12px;margin:8px 0}
+.map-satellite-form input{display:block;width:100%;margin-top:4px}
+.map-satellite-form .map-remember{display:flex;align-items:center;gap:7px}
+.map-satellite-form .map-remember input{display:inline-block;width:auto;margin:0}
+#satellite-estimate{font-size:12px;color:var(--muted)}
+#satellite-account-status{font-size:12px;color:var(--muted)}
+.map-node-dot{display:block;border:2px solid #fff;border-radius:50%;width:15px;height:15px;background:#20b870;box-shadow:0 0 0 2px #101820}
+.map-node-dot.mc{background:#e7a634}.map-node-dot.old{opacity:.45}
+.maplibregl-popup-content{background:#1c2631;color:#f1f5f8;border:1px solid #44515e;border-radius:7px}.maplibregl-popup-close-button{color:#fff}
+.maplibregl-ctrl-group{background:var(--bg3);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.maplibregl-ctrl-group button{width:36px;height:36px;background:var(--bg3);border-color:var(--border)}
+.maplibregl-ctrl-group button:active{background:var(--accent-dim)}
+.maplibregl-ctrl-group .maplibregl-ctrl-icon{filter:invert(1)}
+
+#map-status.map-error{flex:0 0 auto;color:var(--red);background:var(--bg2);border:1px solid var(--red);border-left:4px solid var(--red);border-radius:6px;padding:10px 12px;font-size:13px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
+
+/* Map content is a scrollable column: never shrink tools below their contents. */
+#tab-map > *{flex-shrink:0}
+#map-tool-panel{height:auto;max-height:none;overflow-wrap:anywhere}
+.map-style-choices label{display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;cursor:pointer}
+.map-style-choices input{accent-color:var(--accent)}
+.map-style-choices strong,.map-style-choices small{display:block}
+.map-style-choices strong{color:var(--accent)}
+.map-style-choices small,.map-style-choices p{color:var(--muted);line-height:1.5}

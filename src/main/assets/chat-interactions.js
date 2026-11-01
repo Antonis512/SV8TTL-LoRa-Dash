@@ -162,6 +162,12 @@ function showMessageMenu(radio,message,where) {
   }
   reactionMenu(card,radio,message);
   dialogAction(card,'Copy Text',()=>{AndroidBridge.copyText(identity.text);el('dm-context').hidden=true;});
+  dialogAction(card,'Add to Log',()=>{
+    el('dm-context').hidden=true;
+    const device=state[radio],ch=device.channels.find(c=>c.index===where.channel),peer=device.nodes.find(n=>n.id===where.peer);
+    addMessageToLog({own:!!message.own,sender:identity.name,time:message.receivedAt>0?new Date(message.receivedAt).toLocaleString():message.time||'',network:radioType(radio).toUpperCase(),device:device.ownName||device.name||'',conversation:where.peer?'Direct message with '+(peer?.name||where.peer):ch?.name||'',status:message.own?deliveryLabel(message.delivery):'',text:identity.text});
+  });
+  dialogAction(card,'Add to Message Templates',()=>{el('dm-context').hidden=true;openMessageTemplateEditor(identity.text);});
   if(!message.own) dialogAction(card,'Reply',()=>replyToMessage(radio,message,where));
   if(radioType(radio)==='mc'&&message.own&&!where.peer) dialogAction(card,'Heard Repeats',()=>showMessagePath(message,true,radio));
   if(radioType(radio)==='mc'&&!message.own) dialogAction(card,'View Message Paths',()=>showMessagePath(message,false,radio));
@@ -384,15 +390,18 @@ function appendReactions(bubble,radio,message,entries) {
   const reactions=entries.filter(r=>r.reaction&&r.replyId===message.packetId&&(!r.peer||r.peer===message.peer));
   if(!reactions.length)return;
   const row=node('div','message-reactions');
-  const seen=new Set();
+  const groups=new Map();
   for(const r of reactions) {
-    const identity=(r.own?'You':r.sender)+'\0'+r.text;
-    if(seen.has(identity))continue;seen.add(identity);
-    const chip=node('button','reaction-chip',r.text);chip.type='button';
-    const label=(r.own?'You':state[radio]?.nodes?.find(n=>n.id===r.sender)?.name||r.senderName||r.sender)+(r.own?' · '+deliveryLabel(r.delivery):'');
-    chip.onclick=event=>{event.stopPropagation();showReactionSenders(radio,reactions,r.text);};
-    chip.title=label;chip.setAttribute('aria-label',r.text+' · '+label);
-    if(r.own&&!['delivered','delivered_mesh'].includes(r.delivery))chip.appendChild(node('small','',deliveryLabel(r.delivery)));
+    if(!groups.has(r.text))groups.set(r.text,new Map());
+    groups.get(r.text).set(r.own?'You':r.sender,r);
+  }
+  for(const [emoji,senders] of groups) {
+    const chip=node('button','reaction-chip',emoji+(senders.size>1?' '+senders.size:''));chip.type='button';
+    const names=[...senders.values()].map(r=>r.own?'You':state[radio]?.nodes?.find(n=>n.id===r.sender)?.name||r.senderName||r.sender);
+    chip.onclick=event=>{event.stopPropagation();showReactionSenders(radio,reactions,emoji);};
+    chip.title=names.join(', ');chip.setAttribute('aria-label',emoji+' · '+names.join(', '));
+    const own=[...senders.values()].find(r=>r.own&&!['delivered','delivered_mesh'].includes(r.delivery));
+    if(own)chip.appendChild(node('small','',deliveryLabel(own.delivery)));
     row.appendChild(chip);
   }
   bubble.appendChild(row);

@@ -3,17 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; worker-src blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self' https://tile.openstreetmap.org; frame-src 'none'; object-src 'none'">
   <title>SV8TTL LoRa Dash</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="overmesh-lite.css">
   <link rel="stylesheet" href="android.css">
+  <link rel="stylesheet" href="maplibre-gl.css">
+  <link rel="stylesheet" href="map.css">
 </head>
 <body>
 <div id="app-topo-bg"></div>
 <div id="app-header">
   <span id="hdr-title">SV8TTL LoRa Dash<small>Beta</small></span><div class="hdr-sep"></div>
-  <span id="hdr-radio-name">Android · offline</span>
+  <span id="hdr-radio-name">Android · no radio</span>
   <span id="hdr-time"></span><button id="app-close" type="button" aria-label="Close app" onclick="AndroidBridge.closeApp()">×</button>
 </div>
 
@@ -33,12 +35,13 @@
     <aside class="chat-side" id="channel-mc-side"></aside>
     <section id="channels-center">
     <div id="chat-font-bar" class="chat-font-controls" role="group" aria-label="Chat controls"><button id="chat-advert-left" type="button" onclick="showChatAdvert('left')" hidden>Adv</button><button id="chat-font-smaller" type="button" aria-label="Decrease message text size" onclick="changeChatFont(-1)">A−</button><span id="chat-font-size" aria-live="polite">13 px</span><button id="chat-font-larger" type="button" aria-label="Increase message text size" onclick="changeChatFont(1)">A+</button><button id="chat-advert-right" type="button" onclick="showChatAdvert('right')" hidden>Adv</button></div>
-      <div id="channel-chat-title">Choose a channel</div>
+      <div class="chat-title-row"><div id="channel-chat-title">Choose a channel</div><button id="channel-search-toggle" class="chat-search-toggle" type="button" aria-controls="channel-message-search" aria-label="Hide message search" aria-expanded="true" onclick="toggleMessageSearch('channel')"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"></circle><path d="m15 15 6 6"></path></svg></button></div>
+      <div id="channel-message-search" class="message-search-bar" hidden></div>
       <div id="chat-messages"></div>
       <div id="chat-empty">Connect a radio in Config, then choose a channel.</div>
       <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="chat-input-bar">
         <textarea id="chat-input" class="form-input" placeholder="Message…" rows="1"></textarea>
-        <div class="composer-actions"><button class="preset-picker-button" type="button" onclick="openPresetPicker('chat-input')">Presets</button><button id="chat-send" onclick="sendMsg()">Send</button></div>
+        <div class="composer-actions"><button class="preset-picker-button" type="button" onclick="openPresetPicker('chat-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('chat-input').value)">Save template</button><button id="chat-send" onclick="sendMsg()">Send</button></div>
       </div>
     </section>
     <aside class="chat-side" id="channel-mt-side"></aside>
@@ -46,10 +49,11 @@
   <div id="dm-screen" hidden>
     <aside class="dm-side" id="dm-mc-side"></aside>
     <section id="dm-center">
-      <div id="dm-chat-title">Choose a contact</div>
+      <div class="chat-title-row"><div id="dm-chat-title">Choose a contact</div><button id="dm-search-toggle" class="chat-search-toggle" type="button" aria-controls="dm-message-search" aria-label="Hide message search" aria-expanded="true" onclick="toggleMessageSearch('dm')"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="6"></circle><path d="m15 15 6 6"></path></svg></button></div>
+      <div id="dm-message-search" class="message-search-bar" hidden></div>
       <div id="dm-chat-history"></div>
       <div id="dm-chat-status" aria-live="polite"></div>
-      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><div class="composer-actions"><button class="preset-picker-button" type="button" onclick="openPresetPicker('dm-input')">Presets</button><button id="dm-reply" onclick="replyDm()">Reply</button></div></div>
+      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><div class="composer-actions"><button class="preset-picker-button" type="button" onclick="openPresetPicker('dm-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('dm-input').value)">Save template</button><button id="dm-reply" onclick="replyDm()">Reply</button></div></div>
     </section>
     <aside class="dm-side" id="dm-mt-side"></aside>
   </div>
@@ -72,6 +76,7 @@
     <select id="nodes-kind" class="form-input" onchange="setNodeKind(this.value)"><option value="all">All</option><option value="infrastructure">Infrastructure</option><option value="users">Users</option></select>
     <label class="node-hide-label">Sort <select id="nodes-sort" class="form-input" onchange="setNodeSort(this.value)"><option value="name">Name</option><option value="hops-asc">Hop count: lowest first</option><option value="hops-desc">Hop count: highest first</option><option value="heard-desc">Last Heard: newest first</option><option value="heard-asc">Last Heard: oldest first</option></select></label>
     <select id="nodes-role" class="form-input" onchange="setNodeRole(this.value)"><option value="all">All roles</option></select>
+    <select id="nodes-rf" class="form-input" aria-label="Receiving radio RF filter" onchange="renderNodes()"><option value="all">All radio RF</option></select>
     <label class="node-device-label">MC <select id="nodes-mc-device" class="form-input" onchange="AndroidBridge.selectDevice('mc',this.value)"></select></label>
     <label class="node-device-label">MT <select id="nodes-mt-device" class="form-input" onchange="AndroidBridge.selectDevice('mt',this.value)"></select></label>
   </div>
@@ -85,14 +90,80 @@
 </main>
 
 <main id="tab-map" class="tab-panel" hidden>
-  <div class="section-heading">Map</div>
-  <div class="empty-panel">Map positions are not available from this Android radio adapter yet.</div>
+  <div class="map-top"><strong>Map</strong><button id="map-source-switch" class="map-source-switch" type="button" onclick="toggleMapMode()" aria-label="Switch to offline map">Online ⇄</button><button type="button" onclick="openOfflineMaps()">Offline maps</button><button type="button" onclick="mapFitVisible()">Fit visible</button></div>
+  <div class="map-filters">
+    <label>Network<select id="map-network" class="form-input" onchange="renderMap()"><option value="all">All</option><option value="mc">MC</option><option value="mt">MT</option></select></label>
+    <label>Device<select id="map-device" class="form-input" onchange="renderMap()"><option value="all">All devices</option></select></label>
+    <label>Role<select id="map-role" class="form-input" onchange="renderMap()"><option value="all">All roles</option></select></label>
+    <label>Radio RF<select id="map-rf" class="form-input" onchange="renderMap()"><option value="all">All settings</option></select></label>
+    <label>Heard from<input id="map-from" class="form-input" type="datetime-local" onchange="renderMap()"></label>
+    <label>To<input id="map-to" class="form-input" type="datetime-local" onchange="renderMap()"></label>
+    <button type="button" onclick="clearMapFilters()">Clear filters</button>
+  </div>
+  <div id="map-status" role="status" aria-live="polite"></div>
+  <div id="map-source"></div>
+  <div class="map-canvas-wrap"><div id="offline-map" aria-label="Map"></div>
+  <div id="map-empty-pack" class="map-empty-pack" hidden><strong>No offline map installed</strong><span>Node positions appear as dots. Download an OpenStreetMap area to see streets and places offline.</span><button type="button" onclick="openOfflineMaps()">Offline maps</button></div></div>
+  <div id="map-counts"></div>
+  <details id="map-no-position"><summary>Nodes without a known position</summary><div id="map-no-position-list"></div></details>
+  <div class="map-tool-nav"><button type="button" onclick="mapTool('passive')">Passive activity</button><button type="button" onclick="mapTool('active')">Ask positions</button><button type="button" onclick="mapTool('route')">Radio path</button><button type="button" onclick="mapTool('mark')">Marks</button><button type="button" onclick="mapTool('overlay')">Overlays</button><button type="button" onclick="mapTool('geofence')">Geofences</button></div>
+  <section id="map-tool-panel" aria-live="polite"></section>
+  <div id="map-items"></div>
 </main>
+<dialog id="map-offline-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><h2>Offline maps</h2><button type="button" aria-label="Close Offline maps" onclick="el('map-offline-dialog').close()">×</button></div><div class="log-dialog-body map-offline-choices"><button type="button" onclick="openInstalledMaps()"><strong>Installed maps</strong><span>Choose a map already on this phone.</span></button><button type="button" onclick="openMapImport()"><strong>Import maps</strong><span>Add a BBBike pack or download a Copernicus area.</span></button><button type="button" onclick="openMapDisplayStyle()"><strong>Map Display Style</strong><span>Choose Full or Dark for offline vector maps.</span></button></div></dialog>
+<dialog id="map-style-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><button type="button" aria-label="Back to Offline maps" onclick="backToOfflineMaps('map-style-dialog')">←</button><h2>Map Display Style</h2><button type="button" aria-label="Close Map Display Style" onclick="el('map-style-dialog').close()">×</button></div><div class="log-dialog-body map-style-choices"><label><input type="radio" name="map-display-style" value="full" onchange="setMapDisplayStyle(this.value)"><span><strong>Full</strong><small>Colorful land use, water, roads, buildings and labels.</small></span></label><label><input type="radio" name="map-display-style" value="dark" onchange="setMapDisplayStyle(this.value)"><span><strong>Dark</strong><small>The original dark map style.</small></span></label><p>Applies to offline vector maps. Satellite imagery keeps its original colors.</p></div></dialog>
+<dialog id="map-installed-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><button type="button" aria-label="Back to Offline maps" onclick="backToOfflineMaps('map-installed-dialog')">←</button><h2>Installed maps</h2><button type="button" onclick="el('map-installed-dialog').close()">×</button></div><div class="log-dialog-body"><div id="map-pack-list"></div></div></dialog>
+<dialog id="map-import-dialog" class="log-dialog map-dialog"><div class="log-dialog-head map-pack-dialog-head"><button type="button" aria-label="Back to Offline maps" onclick="backToOfflineMaps('map-import-dialog')">←</button><div class="map-pack-heading"><h2>Import maps</h2><div id="map-pack-import-feedback" hidden><span id="map-pack-import-status" role="status" aria-live="polite"></span><progress id="map-pack-import-progress" aria-label="Map import in progress"></progress></div></div><button type="button" onclick="el('map-import-dialog').close()">×</button></div><div class="log-dialog-body">
+  <div class="actions"><button type="button" onclick="importShortbreadMap()">Import BBBike PMTiles or ZIP</button><button type="button" onclick="showCopernicusMapSetup()">Download Copernicus satellite area…</button></div>
+  <p class="help">BBBike opens the Android file picker immediately. Copernicus downloads satellite imagery through the setup below.</p>
+  <h3>Install a map file</h3>
+  <label>Pack type<select id="map-pack-kind" class="form-input" onchange="el('map-pack-schema').value=this.value==='satellite'?'raster':'shortbread'"><option value="street">Detailed map</option><option value="satellite">Satellite view</option></select></label>
+  <label>Pack format<select id="map-pack-schema" class="form-input"><option value="shortbread">BBBike / Shortbread</option><option value="protomaps">Protomaps</option><option value="raster">Raster satellite PMTiles</option></select></label>
+  <label>Name<input id="map-pack-title" class="form-input" maxlength="100" placeholder="My area"></label>
+  <label>Source / imagery provider (required for satellite)<input id="map-pack-source" class="form-input" maxlength="100" placeholder="BBBike / OpenStreetMap, or imagery provider"></label>
+  <label>Imagery date, if known<input id="map-pack-date" class="form-input" type="date"></label>
+  <div class="actions"><button type="button" onclick="AndroidBridge.importMapPack(el('map-pack-kind').value,el('map-pack-schema').value,el('map-pack-title').value,el('map-pack-source').value,el('map-pack-date').value)">Import selected format from phone</button></div>
+  <label>Or download a ready PMTiles file by HTTPS address<input id="map-pack-url" class="form-input" type="url" placeholder="https://…/my-area.pmtiles"></label>
+  <div class="actions"><button type="button" onclick="downloadMapPackFromForm()">Download and install</button></div>
+  <p><strong>Need a detailed map?</strong> Open BBBike while online, choose your area and PMTiles / Shortbread, then download the file or ZIP to this phone. Use the import button at the top of this dialog. Switch off internet afterward to check the map.</p>
+  <p><a href="https://extract.bbbike.org/" target="_blank" rel="noopener">Open BBBike area download</a> · <a href="https://docs.protomaps.com/guide/getting-started" target="_blank" rel="noopener">Protomaps area packs</a></p>
+  <h3 id="copernicus-map-heading">Download Copernicus satellite imagery on this phone</h3>
+  <p>1. On Map, zoom and pan until the area you want fills the screen. 2. Open Offline maps → Import maps and tap <strong>Use visible area</strong>. 3. Choose an imagery date range. 4. Enter your Copernicus OAuth client ID and secret, then review the tile and size estimate. 5. Download while online. The finished area works offline and joins Full App Backup.</p>
+  <p><button type="button" onclick="AndroidBridge.openCopernicusAccount()">Don't have an account yet?</button> This opens Copernicus Data Space in your browser. Register and verify your email. Sign in, open the Sentinel Hub dashboard, then <button type="button" onclick="AndroidBridge.openCopernicusCredentialsHelp()">see how to generate an OAuth client ID and secret</button>. Return here and enter both values. Copernicus limits requests; choose a smaller area if the estimate is too large.</p>
+  <div class="map-satellite-form">
+    <div class="actions"><button type="button" onclick="chooseSatelliteArea()">Use visible area</button><span id="satellite-estimate" role="status">No area chosen</span></div>
+    <label>Area name<input id="satellite-title" class="form-input" maxlength="100" placeholder="My area satellite"></label>
+    <label>Imagery from<input id="satellite-from" class="form-input" type="date"></label>
+    <label>To<input id="satellite-to" class="form-input" type="date"></label>
+    <label>Copernicus OAuth client ID<input id="satellite-client-id" class="form-input" autocomplete="off"></label>
+    <label>Copernicus OAuth client secret<input id="satellite-client-secret" class="form-input" type="password" autocomplete="off"></label>
+    <label class="map-remember"><input id="satellite-remember" type="checkbox"> Remember my credentials on this phone</label>
+    <p class="help">If left off, entered credentials are used for this download only. Remembered credentials are encrypted on this phone and excluded from Full App Backup.</p>
+    <div class="actions"><span id="satellite-account-status" role="status">Checking account…</span><button id="satellite-login" type="button" onclick="AndroidBridge.useRememberedSatelliteAccount()" hidden>Log in with remembered account</button><button id="satellite-logoff" type="button" onclick="logOffSatelliteAccount()" hidden>Log off</button><button id="satellite-forget" type="button" onclick="forgetSatelliteAccount()" hidden>Forget my credentials</button></div>
+    <div class="actions"><button type="button" onclick="downloadSatelliteArea()">Download satellite area</button><button type="button" onclick="AndroidBridge.cancelSatelliteDownload();el('satellite-estimate').textContent='Stopping after the current tile…'">Cancel download</button></div>
+  </div>
+  <p class="help">Choose the highest native detail available. Sentinel-2 satellite imagery is 10 m per pixel; extra zoom cannot reveal finer details. Packs and saved Map data are included in Full App Backup.</p>
+</div></dialog>
 
 <main id="tab-log" class="tab-panel" hidden>
-  <div class="section-heading">Log</div>
-  <div class="empty-panel">The mission log is not implemented yet.</div>
+  <div class="log-toolbar">
+    <div class="log-views"><button type="button" onclick="setLogView('note')">Notes</button><button type="button" onclick="setLogView('category')">Categories</button><button type="button" onclick="setLogView('template')">Note templates</button><button type="button" onclick="setLogView('templateCategory')">Template categories</button></div>
+    <button type="button" class="log-primary" onclick="newLogItem()">+ New</button>
+  </div>
+  <div class="log-controls"><input id="log-search" class="form-input" type="search" placeholder="Search title or category…" oninput="renderLog()"><label id="log-body-search-wrap"><input id="log-body-search" type="checkbox" onchange="renderLog()"> Search note text</label><select id="log-sort" class="form-input" onchange="renderLog()"><option value="edited-desc">Edited: newest</option><option value="edited-asc">Edited: oldest</option><option value="created-desc">Created: newest</option><option value="created-asc">Created: oldest</option><option value="title-asc">Name: A–Z</option><option value="title-desc">Name: Z–A</option></select></div>
+  <div id="log-filter-bar"></div>
+  <div id="log-bulk-bar" hidden><span id="log-selected-count"></span><select id="log-bulk-category" class="form-input"></select><button type="button" onclick="addCategoryToSelected()">Add category</button><button type="button" onclick="deleteSelectedNotes()">Delete selected</button><button type="button" onclick="clearLogSelection()">Cancel</button></div>
+  <div id="log-list"></div>
 </main>
+<dialog id="log-editor" class="log-dialog"><div class="log-dialog-head"><h2 id="log-editor-heading">New note</h2><button type="button" onclick="closeLogEditor()">×</button></div><div class="log-dialog-body">
+  <label>Title<input id="log-title" class="form-input" maxlength="200"></label>
+  <div id="log-note-fields"><label>Use note template<select id="log-template-picker" class="form-input" onchange="applyNoteTemplate(this.value)"></select></label><div>Categories<div id="log-editor-categories"></div><div class="log-inline"><input id="log-new-category" class="form-input" placeholder="New category"><button type="button" onclick="createCategoryInEditor()">Add category</button></div></div></div>
+  <div id="log-template-fields" hidden><div>Template categories<div id="log-editor-template-categories"></div><div class="log-inline"><input id="log-new-template-category" class="form-input" placeholder="New template category"><button type="button" onclick="createTemplateCategoryInEditor()">Add category</button></div></div></div>
+  <label>Text<textarea id="log-body" class="form-input" rows="12"></textarea></label><p id="log-editor-status" role="status"></p>
+  <div class="log-actions"><button type="button" onclick="saveLogEditor()">Save</button><button id="log-save-template" type="button" onclick="noteDraftAsTemplate()">Save as template</button><button type="button" onclick="closeLogEditor()">Cancel</button></div>
+</div></dialog>
+<dialog id="log-template-from-note" class="log-dialog"><div class="log-dialog-head"><h2>Save note template</h2><button type="button" onclick="el('log-template-from-note').close()">×</button></div><div class="log-dialog-body"><label>Template name<input id="log-draft-template-title" class="form-input" maxlength="200"></label><label>Reusable text<textarea id="log-draft-template-body" class="form-input" rows="10"></textarea></label><div>Template categories<div id="log-draft-template-categories" class="log-chips"></div></div><p class="help">Remove personal details before saving. Your note draft stays open.</p><div class="log-actions"><button type="button" onclick="saveNoteDraftTemplate()">Save template</button><button type="button" onclick="el('log-template-from-note').close()">Cancel</button></div></div></dialog>
+<dialog id="log-detail" class="log-dialog"><div class="log-dialog-head"><h2 id="log-detail-title"></h2><button type="button" onclick="closeLogDetail()">×</button></div><div class="log-dialog-body"><div id="log-detail-categories"></div><p id="log-detail-dates"></p><pre id="log-detail-body"></pre><div class="log-actions"><button type="button" onclick="editOpenNote()">Edit</button><button type="button" onclick="deleteOpenNote()">Delete</button></div></div></dialog>
 
 <main id="tab-settings" class="tab-panel" hidden>
   <div id="settings-content">
@@ -109,11 +180,11 @@
     <div class="settings-shortcuts">
       <button type="button" onclick="showSettingsPage('nodes')"><strong>My Nodes</strong><span>Connect and manage known radios</span></button>
       <button type="button" onclick="showSettingsPage('connections')"><strong>Add Radio Connections</strong><span>Add a radio using Bluetooth or USB</span></button>
-      <button type="button" onclick="showSettingsPage('presets')"><strong>Preset Messages</strong><span>Save messages for Chat and replies</span></button>
+      <button type="button" onclick="showSettingsPage('presets')"><strong>Message Templates</strong><span>Save messages for Chat and replies</span></button>
       <button type="button" onclick="showSettingsPage('sending')"><strong>Sending options</strong><span>Send to multiple · pause or continue a saved chain</span></button>
       <button type="button" onclick="showSettingsPage('timeouts')"><strong>Request timeouts</strong><span>Signal Quality, Ping and traceroute</span></button>
       <button type="button" onclick="showSettingsPage('sounds')"><strong>Notifications</strong><span>Background notifications, sounds and repeats</span></button>
-      <button type="button" onclick="showSettingsPage('backup')"><strong>App backup</strong><span>Export or merge saved radios, messages and settings</span></button>
+      <button type="button" onclick="showSettingsPage('backup')"><strong>App backup</strong><span>Export or merge radios, messages, Log and templates</span></button>
       <button type="button" onclick="showSettingsPage('channel-backup')"><strong>Channel backup</strong><span>Export channel chat as CSV</span></button>
       <button type="button" onclick="AndroidBridge.exportDebugLog()"><strong>Export debug log</strong><span>App diagnostics · up to 10 MB · excludes message bodies and keys</span></button>
       <button type="button" onclick="checkForUpdates()"><strong>Check for Updates</strong><span>Get the latest SV8TTL LoRa Dash from GitHub</span></button>
@@ -122,10 +193,10 @@
     </div>
     <div id="settings-presets-page" class="settings-subpage" hidden>
       <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
-      <h2>Preset Messages</h2>
-      <p class="help">Save message text here, then insert it from Presets in Chat. Selecting a preset will not send it or replace your draft.</p>
+      <h2>Message Templates</h2>
+      <p class="help">Create reusable message text. Choosing one in Chat inserts editable text without sending it.</p>
       <div id="preset-editor-list"></div>
-      <div class="actions"><button type="button" onclick="addPresetEditor()">Add new</button><button type="button" onclick="savePresetEditors()">Save</button></div>
+      <div class="actions"><button type="button" onclick="openMessageTemplateEditor()">Add new</button></div>
       <p id="preset-save-status" class="help" role="status" aria-live="polite"></p>
     </div>
     <div id="settings-timeouts-page" class="settings-subpage" hidden>
@@ -241,14 +312,15 @@
   <div class="settings-window-footer"><button id="update-confirm" type="button" hidden onclick="AndroidBridge.downloadUpdate()">Update</button><button type="button" onclick="closeSettingsWindow('update')">Close</button></div>
 </dialog>
 <dialog id="settings-window-presets" class="settings-window" aria-labelledby="settings-window-presets-title">
-  <div class="settings-window-header"><h2 id="settings-window-presets-title">Preset Messages</h2><button type="button" class="window-x" aria-label="Close Presets" onclick="closeSettingsWindow('presets')">×</button></div>
+  <div class="settings-window-header"><h2 id="settings-window-presets-title">Message Templates</h2><button type="button" class="window-x" aria-label="Close Message Templates" onclick="closeSettingsWindow('presets')">×</button></div>
   <div id="preset-choice-list" class="settings-window-body"></div>
   <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('presets')">Close</button></div>
 </dialog>
+<dialog id="message-template-editor" class="settings-window"><div class="settings-window-header"><h2>Message Template</h2><button type="button" class="window-x" onclick="closeMessageTemplateEditor()">×</button></div><div class="settings-window-body"><label>Template name<input id="message-template-title" class="form-input" maxlength="200" placeholder="e.g. Status Update"></label><textarea id="message-template-text" class="form-input" rows="8" maxlength="4096" placeholder="Message text…" oninput="updateMessageTemplateBudget()"></textarea><div id="message-template-budget" class="help" aria-live="polite"></div><p id="message-template-status" class="help" role="status"></p></div><div class="settings-window-footer"><button type="button" onclick="saveMessageTemplateEditor()">Save template</button><button type="button" onclick="closeMessageTemplateEditor()">Cancel</button></div></dialog>
 <dialog id="settings-window-history" class="settings-window" aria-labelledby="settings-window-history-title">
   <div class="settings-window-header"><h2 id="settings-window-history-title">Saved messages</h2><button type="button" class="window-x" aria-label="Close Saved messages" onclick="closeSettingsWindow('history')">×</button></div>
+  <div id="saved-message-search" class="message-search-bar" hidden></div>
   <div class="settings-window-body"><div id="my-node-history"></div></div>
-  <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('history')">Close</button></div>
 </dialog>
 <div id="dm-context" class="dm-context-overlay" role="dialog" aria-modal="true" hidden></div>
 <nav id="bottom-nav">
@@ -258,7 +330,7 @@
   <button class="nav-btn" data-tab="log" onclick="switchTab('log')"><span class="nav-icon">≡</span><span>Log</span></button>
   <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')"><span class="nav-icon">⊞</span><span>Config</span></button>
 </nav>
-<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="android.js"></script><script src="signal-history.js"></script>
+<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
 </body>
 </html>
 

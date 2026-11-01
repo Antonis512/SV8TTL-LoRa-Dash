@@ -36,7 +36,7 @@ final class ChatStore extends SQLiteOpenHelper {
         final String name;
         SavedChannel(int index, String name) { this.index=index; this.name=name; }
     }
-    ChatStore(Context context) { super(context, "chat-history.db", null, 13); setWriteAheadLoggingEnabled(true); }
+    ChatStore(Context context) { super(context, "chat-history.db", null, 15); setWriteAheadLoggingEnabled(true); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, radio TEXT NOT NULL, " +
                 "node_id TEXT NOT NULL DEFAULT '', channel INTEGER NOT NULL, sender TEXT NOT NULL, " +
@@ -46,6 +46,8 @@ final class ChatStore extends SQLiteOpenHelper {
         createRadioTables(db);
         createHistoryIndex(db);
         createSignalHistory(db);
+        createLogTable(db);
+        createMapTables(db);
     }
     private void createHistoryIndex(SQLiteDatabase db) {
         db.execSQL("CREATE INDEX IF NOT EXISTS messages_history ON messages(radio,node_id,peer,channel,received_at,id)");
@@ -59,6 +61,8 @@ final class ChatStore extends SQLiteOpenHelper {
                 "channel INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY(radio,node_id,channel))");
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if(oldVersion<15)createMapTables(db);
+        if(oldVersion<14)createLogTable(db);
         if(oldVersion<13)createSignalHistory(db);
         if(oldVersion<10) db.execSQL("ALTER TABLE messages ADD COLUMN reaction INTEGER NOT NULL DEFAULT 0");
         if(oldVersion<9) {
@@ -85,6 +89,76 @@ final class ChatStore extends SQLiteOpenHelper {
         if (oldVersion < 6) db.execSQL("ALTER TABLE messages ADD COLUMN hops INTEGER NOT NULL DEFAULT -1");
         if (oldVersion < 11) createHistoryIndex(db);
         if (oldVersion < 12) db.execSQL("CREATE TABLE IF NOT EXISTS pending_backup_settings(id INTEGER PRIMARY KEY,body TEXT NOT NULL)");
+    }
+    private void createMapTables(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS map_nodes(radio TEXT NOT NULL,device TEXT NOT NULL,id TEXT NOT NULL,name TEXT NOT NULL DEFAULT '',role TEXT NOT NULL DEFAULT '',lat REAL,lon REAL,position_at INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(radio,device,id))");
+        db.execSQL("CREATE TABLE IF NOT EXISTS map_positions(id INTEGER PRIMARY KEY AUTOINCREMENT,radio TEXT NOT NULL,device TEXT NOT NULL,node TEXT NOT NULL,lat REAL NOT NULL,lon REAL NOT NULL,reported_at INTEGER NOT NULL)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS map_positions_node ON map_positions(radio,device,node,reported_at)");
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS map_positions_unique ON map_positions(radio,device,node,lat,lon,reported_at)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS map_heard(id INTEGER PRIMARY KEY AUTOINCREMENT,radio TEXT NOT NULL,device TEXT NOT NULL,node TEXT NOT NULL,heard_at INTEGER NOT NULL)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS map_heard_node ON map_heard(radio,device,node,heard_at)");
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS map_heard_unique ON map_heard(radio,device,node,heard_at)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS map_items(id TEXT PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,geometry TEXT NOT NULL,enabled INTEGER NOT NULL,radio TEXT NOT NULL DEFAULT '',device TEXT NOT NULL DEFAULT '',channel INTEGER NOT NULL DEFAULT -1,created INTEGER NOT NULL,edited INTEGER NOT NULL)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS map_geofence_state(item TEXT NOT NULL,radio TEXT NOT NULL,device TEXT NOT NULL,node TEXT NOT NULL,inside INTEGER NOT NULL,PRIMARY KEY(item,radio,device,node))");
+    }
+    private void createLogTable(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS log_items(id TEXT PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,categories TEXT NOT NULL,created INTEGER NOT NULL,edited INTEGER NOT NULL)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS log_items_kind ON log_items(kind,edited)");
+        db.execSQL("INSERT OR IGNORE INTO log_items(id,kind,title,body,categories,created,edited) VALUES ('starter-daily-note','template','Daily Note','What happened:\nDetails:\nFollow-up:','[]',strftime('%s','now')*1000,strftime('%s','now')*1000)");
+    }
+    org.json.JSONArray logItems() throws org.json.JSONException {
+        org.json.JSONArray result=new org.json.JSONArray();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT id,kind,title,body,categories,created,edited FROM log_items",null)) {
+            while(c.moveToNext())result.put(new org.json.JSONObject().put("id",c.getString(0)).put("kind",c.getString(1)).put("title",c.getString(2)).put("body",c.getString(3)).put("categories",new org.json.JSONArray(c.getString(4))).put("created",c.getLong(5)).put("edited",c.getLong(6)));
+        }
+        return result;
+    }
+    void putLogItem(org.json.JSONObject item,boolean imported) throws org.json.JSONException {
+        String id=item.getString("id"),kind=item.getString("kind"),title=item.getString("title").trim(),body=item.optString("body","");
+        if(!id.matches("[a-zA-Z0-9-]{1,80}")||!java.util.Arrays.asList("note","category","template","templateCategory").contains(kind)||title.isEmpty()||title.length()>200||body.length()>200000)throw new org.json.JSONException("Invalid Log item");
+        org.json.JSONArray categories=item.optJSONArray("categories");if(categories==null)categories=new org.json.JSONArray();
+        if(categories.length()>100)throw new org.json.JSONException("Too many categories");
+        for(int i=0;i<categories.length();i++)if(!categories.getString(i).matches("[a-zA-Z0-9-]{1,80}"))throw new org.json.JSONException("Invalid category ID");
+        long created=item.optLong("created",System.currentTimeMillis()),edited=item.optLong("edited",created);
+        if(created<0||edited<0)throw new org.json.JSONException("Invalid Log date");
+        SQLiteDatabase db=getWritableDatabase();
+        if(imported)try(Cursor c=db.rawQuery("SELECT edited FROM log_items WHERE id=?",new String[]{id})){if(c.moveToFirst()&&c.getLong(0)>=edited)return;}
+        ContentValues v=new ContentValues();v.put("id",id);v.put("kind",kind);v.put("title",title);v.put("body",body);v.put("categories",categories.toString());v.put("created",created);v.put("edited",edited);
+        db.insertWithOnConflict("log_items",null,v,SQLiteDatabase.CONFLICT_REPLACE);
+    }
+    void deleteLogItems(org.json.JSONArray ids) throws org.json.JSONException {
+        if(ids.length()>100000)throw new org.json.JSONException("Too many Log items");
+        java.util.Set<String> deleting=new java.util.HashSet<>();
+        for(int i=0;i<ids.length();i++){
+            String id=ids.getString(i);
+            if(!id.matches("[a-zA-Z0-9-]{1,80}"))throw new org.json.JSONException("Invalid Log item ID");
+            deleting.add(id);
+        }
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
+        try {
+            java.util.Set<String> categories=new java.util.HashSet<>();
+            for(String id:deleting)try(Cursor c=db.rawQuery("SELECT kind FROM log_items WHERE id=?",new String[]{id})){
+                if(c.moveToFirst()&&(c.getString(0).equals("category")||c.getString(0).equals("templateCategory")))categories.add(id);
+            }
+            if(!categories.isEmpty()){
+                java.util.Map<String,String> updated=new java.util.LinkedHashMap<>();
+                try(Cursor c=db.rawQuery("SELECT id,categories FROM log_items WHERE kind IN ('note','template')",null)){
+                    while(c.moveToNext()){
+                        if(deleting.contains(c.getString(0)))continue;
+                        org.json.JSONArray old=new org.json.JSONArray(c.getString(1)),kept=new org.json.JSONArray();
+                        for(int i=0;i<old.length();i++)if(!categories.contains(old.getString(i)))kept.put(old.getString(i));
+                        if(kept.length()!=old.length())updated.put(c.getString(0),kept.toString());
+                    }
+                }
+                for(java.util.Map.Entry<String,String> entry:updated.entrySet()){
+                    ContentValues values=new ContentValues();values.put("categories",entry.getValue());values.put("edited",System.currentTimeMillis());
+                    db.update("log_items",values,"id=?",new String[]{entry.getKey()});
+                }
+            }
+            for(String id:deleting)db.delete("log_items","id=?",new String[]{id});
+            db.setTransactionSuccessful();
+        }
+        finally{db.endTransaction();}
     }
     private void createSignalHistory(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS signal_history(id INTEGER PRIMARY KEY AUTOINCREMENT,node_id TEXT NOT NULL,peer TEXT NOT NULL,body TEXT NOT NULL)");
@@ -130,6 +204,7 @@ final class ChatStore extends SQLiteOpenHelper {
         if(seconds<=lastHeard(radio,nodeId,peer)) return;
         ContentValues v=new ContentValues();v.put("radio",radio);v.put("node_id",nodeId);v.put("peer",peer);v.put("heard",seconds);
         getWritableDatabase().insertWithOnConflict("node_heard",null,v,SQLiteDatabase.CONFLICT_REPLACE);
+        new MapData(this).heard(radio,nodeId,peer,seconds);
     }
     void setPaths(long id,String paths) {
         if(id<0) return;
@@ -196,6 +271,64 @@ final class ChatStore extends SQLiteOpenHelper {
             while(c.moveToNext())result.addAll(page(radio,nodeId,c.getString(0),c.getInt(1),0));
         }
         return result;
+    }
+    static final class SearchSenders {
+        final boolean own;final String sender;final int count;
+        SearchSenders(boolean own,String sender,int count){this.own=own;this.sender=sender;this.count=count;}
+        String key(){return own?"own":"sender:"+sender;}
+    }
+    static final class SearchIdentity {
+        final String key,sender,body;
+        SearchIdentity(String key,String sender,String body){this.key=key;this.sender=sender;this.body=body;}
+    }
+    static SearchIdentity searchIdentity(String radio,boolean own,String sender,String body){
+        if(own)return new SearchIdentity("own","Me",body);
+        if(radio.equals("mc")&&sender.equals("MeshCore")){
+            int colon=body.indexOf(": ");
+            if(colon>0&&colon<=80){String name=body.substring(0,colon);return new SearchIdentity("sender:"+name,name,body.substring(colon+2));}
+        }
+        return new SearchIdentity("sender:"+sender,sender,body);
+    }
+    static final class SearchPage {
+        final List<Message> messages;final boolean more;
+        SearchPage(List<Message> messages,boolean more){this.messages=messages;this.more=more;}
+    }
+    private static String conversationWhere(String peer){return "radio=? AND node_id=? AND reaction=0"+
+            (peer.equals("*")?" AND channel=?":peer.isEmpty()?" AND peer=? AND channel=?":" AND peer=?");}
+    private static String[] conversationArgs(String radio,String nodeId,String peer,int channel){
+        return peer.equals("*")?new String[]{radio,nodeId,Integer.toString(channel)}:
+                peer.isEmpty()?new String[]{radio,nodeId,peer,Integer.toString(channel)}:new String[]{radio,nodeId,peer};
+    }
+    List<SearchSenders> searchSenders(String radio,String nodeId,String peer,int channel){
+        java.util.Map<String,Integer> counts=new java.util.HashMap<>();java.util.Map<String,SearchIdentity> identities=new java.util.HashMap<>();
+        try(Cursor c=getReadableDatabase().query("messages",new String[]{"own","sender","body"},conversationWhere(peer),
+                conversationArgs(radio,nodeId,peer,channel),null,null,null)){
+            while(c.moveToNext()){SearchIdentity identity=searchIdentity(radio,c.getInt(0)!=0,c.getString(1),c.getString(2));
+                counts.merge(identity.key,1,Integer::sum);identities.put(identity.key,identity);}
+        }
+        counts.putIfAbsent("own",0);identities.putIfAbsent("own",new SearchIdentity("own","Me",""));
+        List<SearchSenders> result=new ArrayList<>();for(String key:counts.keySet()){
+            SearchIdentity identity=identities.get(key);result.add(new SearchSenders(key.equals("own"),identity.sender,counts.get(key)));
+        }
+        result.sort((a,b)->a.own!=b.own?(a.own?-1:1):a.sender.compareToIgnoreCase(b.sender));return result;
+    }
+    SearchPage searchMessages(String radio,String nodeId,String peer,int channel,String query,java.util.Set<String> selected,long beforeTime,long beforeId){
+        List<Message> result=new ArrayList<>();if(selected.isEmpty())return new SearchPage(result,false);
+        String where=conversationWhere(peer);List<String> args=new ArrayList<>(java.util.Arrays.asList(conversationArgs(radio,nodeId,peer,channel)));
+        if(beforeId>0){where+=" AND (received_at<? OR (received_at=? AND id<?))";
+            args.add(Long.toString(beforeTime));args.add(Long.toString(beforeTime));args.add(Long.toString(beforeId));}
+        String needle=query.toLowerCase(java.util.Locale.ROOT);boolean more=false;
+        try(Cursor c=getReadableDatabase().query("messages",new String[]{"id","radio","node_id","channel","sender","body","time","received_at","own","delivery","peer","unread","hops","heard_repeats","paths","packet_id","reply_id","reaction"},
+                where,args.toArray(new String[0]),null,null,"received_at DESC,id DESC")){
+            while(c.moveToNext()){
+                boolean own=c.getInt(8)!=0;String sender=c.getString(4),body=c.getString(5);
+                SearchIdentity identity=searchIdentity(radio,own,sender,body);
+                if(!selected.contains(identity.key)||!identity.body.toLowerCase(java.util.Locale.ROOT).contains(needle))continue;
+                if(result.size()==100){more=true;break;}
+                Message message=new Message(c.getLong(0),c.getString(1),c.getString(2),c.getInt(3),sender,body,c.getString(6),c.getLong(7),own,c.getString(9),c.getString(10),c.getInt(11)!=0,c.getInt(12),c.getInt(13),c.getString(14));
+                message.packetId=c.getLong(15);message.replyId=c.getLong(16);result.add(message);
+            }
+        }return new SearchPage(result,more);
     }
     java.util.Map<String,Long> heardNodes(String radio,String nodeId) {
         java.util.Map<String,Long> result=new java.util.LinkedHashMap<>();

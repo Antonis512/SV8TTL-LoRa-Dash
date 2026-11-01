@@ -1,5 +1,15 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 1 November 2026 — Full and Dark map display
+
+The Full Shortbread rendering style is locally authored for BBBike-supplied vector data; it is not a copy of BBBike’s website stylesheet. The existing rendering is retained as Dark. No additional third-party code, fonts or sprites were added. Existing map attribution and all notices remain.
+
+## 31 October 2026 — offline Map components
+
+The Android Map implementation and local pack, position-history, geofence, mark, and backup code are locally authored. It bundles MapLibre GL JS 5.15.0 (`maplibre-gl.js`/CSS), PMTiles JS 4.3.0 (`pmtiles.js`), and Protomaps Basemaps JS 5.1.0 (`protomaps-basemaps.js`) from their published distributions, plus the Protomaps basemaps-assets fonts and sprites snapshot downloaded on 31 October 2026. Their licence and provenance texts are retained under `src/main/assets/licenses/`: MapLibre BSD-3-Clause, PMTiles BSD-3-Clause, Protomaps basemap BSD-3-Clause, Noto font OFL, and the Tangrams/Mapzen sprite MIT notice. Installed map data is user supplied and is not bundled in the APK. OpenStreetMap-derived packs require visible contributor attribution; satellite packs require their own source and date information. Existing OverMesh notices, application ID, and signing configuration remain unchanged.
+
+Copernicus Sentinel-2 L2A packs are generated on the user's phone through the Copernicus Data Space Sentinel Hub Process API, using the user's OAuth client. The app retains the source and requested date range in pack metadata, but a requested range is not a verified scene acquisition date. Optional remembered OAuth client credentials are encrypted with an Android Keystore key bound to this device, kept outside the app's Full App Backup, and removed by **Forget my credentials**. **Log off** disables their use in this app until the user logs in again; it cannot sign out an external browser session or revoke the OAuth client at Copernicus. No Copernicus imagery is bundled in the APK. The API workflow was independently implemented using the official Copernicus authentication, Process API, evalscript and quota documentation.
+
 ## 0.10.16 — preset messages
 
 Preset storage, editing and composer insertion are locally authored. No third-party code or assets were added. The existing application ID, debug signing configuration, attribution, dependency notices and provenance questions remain unchanged.

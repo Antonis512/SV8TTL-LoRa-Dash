@@ -16,7 +16,7 @@ const path=require('node:path');
  });
  await page.goto(pathToFileURL(path.resolve('src/main/assets/index.html')).href);
  await page.evaluate(()=>{
-  const radio=id=>({name:id,ownName:id+' Long name',ownId:id==='mt'?'!12345678':'ownmc',key:id+'1',connected:true,channels:[{index:0,name:'Local'}],nodes:[{id:id==='mt'?'!abcdef12':'abcdefabcdef',name:id+' User',role:'User',favorite:false,hops:1}],directs:{},chats:{},state:'Connected',loading:false,scanning:false,scanProgress:0});
+  const radio=id=>({name:id,ownName:id+' Long name',ownId:id==='mt'?'!12345678':'ownmc',key:id+'1',rfLabel:id==='mt'?'Long Fast':'869.618 MHz · BW 62.5 kHz · SF8 · CR4/5',connected:true,channels:[{index:0,name:'Local'}],nodes:[{id:id==='mt'?'!abcdef12':'abcdefabcdef',name:id+' User',role:'User',favorite:false,hops:1}],directs:{},chats:{},state:'Connected',loading:false,scanning:false,scanProgress:0});
   window.fixture={mc:radio('mc'),mt:radio('mt'),selectedMc:'mc1',selectedMt:'mt1',devices:['mc','mt'].map(r=>({radio:r,key:r+'1',id:r+'own',name:r+' Long name'})),myNodes:['mc','mt','mt'].map((r,i)=>({radio:r,id:'saved'+i,name:'Saved '+i,connected:false})),sound:{mode:'shared',shared:{selected:false,repeats:1}},audioEnabled:true};
   onRadioState(fixture);
  });
@@ -42,6 +42,12 @@ const path=require('node:path');
  await page.getByRole('button',{name:/Export debug log/}).click();assert.deepEqual(await page.evaluate(()=>calls.at(-1)),['exportDebugLog']);
  await page.evaluate(()=>navigateBack());
  await page.evaluate(()=>{window.savedTestNavigation=[...navigationStack];switchTab('nodes');});
+ await page.locator('#nodes-show-unknown').check();
+ assert.match(await page.locator('#nodes-list').innerText(),/Radio RF \(last known\) Long Fast/);
+ await page.locator('#nodes-rf').selectOption('Long Fast');
+ assert.equal(await page.locator('#nodes-list .android-node').count(),1);
+ await page.locator('#nodes-rf').selectOption('all');
+ await page.locator('#nodes-show-unknown').uncheck();
  for(const [width,height] of [[360,640],[390,780],[780,390]]) {
    await page.setViewportSize({width,height});
    const filters=await page.locator('.node-filter-options').boundingBox();
@@ -104,6 +110,10 @@ const path=require('node:path');
   const nav=await page.locator('#bottom-nav').boundingBox();assert.ok(nav.y+nav.height<=height+1);
  }
  await page.setViewportSize({width:390,height:780});
+ await page.evaluate(()=>{fixture.myNodes=[{radio:'mc',id:'0123456789abcdef'.repeat(4),name:'Field MeshCore',connected:true,detectedRadio:'mc'}];onRadioState(fixture);switchTab('settings');showSettingsPage('nodes');});
+ const facts=await page.locator('#my-nodes-list .node-facts').evaluate(e=>({scroll:e.scrollWidth,width:e.clientWidth,height:e.clientHeight}));
+ assert.ok(facts.scroll<=facts.width+1&&facts.height>20,'MeshCore public key wraps inside the saved-radio card');
+ await page.screenshot({path:'build/my-nodes-wrap-preview.png'});
  await page.evaluate(()=>{fixture.devices=[{radio:'mt',key:'mt1',id:'mtown',name:'MT Long name'}];onRadioState(fixture);switchTab('settings');showSettingsPage('channel-backup');});
  await page.screenshot({path:'build/channel-backup-preview.png'});
  await page.evaluate(()=>{switchTab('chat');selectChannel('mt',0);showMessageNodeActions('mt','!abcdef12');});

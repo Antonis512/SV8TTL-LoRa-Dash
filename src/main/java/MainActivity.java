@@ -20,6 +20,7 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageInfo;
 import android.content.pm.Signature;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -31,6 +32,7 @@ import android.os.Looper;
 import android.os.ParcelUuid;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.provider.OpenableColumns;
 import android.net.Uri;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
@@ -49,8 +51,10 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsResult;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -70,6 +74,7 @@ import java.util.Map;
 import java.util.Iterator;
 import java.util.TreeMap;
 import java.io.InputStream;
+import java.io.FilterInputStream;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -100,11 +105,24 @@ public final class MainActivity extends Activity {
     private RadioSession scanningSession, awaitingUsbSession, selected = mt;
     private int scanToken;
     private ChatStore chatStore;
+    private MapData mapData;
+    private SatelliteCredentials satelliteCredentials;
+    private MapPacks mapPacks;
+    private String pendingMapPackKind;
+    private String pendingMapPackSchema;
+    private String pendingMapPackTitle;
+    private String pendingMapPackSource,pendingMapPackDate;
+    private boolean mapPackPickerOpen,mapPackImportActive;
+    private String mapPackStatus="";
+    private boolean mapPackStatusBusy;
+    private int mapPackStatusPercent=-1;
     private SendChain sendChain;
     private long nextChainSend;
     private final Runnable chainRunner=new Runnable(){public void run(){if(closing)return;tickChain();main.postDelayed(this,500);}};
     private final Runnable splitRunner=new Runnable(){public void run(){if(closing)return;for(RadioSession s:sessions.values())tickSplit(s);main.postDelayed(this,100);}};
     private final java.util.concurrent.ExecutorService historyWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.ExecutorService mapImportWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.ExecutorService messageSearchWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
     private boolean connectingAvailable;
     private int availableRun;
     private boolean retryingAvailable;
@@ -255,7 +273,9 @@ public final class MainActivity extends Activity {
     private static final int EXPORT_JSON=401, EXPORT_CSV=402, IMPORT_JSON=403, EXPORT_DM_CSV=404, PICK_SOUND=405,
             EXPORT_APP_JSON=406, IMPORT_APP_JSON=407;
     private String transferRadio, transferNode, transferPeer;
-    private static final int EXPORT_CHANNEL_CSV=408;
+    // 409 belongs to ENABLE_BLUETOOTH; every activity result needs a distinct code.
+    private static final int EXPORT_CHANNEL_CSV=408, IMPORT_MAP_PACK=412, EXPORT_MAP_ITEM=410, IMPORT_MAP_ITEM=411;
+    private String pendingMapExportId;
     private int transferChannel;
     private String pickingSound;
     private long lastSoundAt;
@@ -283,6 +303,7 @@ public final class MainActivity extends Activity {
         final java.util.Set<String> historyRequests=new java.util.HashSet<>();
         final Map<String,Long> readThrough=new java.util.HashMap<>();
         final Map<String, NodeEntry> knownNodes = new TreeMap<>();
+        String rfLabel="";
         final ArrayDeque<ChatEntry> pendingSends = new ArrayDeque<>();
         final Map<Long,ChatEntry> trackedMessages=new java.util.LinkedHashMap<>();
         final ArrayDeque<SplitSend> splitSends=new ArrayDeque<>();
@@ -573,6 +594,14 @@ public final class MainActivity extends Activity {
         }
 
         @Override public void status(String text) { updateStatus(text); }
+        @Override public void radioSettings(String label) {
+            int currentGeneration=generation;
+            main.post(()->{if(generation!=currentGeneration||label.isEmpty())return;
+                rfLabel=label;if(!ownId.isEmpty())getPreferences(0).edit().putString("radio_rf:"+(meshcore?"mc":"mt")+":"+ownId,label).apply();
+                publishRadioUpdate();
+                if(pageReady&&web!=null)web.evaluateJavascript("if(!document.getElementById('tab-map').hidden)AndroidBridge.loadMap()",null);
+            });
+        }
         @Override public void syncComplete() {
             int currentGeneration=generation;
             main.post(() -> {
@@ -605,12 +634,15 @@ public final class MainActivity extends Activity {
                 if (!id.equals(ownId)) {
                     readThrough.clear();
                     ownId = id; ownName = name; chats.clear(); directs.clear();
+                    rfLabel=getPreferences(0).getString("radio_rf:"+radio+":"+id,"");
                     loadSessionHistory(this);
                 }
+                if(!rfLabel.isEmpty())getPreferences(0).edit().putString("radio_rf:"+radio+":"+id,rfLabel).apply();
                 NodeEntry local = knownNodes.get(id);
                 if (local != null && !local.name.isEmpty()) ownName = local.name;
                 else if (!name.isEmpty() && (!name.equals("Meshtastic " + id) || ownName.isEmpty())) ownName = name;
                 chatStore.saveRadio(radio, id, ownName, bleAddress);
+                for(NodeEntry known:knownNodes.values())mapData.node(radio,id,known.id,known.name,known.role,known.latitude,known.longitude,false);
                 requestedId="";requestedRadio="";
                 if (meshcore) selectedMc=this; else selectedMt=this;
                 for (Map.Entry<Integer,String> item : channelNames.entrySet())
@@ -711,6 +743,12 @@ public final class MainActivity extends Activity {
                         hops < 0 && old != null ? old.hops : hops,
                         !Double.isFinite(latitude) && old != null ? old.latitude : latitude,
                         !Double.isFinite(longitude) && old != null ? old.longitude : longitude));
+                if(!ownId.isEmpty()){
+                    boolean changedPosition=meshcore&&old!=null&&MapData.valid(latitude,longitude)
+                            &&(latitude!=old.latitude||longitude!=old.longitude);
+                    mapData.node(meshcore?"mc":"mt",ownId,id,name,role,latitude,longitude,changedPosition);
+                    if(changedPosition)showMapGeofenceAlerts("mc",ownId,id,name,latitude,longitude);
+                }
                 if (id.equals(ownId) && !name.isEmpty()) {
                     ownName = name;
                     chatStore.saveRadio(meshcore ? "mc" : "mt", id, name, bleAddress);
@@ -728,7 +766,30 @@ public final class MainActivity extends Activity {
                 NodeEntry old = knownNodes.get(id);
                 if (old != null) knownNodes.put(id, new NodeEntry(id, old.name, old.role,
                         old.model, old.channel, old.hops, latitude, longitude));
+                if(!ownId.isEmpty()){
+                    String radio=meshcore?"mc":"mt";
+                    mapData.node(radio,ownId,id,old==null?id:old.name,old==null?"":old.role,latitude,longitude,true);
+                    showMapGeofenceAlerts(radio,ownId,id,old==null?id:old.name,latitude,longitude);
+                }
                 publishRadioUpdate();
+                sendMapData();
+            });
+        }
+        @Override public void waypoint(String sender,long waypointId,String name,String description,double latitude,double longitude,boolean deleted) {
+            int currentGeneration=generation;
+            main.post(()->{
+                if(generation!=currentGeneration||meshcore||ownId.isEmpty())return;
+                String itemId="mt-"+sender.replace("!","")+"-"+Long.toHexString(waypointId);
+                if(deleted){mapData.delete(itemId);sendMapData();return;}
+                try{
+                    JSONObject item=new JSONObject().put("id",itemId).put("kind","mark")
+                            .put("title",name.trim().isEmpty()?"Waypoint from "+sender:name.trim())
+                            .put("description",description.trim().isEmpty()?"Shared by "+sender:description.trim()+" · Shared by "+sender)
+                            .put("geometry",new JSONObject().put("type","Point").put("coordinates",new JSONArray().put(longitude).put(latitude)))
+                            .put("radio","mt").put("device",ownId).put("enabled",true)
+                            .put("created",System.currentTimeMillis()).put("edited",System.currentTimeMillis());
+                    mapData.put(item,false);sendMapData();
+                }catch(JSONException error){debug("Invalid radio waypoint ignored");}
             });
         }
         @Override public void ownPosition(double latitude, double longitude) {
@@ -819,8 +880,20 @@ public final class MainActivity extends Activity {
         @Override public String toString() { return name + "  ·  " + index; }
     }
 
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        if(mapPackPickerOpen){
+            state.putStringArray("mapPackSelection",new String[]{pendingMapPackKind,pendingMapPackSchema,pendingMapPackTitle,pendingMapPackSource,pendingMapPackDate});
+        }
+    }
+
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        String[] selection=savedInstanceState==null?null:savedInstanceState.getStringArray("mapPackSelection");
+        if(selection!=null&&selection.length==5){
+            pendingMapPackKind=selection[0];pendingMapPackSchema=selection[1];pendingMapPackTitle=selection[2];
+            pendingMapPackSource=selection[3];pendingMapPackDate=selection[4];mapPackPickerOpen=true;
+        }
         debugLog=new DebugLog(getFilesDir());
         String appVersion="unknown";
         try{appVersion=getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(Exception ignored){}
@@ -831,6 +904,9 @@ public final class MainActivity extends Activity {
         sessions.put(mt.key,mt); sessions.put(mc.key,mc);
         RadioConnectionService.owner=new java.lang.ref.WeakReference<>(this);
         chatStore = new ChatStore(this);
+        mapData = new MapData(chatStore);
+        satelliteCredentials = new SatelliteCredentials(this);
+        mapPacks = new MapPacks(this);
         chatStore.markInterruptedSends();
         try{String pending=chatStore.pendingSettings();if(pending!=null){mergeSettings(new JSONObject(pending));chatStore.clearPendingSettings();}}catch(Exception error){debug("Backup settings recovery pending");}
         try {sendChain=new SendChain(getFilesDir());}catch(Exception error){debug("Cannot restore sending chain: "+error.getClass().getSimpleName());}
@@ -850,16 +926,32 @@ public final class MainActivity extends Activity {
         else registerReceiver(bluetoothStateReceiver,new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED));
         WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
+        if((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0)WebView.setWebContentsDebuggingEnabled(true);
         web = new WebView(this);
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
+        settings.setUserAgentString(settings.getUserAgentString()+" SV8TTL-LoRa-Dash/0.1");
         settings.setDomStorageEnabled(false);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
         settings.setAllowFileAccessFromFileURLs(false);
         settings.setAllowUniversalAccessFromFileURLs(false);
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this).setMessage(message)
+                        .setPositiveButton("OK", (dialog, which) -> result.confirm())
+                        .setNegativeButton("Cancel", (dialog, which) -> result.cancel())
+                        .setOnCancelListener(dialog -> result.cancel()).show();
+                return true;
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                Uri uri=request.getUrl();
+                if("appassets.androidplatform.net".equals(uri.getHost())&&uri.getPath()!=null&&uri.getPath().startsWith("/packs/"))
+                    return mapPacks.serveSlice(uri.getPath(),uri.getQueryParameter("offset"),uri.getQueryParameter("length"));
+                if("appassets.androidplatform.net".equals(uri.getHost())&&uri.getPath()!=null&&uri.getPath().startsWith("/satellite/"))
+                    return mapPacks.serveSatellite(uri.getPath());
                 return assets.shouldInterceptRequest(request.getUrl());
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -882,6 +974,7 @@ public final class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view, String url) {
                 debug("WebView page finished app="+APP_URL.equals(url));
                 pageReady = APP_URL.equals(url); publish();
+                if(pageReady&&!mapPackStatus.isEmpty())mapPackImportStatus(mapPackStatus,mapPackStatusBusy,mapPackStatusPercent);
             }
         });
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
@@ -970,8 +1063,10 @@ public final class MainActivity extends Activity {
                 JSONArray messages=new JSONArray(json);
                 if(messages.length()>50)throw new IllegalArgumentException("Maximum 50 messages");
                 for(int i=0;i<messages.length();i++) {
-                    String value=messages.getString(i);
-                    if(value.trim().isEmpty()||value.length()>4096)throw new IllegalArgumentException("Messages must contain 1–4096 characters");
+                    Object entry=messages.get(i);
+                    String value=entry instanceof JSONObject?((JSONObject)entry).getString("text"):(String)entry;
+                    String title=entry instanceof JSONObject?((JSONObject)entry).getString("title"):"Message "+(i+1);
+                    if(value.trim().isEmpty()||value.length()>4096||title.trim().isEmpty()||title.length()>200)throw new IllegalArgumentException("Template name or message length is invalid");
                 }
                 if(!getPreferences(0).edit().putString("preset_messages",messages.toString()).commit())throw new IOException("Could not save messages");
                 publish();
@@ -1008,6 +1103,111 @@ public final class MainActivity extends Activity {
             });
         }
         @JavascriptInterface public void copyText(String text) { main.post(() -> MainActivity.this.copyText(text)); }
+        @JavascriptInterface public void loadLogItems() {main.post(()->sendLogItems());}
+        @JavascriptInterface public void loadMap() {main.post(()->sendMapData());}
+        @JavascriptInterface public void loadSatelliteAccount(){main.post(()->sendSatelliteAccount());}
+        @JavascriptInterface public void openCopernicusAccount(){main.post(()->openMapHelp("https://dataspace.copernicus.eu/"));}
+        @JavascriptInterface public void openCopernicusCredentialsHelp(){main.post(()->openMapHelp("https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Overview/Authentication.html"));}
+        @JavascriptInterface public void logOffSatelliteAccount(){main.post(()->{
+            satelliteDownloadCancelled=true;satelliteCredentials.setLoggedOff(true);sendSatelliteAccount();
+            nodeActionResult("Logged off Copernicus in this app");
+        });}
+        @JavascriptInterface public void useRememberedSatelliteAccount(){main.post(()->{
+            if(satelliteCredentials.load()==null){nodeActionResult("No Copernicus credentials are remembered");return;}
+            satelliteCredentials.setLoggedOff(false);sendSatelliteAccount();
+        });}
+        @JavascriptInterface public void forgetSatelliteAccount(){main.post(()->{
+            satelliteDownloadCancelled=true;satelliteCredentials.forget();sendSatelliteAccount();
+            nodeActionResult("Copernicus credentials forgotten on this phone");
+        });}
+        @JavascriptInterface public void estimateSatellite(String bounds){main.post(()->{
+            try{JSONArray b=new JSONArray(bounds);CopernicusMaps.Plan p=CopernicusMaps.plan(b.getDouble(0),b.getDouble(1),b.getDouble(2),b.getDouble(3));
+                web.evaluateJavascript("window.onSatelliteEstimate("+p.json()+")",null);
+            }catch(Exception error){nodeActionResult("Satellite area: "+error.getMessage());}
+        });}
+        @JavascriptInterface public void downloadSatellite(String bounds,String from,String to,String title,String clientId,String clientSecret,boolean remember){main.post(()->{
+            if(satelliteDownloadRunning){nodeActionResult("A satellite download is already running");return;}
+            String actualId=clientId.trim(),actualSecret=clientSecret;
+            if(actualId.isEmpty()&&actualSecret.isEmpty()){
+                SatelliteCredentials.Account saved=satelliteCredentials.loggedOff()?null:satelliteCredentials.load();
+                if(saved!=null){actualId=saved.id;actualSecret=saved.secret;}
+            }
+            if(actualId.isEmpty()||actualSecret.isEmpty()){nodeActionResult("Enter both Copernicus credentials or log in with the remembered account");return;}
+            final String downloadId=actualId,downloadSecret=actualSecret;
+            final CopernicusMaps.Plan plan;try{JSONArray b=new JSONArray(bounds);plan=CopernicusMaps.plan(b.getDouble(0),b.getDouble(1),b.getDouble(2),b.getDouble(3));
+                if(plan.tiles.size()*300000L>mapPacks.freeSpace())throw new IllegalArgumentException("Not enough free phone space for the estimated satellite download");
+            }catch(Exception error){nodeActionResult("Satellite area: "+error.getMessage());return;}
+            satelliteDownloadRunning=true;satelliteDownloadCancelled=false;
+            nodeActionResult("Downloading "+plan.tiles.size()+" Copernicus tiles. Keep the app open.");
+            historyWorker.execute(()->{File pack=null;try{
+                pack=CopernicusMaps.download(getCacheDir(),plan,from,to,downloadId,downloadSecret,(done,total)->{
+                    if(satelliteDownloadCancelled)throw new IllegalStateException("Cancelled by user");
+                    if(done==1&&remember)try{satelliteCredentials.remember(downloadId,downloadSecret);main.post(()->sendSatelliteAccount());}
+                    catch(Exception error){main.post(()->nodeActionResult("Download continues, but the account could not be remembered"));}
+                    if(done==1||done==total||done%25==0)main.post(()->{if(pageReady&&!closing)web.evaluateJavascript("window.onSatelliteProgress("+done+","+total+")",null);});
+                });
+                mapPacks.installCopernicus(pack,title,plan,from,to);
+                main.post(()->{if(!closing){sendMapData();nodeActionResult("Copernicus satellite area installed for offline use");}});
+            }catch(Exception error){main.post(()->{if(!closing)nodeActionResult("Satellite download failed: "+error.getMessage());});}
+            finally{if(pack!=null)pack.delete();main.post(()->satelliteDownloadRunning=false);}});
+        });}
+        @JavascriptInterface public void cancelSatelliteDownload(){satelliteDownloadCancelled=true;}
+        @JavascriptInterface public void saveMapItem(String json){main.post(()->{
+            try{mapData.put(new JSONObject(json),false);sendMapData();}
+            catch(Exception error){nodeActionResult("Could not save map item: "+error.getMessage());}
+        });}
+        @JavascriptInterface public void deleteMapItem(String id){main.post(()->{mapData.delete(id);sendMapData();});}
+        @JavascriptInterface public void toggleMapItem(String id,boolean enabled){main.post(()->{
+            try{JSONArray items=mapData.items();for(int i=0;i<items.length();i++){JSONObject item=items.getJSONObject(i);if(id.equals(item.getString("id"))){item.put("enabled",enabled).put("edited",System.currentTimeMillis());mapData.put(item,false);sendMapData();return;}}}
+            catch(Exception error){nodeActionResult("Could not update map item: "+error.getMessage());}
+        });}
+        @JavascriptInterface public void importMapPack(String kind,String schema,String title,String sourceName,String captureDate){main.post(()->{
+            if(!kind.equals("street")&&!kind.equals("satellite"))return;
+            if(mapPackPickerOpen||mapPackImportActive)return;
+            pendingMapPackKind=kind;pendingMapPackSchema=schema;pendingMapPackTitle=title;pendingMapPackSource=sourceName;pendingMapPackDate=captureDate;
+            mapPackPickerOpen=true;mapPackImportStatus("",false);
+            Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+            try{startActivityForResult(intent,IMPORT_MAP_PACK);}catch(ActivityNotFoundException error){mapPackPickerOpen=false;clearPendingMapPack();mapPackImportStatus("Android file picker is unavailable.");}
+        });}
+        @JavascriptInterface public void downloadMapPack(String url,String title,String kind,String schema,String sourceName,String captureDate){main.post(()->{
+            if(!url.startsWith("https://")){nodeActionResult("Use an HTTPS map pack address");return;}
+            mapPackImportStatus("Downloading map pack… Keep the app open until it finishes.",true);
+            historyWorker.execute(()->{try{JSONObject pack=mapPacks.download(url,title,kind,schema,sourceName,captureDate);main.post(()->mapPackInstalled(pack));}
+                catch(Exception error){main.post(()->mapPackImportStatus("Map download failed: "+error.getMessage()));}});
+        });}
+        @JavascriptInterface public void removeMapPack(String id){main.post(()->{
+            try{mapPacks.remove(id);if(id.equals(getPreferences(0).getString("active_map_pack_id","")))getPreferences(0).edit().remove("active_map_pack_id").apply();sendMapData();}
+            catch(Exception error){nodeActionResult("Could not remove map pack: "+error.getMessage());}
+        });}
+        @JavascriptInterface public void setMapDisplayStyle(String style){main.post(()->{
+            if(style.equals("full")||style.equals("dark"))getPreferences(0).edit().putString("map_display_style",style).apply();
+        });}
+        @JavascriptInterface public void selectMapPack(String id){main.post(()->{
+            JSONArray packs=mapPacks.list();for(int i=0;i<packs.length();i++){
+                JSONObject pack=packs.optJSONObject(i);
+                if(pack!=null&&id.equals(pack.optString("id"))){getPreferences(0).edit().putString("active_map_pack_id",id).apply();return;}
+            }
+            nodeActionResult("Offline map is no longer installed");sendMapData();
+        });}
+        @JavascriptInterface public void mapNodeAction(String key,String id,String action){main.post(()->MainActivity.this.nodeAction(session(key),id,action,""));}
+        @JavascriptInterface public void senseMesh(String key,int channel){main.post(()->requestMapSense(key,channel));}
+        @JavascriptInterface public void sendMapMark(String id,String key,int channel){main.post(()->sendMapMark(id,key,channel));}
+        @JavascriptInterface public void exportMapItem(String id){main.post(()->{
+            pendingMapExportId=id;
+            Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/geo+json")
+                    .putExtra(Intent.EXTRA_TITLE,"SV8TTL-map-item.geojson");startActivityForResult(intent,EXPORT_MAP_ITEM);
+        });}
+        @JavascriptInterface public void importMapItem(){main.post(()->{
+            Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");startActivityForResult(intent,IMPORT_MAP_ITEM);
+        });}
+        @JavascriptInterface public void saveLogItem(String json) {main.post(()->{
+            try {chatStore.putLogItem(new JSONObject(json),false);sendLogItems();}
+            catch(Exception error){nodeActionResult("Could not save Log item: "+error.getMessage());}
+        });}
+        @JavascriptInterface public void deleteLogItems(String json) {main.post(()->{
+            try {chatStore.deleteLogItems(new JSONArray(json));sendLogItems();}
+            catch(Exception error){nodeActionResult("Could not delete Log items: "+error.getMessage());}
+        });}
         @JavascriptInterface public int messagePartCount(String text,int limit) {
             try{return MessageChunks.split(text,limit).size();}
             catch(IllegalArgumentException error){return -1;}
@@ -1115,6 +1315,34 @@ public final class MainActivity extends Activity {
         }
         @JavascriptInterface public void viewSaved(String radio, String id) {
             main.post(() -> MainActivity.this.viewSaved(radio,id));
+        }
+        @JavascriptInterface public void messageSearchSenders(String radio,String id,String peer,int channel,String scope){
+            messageSearchWorker.execute(()->{try{
+                if(!validSearchScope(radio,id,peer,channel))return;
+                JSONArray choices=new JSONArray();for(ChatStore.SearchSenders sender:chatStore.searchSenders(radio,id,peer,channel))
+                    choices.put(new JSONObject().put("key",sender.key()).put("name",sender.own?"Me":sender.sender).put("count",sender.count));
+                main.post(()->{if(pageReady&&!closing)web.evaluateJavascript("window.onMessageSearchSenders("+JSONObject.quote(scope)+","+choices+")",null);});
+            }catch(Exception error){debug("Could not list message senders");}});
+        }
+        @JavascriptInterface public void searchStoredMessages(String radio,String id,String peer,int channel,String query,String senderKeys,long beforeTime,long beforeId,String scope,int request){
+            messageSearchWorker.execute(()->{try{
+                if(!validSearchScope(radio,id,peer,channel))return;
+                if(query.length()>200)throw new IllegalArgumentException("Search is too long");
+                JSONArray chosen=new JSONArray(senderKeys);if(chosen.length()>1000)throw new IllegalArgumentException("Too many senders");
+                java.util.Set<String> keys=new java.util.HashSet<>();for(int i=0;i<chosen.length();i++)keys.add(chosen.getString(i));
+                ChatStore.SearchPage page=chatStore.searchMessages(radio,id,peer,channel,query,keys,beforeTime,beforeId);
+                JSONArray messages=new JSONArray();for(ChatStore.Message m:page.messages){ChatStore.SearchIdentity identity=ChatStore.searchIdentity(m.radio,m.own,m.sender,m.text);
+                    messages.put(new JSONObject()
+                        .put("id",m.id).put("sender",m.sender).put("text",m.text).put("time",displayTime(m.receivedAt))
+                        .put("receivedAt",m.receivedAt).put("own",m.own).put("delivery",m.delivery).put("peer",m.peer)
+                        .put("channel",m.channel).put("hops",m.hops).put("packetId",m.packetId).put("replyId",m.replyId)
+                        .put("displaySender",identity.sender).put("displayText",identity.body));}
+                long cursorTime=page.messages.isEmpty()?0:page.messages.get(page.messages.size()-1).receivedAt;
+                long cursorId=page.messages.isEmpty()?0:page.messages.get(page.messages.size()-1).id;
+                JSONObject result=new JSONObject().put("scope",scope).put("request",request).put("messages",messages)
+                        .put("more",page.more).put("beforeTime",cursorTime).put("beforeId",cursorId);
+                main.post(()->{if(pageReady&&!closing)web.evaluateJavascript("window.onMessageSearchPage("+result+")",null);});
+            }catch(Exception error){main.post(()->{if(pageReady&&!closing)web.evaluateJavascript("window.onMessageSearchError("+JSONObject.quote(scope)+","+request+","+JSONObject.quote(error.getMessage()==null?"Search failed":error.getMessage())+")",null);});}});
         }
         @JavascriptInterface public void removeKnown(String radio, String id) {
             main.post(() -> MainActivity.this.removeKnown(radio,id));
@@ -1391,6 +1619,11 @@ public final class MainActivity extends Activity {
         catch(IllegalArgumentException error) { s.updateStatus("Saved Bluetooth address is invalid"); }
     }
 
+    private boolean validSearchScope(String radio,String id,String peer,int channel){
+        return ("mc".equals(radio)||"mt".equals(radio))&&id!=null&&!id.isEmpty()&&id.length()<160
+                &&peer!=null&&peer.length()<160&&(peer.isEmpty()?channel>=0:channel==-1)
+                &&chatStore.getRadio(radio,id)!=null;
+    }
     private void viewSaved(String radio,String id) {
         if(chatStore.getRadio(radio,id)==null || !pageReady) return;
         int revision=++savedViewRevision;
@@ -1552,13 +1785,13 @@ public final class MainActivity extends Activity {
     }
     private void exportAppBackup() {
         Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                .setType("application/json")
-                .putExtra(Intent.EXTRA_TITLE,"SV8TTL-LoRa-Dash-full-backup.json");
+                .setType("application/zip")
+                .putExtra(Intent.EXTRA_TITLE,"SV8TTL-LoRa-Dash-full-backup.zip");
         startActivityForResult(intent,EXPORT_APP_JSON);
     }
     private void importAppBackup() {
         Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                .setType("application/json");
+                .setType("*/*");
         startActivityForResult(intent,IMPORT_APP_JSON);
     }
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
@@ -1579,7 +1812,28 @@ public final class MainActivity extends Activity {
             }
             pickingSound=null; return;
         }
+        if(requestCode==IMPORT_MAP_PACK&&(resultCode!=RESULT_OK||data==null||data.getData()==null)){
+            mapPackPickerOpen=false;clearPendingMapPack();mapPackImportStatus(resultCode==RESULT_CANCELED?"Map import cancelled.":"No readable map file was returned. Please choose the file again.",false);return;
+        }
         if(resultCode!=RESULT_OK || data==null || data.getData()==null) return;
+        if(requestCode==IMPORT_MAP_PACK){
+            mapPackPickerOpen=false;
+            final Uri uri=data.getData();final String kind=pendingMapPackKind,schema=pendingMapPackSchema,title=pendingMapPackTitle,sourceName=pendingMapPackSource,captureDate=pendingMapPackDate;clearPendingMapPack();
+            if(kind==null){mapPackImportStatus("Map selection expired. Please choose the file again.");return;}
+            mapPackImportActive=true;
+            mapPackImportStatus("Opening selected map file…",true);
+            mapImportWorker.execute(()->{try{
+                long total=mapPackSourceSize(uri);
+                try(InputStream raw=getContentResolver().openInputStream(uri)){
+                if(raw==null)throw new IOException("Cannot read map pack");
+                mapPackImportStatusOnMain("Copying map to phone…",true);
+                String label=title==null||title.trim().isEmpty()?"Offline "+(kind.equals("street")?"detailed map":"satellite view"):title;
+                JSONObject pack=mapPacks.add(mapPackProgressStream(raw,total),label,kind,schema,sourceName,captureDate);
+                main.post(()->{mapPackImportActive=false;mapPackInstalled(pack);});
+                }
+            }catch(Exception error){main.post(()->{mapPackImportActive=false;mapPackImportStatus("Map import failed: "+error.getMessage());});}});return;
+        }
+        if(requestCode==EXPORT_MAP_ITEM||requestCode==IMPORT_MAP_ITEM){transferMapItem(requestCode,data.getData());return;}
         if(requestCode==EXPORT_APP_JSON||requestCode==EXPORT_JSON||requestCode==IMPORT_APP_JSON||requestCode==IMPORT_JSON) {
             transferHistory(requestCode,data.getData());return;
         }
@@ -1610,14 +1864,15 @@ public final class MainActivity extends Activity {
         final boolean exporting=requestCode==EXPORT_APP_JSON||requestCode==EXPORT_JSON;
         final boolean full=requestCode==EXPORT_APP_JSON||requestCode==IMPORT_APP_JSON;
         JSONObject settings=new JSONObject();
-        try{for(Map.Entry<String,?> e:getPreferences(0).getAll().entrySet())settings.put(e.getKey(),e.getValue());}catch(JSONException error){nodeActionResult(error.getMessage());return;}
+        try{for(Map.Entry<String,?> e:getPreferences(0).getAll().entrySet())settings.put(e.getKey(),e.getValue());if(full&&!settings.has("preset_messages"))settings.put("preset_messages",new JSONArray().put(new JSONObject().put("title","Status Update").put("text","Status:\nLocation:\nNext update:")).toString());}catch(JSONException error){nodeActionResult(error.getMessage());return;}
         historyTransferRunning=true;
         nodeActionResult(exporting?"Exporting history…":"Validating and importing history…");
         historyWorker.execute(()->{
             try {
                 if(exporting) {
                     OutputStream stream=getContentResolver().openOutputStream(uri,"wt");if(stream==null)throw new IOException("Cannot open destination");
-                    HistoryBackup.export(new java.io.OutputStreamWriter(stream,StandardCharsets.UTF_8),chatStore,radio,id,full?settings:null);
+                    if(full)exportFullArchive(stream,settings);
+                    else HistoryBackup.export(new java.io.OutputStreamWriter(stream,StandardCharsets.UTF_8),chatStore,radio,id,null);
                     main.post(()->{if(!closing)nodeActionResult("Backup exported. Sound selections are included; sound files are not embedded.");});
                 }else {
                     // Copy once to private staging so both streaming passes see the same bytes.
@@ -1627,16 +1882,23 @@ public final class MainActivity extends Activity {
                             if(input==null)throw new IOException("Cannot open backup");byte[] buffer=new byte[8192];int count;
                             while((count=input.read(buffer))!=-1)out.write(buffer,0,count);
                         }
-                        HistoryBackup.ReaderSource source=()->new java.io.InputStreamReader(new java.io.FileInputStream(staged),StandardCharsets.UTF_8);
+                        java.util.zip.ZipFile archive=null;java.util.zip.ZipEntry historyEntry=null;
+                        try(java.io.FileInputStream sniff=new java.io.FileInputStream(staged)){byte[] magic=new byte[4];if(sniff.read(magic)==4&&magic[0]=='P'&&magic[1]=='K'&&full){archive=new java.util.zip.ZipFile(staged);historyEntry=archive.getEntry("history.json");if(historyEntry==null)throw new IOException("Full backup has no history.json");}}
+                        final java.util.zip.ZipFile backupArchive=archive;final java.util.zip.ZipEntry backupHistory=historyEntry;
+                        HistoryBackup.ReaderSource source=()->new java.io.InputStreamReader(backupArchive==null?new java.io.FileInputStream(staged):backupArchive.getInputStream(backupHistory),StandardCharsets.UTF_8);
+                        try{
                         HistoryBackup.Headers headers=HistoryBackup.read(source,full,null,null);
                         int[] added={0,0,0};android.database.sqlite.SQLiteDatabase db=chatStore.getWritableDatabase();db.beginTransaction();
                         try {
                             HistoryBackup.NodeMerger merge=node->{int[] counts=mergeNodeBackup(node);for(int i=0;i<3;i++)added[i]+=counts[i];};
                             for(JSONObject header:headers.nodes){validateNodeBackup(header);merge.merge(header);}
                             HistoryBackup.read(source,full,headers,merge);
+                            if(full&&headers.log!=null)for(int i=0;i<headers.log.length();i++)chatStore.putLogItem(headers.log.getJSONObject(i),true);
+                            if(full&&headers.map!=null)mapData.mergeBackup(headers.map);
                             if(full)chatStore.pendingSettings(headers.settings.toString());
                             db.setTransactionSuccessful();
                         }finally{db.endTransaction();}
+                        if(backupArchive!=null&&full)importMapPacksFromArchive(backupArchive);
                         main.post(()->{
                             if(closing)return;
                             try {
@@ -1645,11 +1907,61 @@ public final class MainActivity extends Activity {
                                 new AlertDialog.Builder(this).setTitle("Backup imported").setMessage("Added "+added[0]+" radios, "+added[1]+" channels and "+added[2]+" messages. Existing data was kept. Unavailable sound files must be selected again in Config.").setPositiveButton("OK",null).show();
                             }catch(Exception error){nodeActionResult("History imported; settings recovery is pending: "+error.getMessage());}
                         });
+                        }finally{if(backupArchive!=null)backupArchive.close();}
                     }finally{if(!staged.delete())debug("Import staging cleanup pending");}
                 }
             }catch(Exception error){main.post(()->{if(!closing)new AlertDialog.Builder(this).setTitle("File transfer failed").setMessage(error.getMessage()).setPositiveButton("OK",null).show();});}
             finally{main.post(()->historyTransferRunning=false);}
         });
+    }
+    private void exportFullArchive(OutputStream destination,JSONObject settings) throws Exception {
+        try(java.util.zip.ZipOutputStream zip=new java.util.zip.ZipOutputStream(destination)){
+            zip.setLevel(java.util.zip.Deflater.NO_COMPRESSION);
+            zip.putNextEntry(new java.util.zip.ZipEntry("history.json"));
+            OutputStream nonClosing=new java.io.FilterOutputStream(zip){@Override public void close()throws IOException{flush();}};
+            HistoryBackup.export(new java.io.OutputStreamWriter(nonClosing,StandardCharsets.UTF_8),chatStore,null,null,settings,mapData);
+            zip.closeEntry();
+            JSONArray packs=mapPacks.list();zip.putNextEntry(new java.util.zip.ZipEntry("packs.json"));zip.write(packs.toString().getBytes(StandardCharsets.UTF_8));zip.closeEntry();
+            byte[] buffer=new byte[65536];for(int i=0;i<packs.length();i++){
+                JSONObject p=packs.getJSONObject(i);String id=p.getString("id"),extension=p.optString("schema").equals("copernicus")?"satpack":"pmtiles";
+                java.io.File file=mapPacks.file(id,extension);if(file==null||!file.isFile())throw new IOException("Map pack is missing: "+p.optString("title",id));
+                zip.putNextEntry(new java.util.zip.ZipEntry("packs/"+id+"."+extension));try(InputStream input=new java.io.FileInputStream(file)){int n;while((n=input.read(buffer))!=-1)zip.write(buffer,0,n);}zip.closeEntry();
+            }
+        }
+    }
+    private void importMapPacksFromArchive(java.util.zip.ZipFile zip) throws Exception {
+        java.util.zip.ZipEntry index=zip.getEntry("packs.json");if(index==null)return;if(index.getSize()>1000000)throw new IOException("Invalid map pack list");
+        byte[] data;try(InputStream input=zip.getInputStream(index);java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream()){
+            byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(output.size()+n>1000000)throw new IOException("Map pack list too large");output.write(buffer,0,n);}data=output.toByteArray();
+        }
+        JSONArray packs=new JSONArray(new String(data,StandardCharsets.UTF_8));if(packs.length()>100)throw new IOException("Too many map packs");
+        for(int i=0;i<packs.length();i++){
+            JSONObject p=packs.getJSONObject(i);String id=p.getString("id");if(!id.matches("[0-9a-f-]{36}"))throw new IOException("Invalid map pack ID");
+            String extension=p.optString("schema").equals("copernicus")?"satpack":"pmtiles";
+            java.util.zip.ZipEntry entry=zip.getEntry("packs/"+id+"."+extension);if(entry==null)throw new IOException("Map pack file missing");
+            if(!mapPacks.hasBackupOrigin(id))try(InputStream input=zip.getInputStream(entry)){mapPacks.addBackup(input,p);}
+        }
+    }
+    private void transferMapItem(int requestCode,Uri uri){
+        try{
+            if(requestCode==EXPORT_MAP_ITEM){
+                JSONObject item=null;JSONArray items=mapData.items();for(int i=0;i<items.length();i++)if(pendingMapExportId.equals(items.getJSONObject(i).getString("id"))){item=items.getJSONObject(i);break;}
+                if(item==null)throw new IOException("Map item no longer exists");
+                JSONObject properties=new JSONObject().put("id",item.getString("id")).put("kind",item.getString("kind")).put("title",item.getString("title")).put("description",item.optString("description","")).put("enabled",false);
+                JSONObject feature=new JSONObject().put("type","Feature").put("properties",properties).put("geometry",item.getJSONObject("geometry"));
+                try(OutputStream output=getContentResolver().openOutputStream(uri,"wt")){if(output==null)throw new IOException("Cannot open destination");output.write(feature.toString(2).getBytes(StandardCharsets.UTF_8));}
+                nodeActionResult("Map item exported. Share the file by Bluetooth, USB or storage card.");
+            }else{
+                byte[] bytes;try(InputStream input=getContentResolver().openInputStream(uri);java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream()){
+                    if(input==null)throw new IOException("Cannot open map item");byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(output.size()+n>120000)throw new IOException("Map item exceeds 120 KB");output.write(buffer,0,n);}bytes=output.toByteArray();
+                }
+                JSONObject feature=new JSONObject(new String(bytes,StandardCharsets.UTF_8));if(!"Feature".equals(feature.optString("type")))throw new IOException("Choose a GeoJSON map item");
+                JSONObject p=feature.getJSONObject("properties");String kind=p.optString("kind");
+                JSONObject item=new JSONObject().put("id",java.util.UUID.randomUUID().toString()).put("kind",kind).put("title",p.optString("title","Shared map item"))
+                        .put("description",p.optString("description","")).put("geometry",feature.getJSONObject("geometry")).put("enabled",!kind.equals("geofence"));
+                mapData.put(item,false);sendMapData();nodeActionResult(kind.equals("geofence")?"Geofence imported off. Review its area, then enable alerts.":"Map item imported from file.");
+            }
+        }catch(Exception error){nodeActionResult("Map item transfer failed: "+error.getMessage());}
     }
     private void validateNodeBackup(JSONObject json) throws JSONException {
         if(json.optInt("version")<1||json.optInt("version")>2) throw new JSONException("Unsupported node backup version");
@@ -1712,7 +2024,105 @@ public final class MainActivity extends Activity {
         for(RadioSession session:sessions.values()) if(!session.ownId.isEmpty())
             loadSessionHistory(session);
         publish();
+        sendLogItems();
+        sendMapData();
         if(pageReady) web.evaluateJavascript("window.onAppBackupImported()",null);
+    }
+    private void sendLogItems() {
+        if(!pageReady||closing||web==null)return;
+        try {web.evaluateJavascript("window.onLogItems("+chatStore.logItems().toString()+")",null);}
+        catch(Exception error){nodeActionResult("Could not load Log items: "+error.getMessage());}
+    }
+    private void sendMapData(){
+        if(!pageReady||closing||web==null)return;
+        try{JSONObject data=mapData.snapshot().put("displayStyle",getPreferences(0).getString("map_display_style","full")).put("packs",mapPacks.list()).put("selectedPackId",getPreferences(0).getString("active_map_pack_id",""));
+            JSONArray nodes=data.getJSONArray("nodes");for(int i=0;i<nodes.length();i++){JSONObject node=nodes.getJSONObject(i);node.put("receivingRf",getPreferences(0).getString("radio_rf:"+node.getString("radio")+":"+node.getString("device"),""));}
+            web.evaluateJavascript("window.onMapData("+data+")",null);}
+        catch(Exception error){nodeActionResult("Could not load Map: "+error.getMessage());}
+    }
+    private void mapPackImportStatus(String message){mapPackImportStatus(message,false);}
+    private void mapPackImportStatus(String message,boolean busy){
+        mapPackImportStatus(message,busy,-1);
+    }
+    private void mapPackImportStatus(String message,boolean busy,int percent){
+        mapPackStatus=message;mapPackStatusBusy=busy;mapPackStatusPercent=percent;
+        if(pageReady&&!closing&&web!=null)web.evaluateJavascript("window.onMapPackImportStatus("+JSONObject.quote(message)+","+busy+","+percent+")",null);
+    }
+    private void clearPendingMapPack(){pendingMapPackKind=null;pendingMapPackSchema=null;pendingMapPackTitle=null;pendingMapPackSource=null;pendingMapPackDate=null;}
+    private void mapPackImportStatusOnMain(String message,boolean busy){main.post(()->mapPackImportStatus(message,busy));}
+    private long mapPackSourceSize(Uri uri){
+        try(Cursor cursor=getContentResolver().query(uri,new String[]{OpenableColumns.SIZE},null,null,null)){
+            if(cursor!=null&&cursor.moveToFirst()&&!cursor.isNull(0))return cursor.getLong(0);
+        }catch(Exception ignored){}
+        return -1;
+    }
+    private InputStream mapPackProgressStream(InputStream source,long total){
+        return new FilterInputStream(source){long copied=0,nextReport=1024*1024;
+            private void report(int amount){
+                copied+=amount;if(copied<nextReport)return;nextReport=copied+1024*1024;
+                double done=copied/1048576.0;
+                String message=total>0?String.format(java.util.Locale.ROOT,"Copying map: %.1f of %.1f MB (%d%%)",done,total/1048576.0,Math.min(100,copied*100/total)):
+                        String.format(java.util.Locale.ROOT,"Copying map: %.1f MB",done);
+                int percent=total>0?(int)Math.min(100,copied*100/total):-1;
+                main.post(()->mapPackImportStatus(message,true,percent));
+            }
+            @Override public int read()throws IOException{int value=super.read();if(value>=0)report(1);return value;}
+            @Override public int read(byte[] bytes,int offset,int length)throws IOException{int n=super.read(bytes,offset,length);if(n>0)report(n);else if(n<0)mapPackImportStatusOnMain("Checking and installing map…",true);return n;}
+        };
+    }
+    private void mapPackInstalled(JSONObject pack){
+        mapPackImportStatus("",false);
+        getPreferences(0).edit().putString("active_map_pack_id",pack.optString("id")).apply();
+        sendMapData();
+        if(pageReady&&!closing&&web!=null)web.evaluateJavascript("window.onMapPackInstalled("+pack+")",null);
+    }
+    private volatile boolean satelliteDownloadRunning,satelliteDownloadCancelled;
+    private void openMapHelp(String url){
+        try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}
+        catch(ActivityNotFoundException error){nodeActionResult("No browser is available to open Copernicus");}
+    }
+    private void sendSatelliteAccount(){
+        if(!pageReady||closing||web==null)return;
+        SatelliteCredentials.Account saved=satelliteCredentials.load();String id=saved==null?"":saved.id;
+        String label=id.isEmpty()?"":id.length()<=8?id:"…"+id.substring(id.length()-8);
+        boolean signedIn=saved!=null&&!satelliteCredentials.loggedOff();
+        web.evaluateJavascript("window.onSatelliteAccount("+(saved!=null)+","+signedIn+","+JSONObject.quote(label)+")",null);
+    }
+    private long lastMapSense;
+    private void showMapGeofenceAlerts(String radio,String device,String id,String name,double latitude,double longitude){
+        try{JSONArray alerts=mapData.geofenceChanges(radio,device,id,latitude,longitude);
+            for(int i=0;i<alerts.length();i++){JSONObject alert=alerts.getJSONObject(i);String message=name+(alert.getBoolean("inside")?" entered ":" left ")+alert.getString("title");
+                if(pageReady&&visible)web.evaluateJavascript("window.onMapAlert("+JSONObject.quote(message)+")",null);
+                MessageNotifications.show(this,"Map geofence",message);
+            }
+        }catch(JSONException error){debug("Map geofence alert failed");}
+    }
+    private void requestMapSense(String key,int channel){
+        RadioSession s=session(key);
+        if(s==null||s.meshcore||!s.connected||s.loading||s.protocol==null||!s.channelNames.containsKey(channel)){
+            nodeActionResult("Choose a connected Meshtastic device and one of its reported channels");return;
+        }
+        long now=System.currentTimeMillis();if(now-lastMapSense<180000){nodeActionResult("Wait three minutes between mesh-wide position requests");return;}
+        new AlertDialog.Builder(this).setTitle("Ask the mesh for positions?")
+                .setMessage("This sends one radio request to the selected Meshtastic channel. Replies depend on the nodes and radio coverage. It uses shared airtime.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Send request",(dialog,which)->{
+                    try{s.sendTracked(s.protocol.nodeCommand("pos","!ffffffff","",channel));lastMapSense=System.currentTimeMillis();nodeActionResult("Position request sent. Watch Map as replies arrive.");}
+                    catch(Exception error){nodeActionResult("Could not request positions: "+error.getMessage());}
+                }).show();
+    }
+    private void sendMapMark(String id,String key,int channel){
+        RadioSession s=session(key);if(s==null||s.meshcore||!s.connected||s.loading||!(s.protocol instanceof MeshtasticProtocol)||!s.channelNames.containsKey(channel)){
+            nodeActionResult("Choose a connected Meshtastic device and one of its reported channels");return;
+        }
+        try{
+            JSONObject mark=null;JSONArray items=mapData.items();for(int i=0;i<items.length();i++)if(id.equals(items.getJSONObject(i).getString("id"))){mark=items.getJSONObject(i);break;}
+            if(mark==null||!"mark".equals(mark.optString("kind")))throw new IllegalArgumentException("Select a saved mark");
+            JSONArray coords=mark.getJSONObject("geometry").getJSONArray("coordinates");double lon=coords.getDouble(0),lat=coords.getDouble(1);
+            String name=mark.getString("title"),description=mark.optString("description","");
+            if(!MapData.valid(lat,lon))throw new IllegalArgumentException("Mark needs valid coordinates");
+            byte[] packet=((MeshtasticProtocol)s.protocol).waypointCommand(id,name,description,lat,lon,channel);
+            s.sendTracked(packet);nodeActionResult("Mark sent to the Meshtastic radio. Mesh delivery is not guaranteed.");
+        }catch(Exception error){nodeActionResult("Could not send mark: "+error.getMessage());}
     }
     private int mergeSettings(JSONObject settings) throws JSONException {
         SharedPreferences preferences=getPreferences(0);
@@ -1805,7 +2215,7 @@ public final class MainActivity extends Activity {
             data.put("requestTimeouts",new JSONObject().put("signal",requestTimeoutSeconds("signal")).put("ping",requestTimeoutSeconds("ping")).put("trace",requestTimeoutSeconds("trace")));
             data.put("channelObservationSeconds",channelObservationSeconds());
             data.put("messageSplitEnabled",messageSplitEnabled()).put("messageSplitIntervalSeconds",splitIntervalMs()/1000);
-            try {data.put("presetMessages",new JSONArray(getPreferences(0).getString("preset_messages","[]")));}
+            try {data.put("presetMessages",new JSONArray(getPreferences(0).getString("preset_messages",new JSONArray().put(new JSONObject().put("title","Status Update").put("text","Status:\nLocation:\nNext update:")).toString())));}
             catch(JSONException ignored){data.put("presetMessages",new JSONArray());}
             data.put("connectingAvailable",connectingAvailable);
             data.put("settlingSeconds",getPreferences(0).getInt("send_settling_seconds",3));
@@ -1846,6 +2256,7 @@ public final class MainActivity extends Activity {
             for(RadioSession s:sessions.values()) if(s.connected)
                 active.put(new JSONObject().put("key",s.key).put("radio",s.meshcore?"mc":"mt")
                         .put("id",s.ownId).put("name",s.ownName.isEmpty()?s.name:s.ownName)
+                        .put("rfLabel",sessionRfLabel(s))
                         .put("unread",hasUnread(s)).put("dmUnread",hasUnreadDm(s))
                         .put("channelUnread",hasUnreadChannel(s)));
             data.put("devices",active).put("selectedMc",selectedMc.key).put("selectedMt",selectedMt.key);
@@ -1867,6 +2278,7 @@ public final class MainActivity extends Activity {
 
     private JSONObject sessionJson(RadioSession session) throws JSONException {
         JSONObject obj = new JSONObject().put("radio",session.meshcore?"mc":"mt").put("name", session.name).put("state", session.state)
+                .put("rfLabel",sessionRfLabel(session))
                 .put("historyRevision",session.historyRevision)
                 .put("connected", session.connected).put("scanning", session.scanning)
                 .put("scanProgress", session.scanProgress).put("ownId",session.ownId)
@@ -1927,6 +2339,7 @@ public final class MainActivity extends Activity {
         }
         return obj.put("chats", conversations);
     }
+    private String sessionRfLabel(RadioSession session){return session.rfLabel.isEmpty()&&!session.ownId.isEmpty()?getPreferences(0).getString("radio_rf:"+(session.meshcore?"mc":"mt")+":"+session.ownId,""):session.rfLabel;}
     private boolean hasUnreadDm(RadioSession session) {
         return !session.ownId.isEmpty()&&chatStore.hasUnread(session.meshcore?"mc":"mt",session.ownId,true);
     }
@@ -1990,6 +2403,10 @@ public final class MainActivity extends Activity {
     private void nodeAction(RadioSession session, String id, String action, String text) {
         if (session == null || id == null || action == null) return;
         debug(session.key+" node action="+action+" target="+id);
+        if("map".equals(action)){
+            if(pageReady)web.evaluateJavascript("window.openMapNode("+JSONObject.quote(session.meshcore?"mc":"mt")+","+JSONObject.quote(id)+","+JSONObject.quote(session.ownId)+")",null);
+            return;
+        }
         if("signal".equals(action)) {
             if(session.meshcore||!session.connected||session.loading||session.ownId.isEmpty()||!session.knownNodes.containsKey(id)) {session.signalNotice(id,"Error: connect the MT radio and reload this contact first.",false);return;}
             if(session.pendingSignal!=0){
@@ -2007,14 +2424,6 @@ public final class MainActivity extends Activity {
                 boolean next = !getPreferences(0).getBoolean(key, false);
                 getPreferences(0).edit().putBoolean(key, next).apply();
                 publish(); nodeActionResult(next ? "Added to favorites" : "Removed from favorites"); return;
-            }
-            if ("map".equals(action)) {
-                if (!Double.isFinite(entry.latitude) || !Double.isFinite(entry.longitude)) {
-                    nodeActionResult("No position reported by this contact"); return;
-                }
-                Uri uri = Uri.parse("geo:" + entry.latitude + "," + entry.longitude + "?q=" +
-                        entry.latitude + "," + entry.longitude + "(" + Uri.encode(entry.name) + ")");
-                startActivity(new Intent(Intent.ACTION_VIEW, uri)); return;
             }
             if ("share".equals(action)) {
                 String details = session.name + " · " + entry.name + " · " + entry.id + " · " + entry.role;
@@ -2245,6 +2654,7 @@ public final class MainActivity extends Activity {
         create.setOnClickListener(v->{dialog.dismiss();new MultiSendComposer(true,null,null).show();});dialog.show();
     }
     private final class MultiSendComposer {
+        final int panelColor=0xff161b22,fieldColor=0xff21262d,textColor=0xffc9d1d9,mutedColor=0xff8b949e,accentColor=0xffe8b04f,borderColor=0xff30363d;
         final boolean editingSet;final String setKey;final JSONObject initialSet;EditText setName;
         MultiSendComposer(){this(false,null,null);}
         MultiSendComposer(boolean editingSet,String setKey,JSONObject initialSet){this.editingSet=editingSet;this.setKey=setKey;this.initialSet=initialSet;}
@@ -2253,6 +2663,26 @@ public final class MainActivity extends Activity {
         final Map<String,Map<String,JSONObject>> choices=new LinkedHashMap<>();
         Spinner radioPicker;EditText search,message;LinearLayout list;TextView summary,error;
         android.widget.CheckBox parallel;Button channelButton,dmButton;boolean direct;
+        GradientDrawable fieldBackground(){GradientDrawable shape=rounded(fieldColor);shape.setCornerRadius(dp(6));shape.setStroke(dp(1),borderColor);return shape;}
+        void styleField(EditText input){input.setTextColor(textColor);input.setHintTextColor(mutedColor);input.setBackground(fieldBackground());input.setPadding(dp(10),dp(8),dp(10),dp(8));}
+        void styleButton(Button button){button.setAllCaps(false);button.setTextColor(accentColor);button.setBackground(fieldBackground());button.setMinHeight(dp(40));}
+        TextView heading(String title){TextView view=label(title,14,accentColor,true);view.setPadding(0,dp(10),0,dp(5));return view;}
+        void chooseTemplate(){
+            try{
+                String initial=new JSONArray().put(new JSONObject().put("title","Status Update").put("text","Status:\nLocation:\nNext update:")).toString();
+                JSONArray saved=new JSONArray(getPreferences(0).getString("preset_messages",initial));
+                if(saved.length()==0){error.setText("No message templates saved. Add one in Config → Message Templates.");return;}
+                String[] names=new String[saved.length()];
+                for(int i=0;i<saved.length();i++){JSONObject item=saved.optJSONObject(i);names[i]=item==null?"Message "+(i+1):item.optString("title","Message "+(i+1));}
+                new AlertDialog.Builder(MainActivity.this).setTitle("Message Templates").setItems(names,(dialog,index)->{
+                    JSONObject item=saved.optJSONObject(index);String template=item==null?saved.optString(index):item.optString("text");
+                    int start=Math.max(0,message.getSelectionStart()),end=Math.max(start,message.getSelectionEnd());
+                    String before=message.getText().subSequence(0,start).toString(),after=message.getText().subSequence(end,message.length()).toString();
+                    String insert=(before.isEmpty()||Character.isWhitespace(before.charAt(before.length()-1))?"":" ")+template+(after.isEmpty()||Character.isWhitespace(after.charAt(0))?"":" ");
+                    message.getText().replace(start,end,insert);message.setSelection(start+insert.length());error.setText("");
+                }).setNegativeButton("Cancel",null).show();
+            }catch(JSONException failure){error.setText("Could not read message templates.");}
+        }
         RadioSession current(){int i=radioPicker.getSelectedItemPosition();return i>=0&&i<radios.size()?radios.get(i):null;}
         void show() {
             try {
@@ -2266,11 +2696,11 @@ public final class MainActivity extends Activity {
                         targets.put("dm:"+n.id,chainTarget(s,n.id,-1,n.name).put("display",n.name+" · "+n.id));
                 }
                 if(radios.isEmpty()){nodeActionResult("Connect a radio and wait for it to finish loading");return;}
-                LinearLayout layout=vertical();layout.setPadding(dp(16),dp(8),dp(16),dp(8));
-                setName=new EditText(MainActivity.this);setName.setSingleLine(true);setName.setHint("Destination set name");
+                LinearLayout layout=vertical();layout.setBackgroundColor(panelColor);layout.setPadding(dp(16),dp(8),dp(16),dp(8));
+                setName=new EditText(MainActivity.this);setName.setSingleLine(true);setName.setHint("Destination set name");styleField(setName);
                 if(editingSet)layout.addView(setName);
                 else {
-                    Button savedSets=new Button(MainActivity.this);savedSets.setText("Add saved destination set");layout.addView(savedSets);
+                    Button savedSets=new Button(MainActivity.this);savedSets.setText("Add saved destination set");styleButton(savedSets);layout.addView(savedSets);
                     savedSets.setOnClickListener(v->{
                         List<JSONObject> sets=new ArrayList<>(destinationSets().values());List<String> labels=new ArrayList<>();for(JSONObject set:sets)labels.add(set.optString("name"));
                         if(sets.isEmpty()){error.setText("Create a destination set in Config → Sending options first.");return;}
@@ -2279,27 +2709,33 @@ public final class MainActivity extends Activity {
                         }).setNegativeButton("Cancel",null).show();
                     });
                 }
-                layout.addView(label("Select Radio",16,DARK,true));
+                layout.addView(heading("Select radio"));
                 radioPicker=new Spinner(MainActivity.this,Spinner.MODE_DROPDOWN);
-                ArrayAdapter<String> adapter=new ArrayAdapter<>(MainActivity.this,android.R.layout.simple_spinner_item,names);adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);radioPicker.setAdapter(adapter);layout.addView(radioPicker);
-                layout.addView(label("Select Channel / DM",16,DARK,true));
-                LinearLayout types=horizontal();channelButton=new Button(MainActivity.this);channelButton.setText("Channel");dmButton=new Button(MainActivity.this);dmButton.setText("DM · Select Nodes");types.addView(channelButton,new LinearLayout.LayoutParams(0,-2,1));types.addView(dmButton,new LinearLayout.LayoutParams(0,-2,1));layout.addView(types);
-                search=new EditText(MainActivity.this);search.setSingleLine(true);search.setHint("Search nodes by name or ID");layout.addView(search);
+                ArrayAdapter<String> adapter=new ArrayAdapter<String>(MainActivity.this,android.R.layout.simple_spinner_item,names){
+                    @Override public View getView(int position,View convertView,android.view.ViewGroup parent){TextView item=(TextView)super.getView(position,convertView,parent);item.setTextColor(textColor);item.setPadding(dp(10),dp(8),dp(10),dp(8));return item;}
+                    @Override public View getDropDownView(int position,View convertView,android.view.ViewGroup parent){TextView item=(TextView)super.getDropDownView(position,convertView,parent);item.setTextColor(textColor);item.setBackgroundColor(fieldColor);item.setPadding(dp(10),dp(12),dp(10),dp(12));return item;}
+                };radioPicker.setAdapter(adapter);radioPicker.setBackground(fieldBackground());layout.addView(radioPicker);
+                layout.addView(heading("Select channel or DM"));
+                LinearLayout types=horizontal();channelButton=new Button(MainActivity.this);channelButton.setText("Channel");dmButton=new Button(MainActivity.this);dmButton.setText("DM · Select Nodes");styleButton(channelButton);styleButton(dmButton);types.addView(channelButton,new LinearLayout.LayoutParams(0,-2,1));types.addView(dmButton,new LinearLayout.LayoutParams(0,-2,1));layout.addView(types);
+                search=new EditText(MainActivity.this);search.setSingleLine(true);search.setHint("Search nodes by name or ID");styleField(search);layout.addView(search);
                 list=vertical();ScrollView options=new ScrollView(MainActivity.this);options.addView(list);layout.addView(options,new LinearLayout.LayoutParams(-1,dp(200)));
-                Button save=new Button(MainActivity.this);save.setText("Save Destinations");layout.addView(save);
-                summary=new TextView(MainActivity.this);layout.addView(summary);
-                message=new EditText(MainActivity.this);message.setHint("Message for this chain");message.setMinLines(2);layout.addView(message);
-                parallel=new android.widget.CheckBox(MainActivity.this);parallel.setText("Send through different radios simultaneously");layout.addView(parallel);
-                if(editingSet){message.setVisibility(View.GONE);parallel.setVisibility(View.GONE);}
-                layout.addView(label("Save channels and DMs for each radio, then select another radio. Saved sets can be combined with manual selections.",14,Color.GRAY,false));
-                error=new TextView(MainActivity.this);error.setTextColor(0xffb3261e);layout.addView(error);
+                Button save=new Button(MainActivity.this);save.setText("Save destinations");styleButton(save);layout.addView(save);
+                summary=label("",12,mutedColor,false);summary.setPadding(0,dp(8),0,dp(8));layout.addView(summary);
+                LinearLayout messageHeading=horizontal();messageHeading.addView(heading("Message"),new LinearLayout.LayoutParams(0,-2,1));
+                Button templates=new Button(MainActivity.this);templates.setText("Templates");styleButton(templates);messageHeading.addView(templates);layout.addView(messageHeading);
+                message=new EditText(MainActivity.this);message.setHint("Message for this chain");message.setMinLines(2);styleField(message);layout.addView(message);
+                templates.setOnClickListener(v->chooseTemplate());
+                parallel=new android.widget.CheckBox(MainActivity.this);parallel.setText("Send through different radios simultaneously");parallel.setTextColor(textColor);parallel.setButtonTintList(android.content.res.ColorStateList.valueOf(accentColor));layout.addView(parallel);
+                if(editingSet){messageHeading.setVisibility(View.GONE);message.setVisibility(View.GONE);parallel.setVisibility(View.GONE);}
+                layout.addView(label("Save channels and DMs for each radio, then select another radio. Saved sets can be combined with manual selections.",12,mutedColor,false));
+                error=new TextView(MainActivity.this);error.setTextColor(0xffff8b80);layout.addView(error);
                 ScrollView scroll=new ScrollView(MainActivity.this);scroll.setFillViewport(true);scroll.addView(layout);
                 AlertDialog dialog=new AlertDialog.Builder(MainActivity.this).setTitle(editingSet?"Destination set":"Send to multiple").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton(editingSet?"Save set":"Send Chain",null).create();
                 channelButton.setOnClickListener(v->{direct=false;render();});dmButton.setOnClickListener(v->{direct=true;render();});
                 radioPicker.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int position,long id){search.setText("");render();}});
                 search.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){render();}public void afterTextChanged(android.text.Editable e){}});
                 save.setOnClickListener(v->{RadioSession s=current();if(s!=null){selection.save(s.key);error.setText("");updateSummary();}});
-                dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{if(editingSet)saveSet(dialog);else send(dialog);}));
+                dialog.setOnShowListener(d->{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(accentColor);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(accentColor);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{if(editingSet)saveSet(dialog);else send(dialog);});});
                 if(initialSet!=null){setName.setText(initialSet.optString("name"));loadSet(initialSet);}
                 render();updateSummary();dialog.show();
                 dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -2340,10 +2776,10 @@ public final class MainActivity extends Activity {
             for(Map.Entry<String,JSONObject> option:choices.get(s.key).entrySet()) {
                 String id=option.getKey(),name=option.getValue().optString("display");
                 if(id.startsWith("dm:")!=direct||(direct&&!name.toLowerCase(java.util.Locale.ROOT).contains(query)))continue;
-                android.widget.CheckBox check=new android.widget.CheckBox(MainActivity.this);check.setText(name);check.setChecked(selection.selected(s.key,id));
+                android.widget.CheckBox check=new android.widget.CheckBox(MainActivity.this);check.setText(name);check.setTextColor(textColor);check.setButtonTintList(android.content.res.ColorStateList.valueOf(accentColor));check.setChecked(selection.selected(s.key,id));
                 check.setOnCheckedChangeListener((button,checked)->{selection.select(s.key,id,checked);updateSummary();});list.addView(check);count++;
             }
-            if(count==0)list.addView(label(direct?"No matching nodes on this radio":"No channels reported by this radio",14,Color.GRAY,false));
+            if(count==0)list.addView(label(direct?"No matching nodes on this radio":"No channels reported by this radio",14,mutedColor,false));
         }
         void updateSummary() {
             StringBuilder text=new StringBuilder();int total=0;
@@ -3245,7 +3681,7 @@ public final class MainActivity extends Activity {
         unregisterReceiver(bluetoothStateReceiver);
         pageReady = false;
         if (web != null) { web.removeJavascriptInterface("AndroidBridge"); web.destroy(); web = null; }
-        historyWorker.execute(()->chatStore.close());historyWorker.shutdown();
+        historyWorker.execute(()->chatStore.close());historyWorker.shutdown();mapImportWorker.shutdown();messageSearchWorker.shutdown();
         updateWorker.shutdown();
         super.onDestroy();
     }

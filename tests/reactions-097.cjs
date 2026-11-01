@@ -30,6 +30,15 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  await page.evaluate(()=>{pendingCompose=null;f.mt.connected=false;onRadioState(f);showMessageMenu('mt',f.mt.chats[2][0],{peer:'!abcdef12'});});await page.getByRole('button',{name:'Emoji',exact:true}).click();assert.equal(await page.locator('.reaction-choices button:disabled').count(),9);
  await page.evaluate(()=>{showMessageMenu('mc',{id:5,packetId:5,text:'MC',sender:'MeshCore'},{channel:2});});assert.equal(await page.locator('.reaction-choices').count(),0);
  await page.evaluate(()=>{showMessageMenu('mt',{id:5,text:'Old',sender:'!abcdef12'},{channel:2});});await page.getByRole('button',{name:'Emoji',exact:true}).click();assert.match(await page.locator('#dm-context').innerText(),/original packet reference was not saved/);
+ await page.evaluate(()=>{f.mt.connected=true;f.mt.chats[2].push(
+  {id:4,packetId:126,replyId:123,reaction:true,text:'❤️',sender:'!33445566',time:'12:03'},
+  {id:5,packetId:127,text:'My message',sender:'You',own:true,time:'12:04'},
+  {id:6,packetId:128,replyId:127,reaction:true,text:'👍',sender:'!abcdef12',time:'12:05'}
+ );onRadioState(f);selectChannel('mt',2);});
+ assert.equal(await page.locator('#chat-messages .reaction-chip').first().innerText(),'❤️ 2');
+ assert.equal(await page.locator('#chat-messages .android-msg.own .reaction-chip').innerText(),'👍');
+ await page.evaluate(()=>{f.mt.directs['!abcdef12']=f.mt.chats[2];onRadioState(f);selectDmPeer('mt','!abcdef12');});
+ assert.equal(await page.locator('#dm-chat-history .android-msg.own .reaction-chip').innerText(),'👍');
  await page.evaluate(()=>{el('dm-context').hidden=true;switchTab('chat');selectChannel('mt',2);});await page.screenshot({path:'build/reactions-097.png'});
  assert.deepEqual(errors,[]);console.log('Reactions and Send-return UI checks passed');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

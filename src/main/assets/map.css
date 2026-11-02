@@ -63,3 +63,7 @@
 .map-style-choices strong,.map-style-choices small{display:block}
 .map-style-choices strong{color:var(--accent)}
 .map-style-choices small,.map-style-choices p{color:var(--muted);line-height:1.5}
+
+#map-tool-panel .mark-input{position:relative}
+#map-tool-panel .mark-input input{padding-right:48px;min-height:42px;box-sizing:border-box}
+#tab-map #map-tool-panel .mark-input button{position:absolute;right:1px;bottom:1px;width:42px;height:40px;margin:0;border:0;background:transparent;font-size:19px}

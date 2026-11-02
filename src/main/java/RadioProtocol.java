@@ -25,6 +25,7 @@ interface RadioProtocol {
         default void directPacket(String id,String text,long time,int hops,long packetId,long replyId) {directMessage(id,text,time,hops);}
         default void reaction(int channel,String sender,String peer,String text,long time,long packetId,long replyId) {}
         default void lastHeard(String id,long seconds) {}
+        default void lastHeard(String id,long seconds,boolean viaRadio) {lastHeard(id,seconds);}
         default void radioSettings(String label) {}
         default void channelMessage(int channel,String sender,String text,long receivedAt,int hops,long packetId,long replyId) { message(channel,sender,text,receivedAt,hops); }
         default void advertResult(String text,boolean success) { actionResult(text); }
@@ -80,16 +81,22 @@ final class MeshtasticProtocol implements RadioProtocol {
     }
 
     @Override public byte[] sendChannel(int channel, String text) {return sendChannelReply(channel,text,0);}
-    byte[] waypointCommand(String markId,String name,String description,double lat,double lon,int channel){
+    byte[] waypointCommand(String markId,String name,String description,double lat,double lon,int channel,String peer){
         if(!MapData.valid(lat,lon)||channel<0||channel>7)throw new IllegalArgumentException("Invalid mark position or channel");
         if(name.length()>30||description.length()>100)throw new IllegalArgumentException("Mark name must be at most 30 characters and description at most 100");
+        long destination=0xffffffffL;
+        if(peer!=null&&!peer.isEmpty()){
+            if(!peer.matches("![0-9a-fA-F]{8}"))throw new IllegalArgumentException("Invalid waypoint recipient");
+            destination=Long.parseUnsignedLong(peer.substring(1),16);
+            if(destination==0||destination==0xffffffffL)throw new IllegalArgumentException("Choose an individual node");
+        }
         long waypointId=markId.hashCode()&0xffffffffL;if(waypointId==0)waypointId=1;
         byte[] waypoint=new ProtoWire.Writer().varint(1,waypointId)
                 .fixed32(2,(int)Math.round(lat*1e7)).fixed32(3,(int)Math.round(lon*1e7))
                 .bytes(6,name.getBytes(StandardCharsets.UTF_8)).bytes(7,description.getBytes(StandardCharsets.UTF_8)).build();
         byte[] data=new ProtoWire.Writer().varint(1,8).bytes(2,waypoint).build();
         long packetId=newId();
-        byte[] packet=new ProtoWire.Writer().fixed32(2,0xffffffffL).varint(3,channel).bytes(4,data)
+        byte[] packet=new ProtoWire.Writer().fixed32(2,destination).varint(3,channel).bytes(4,data)
                 .fixed32(6,packetId).varint(9,3).varint(10,1).build();
         return new ProtoWire.Writer().bytes(1,packet).build();
     }
@@ -194,7 +201,7 @@ final class MeshtasticProtocol implements RadioProtocol {
 
     private void readNode(byte[] bytes, Events events) {
         ProtoWire.Reader r = new ProtoWire.Reader(bytes); long num = 0, lastHeard=0; String name = ""; String role = "";
-        String model = "", shortName = ""; int channel = 0, hops = -1; double lat = Double.NaN, lon = Double.NaN;
+        String model = "", shortName = ""; int channel = 0, hops = -1; Position position=new Position();
         while (r.next()) {
             if (r.field == 1) num = r.number();
             else if (r.field == 2) {
@@ -208,7 +215,7 @@ final class MeshtasticProtocol implements RadioProtocol {
                     else user.skip();
                 }
             } else if (r.field == 3) {
-                double[] position = readPosition(r.bytes()); lat = position[0]; lon = position[1];
+                position=readPosition(r.bytes());
             } else if (r.field == 5) lastHeard=r.number()&0xffffffffL;
             else if (r.field == 7) channel = (int)r.number();
             else if (r.field == 9) hops = (int)r.number();
@@ -216,22 +223,28 @@ final class MeshtasticProtocol implements RadioProtocol {
         }
         String id = "!" + String.format("%08x", num);
         name = reportedName(id, name, shortName);
+        double lat=position.lat,lon=position.lon;
         events.node(id, name, role, model, channel, hops, lat, lon);
-        events.lastHeard(id,lastHeard);
+        events.lastHeard(id,lastHeard,false);
         if (num == myNode && !name.isEmpty()) events.ownNode(id, name);
-        if (num == myNode && Double.isFinite(lat) && Double.isFinite(lon)) events.ownPosition(lat, lon);
+        if (num == myNode && Double.isFinite(lat) && Double.isFinite(lon)) {
+            events.ownPosition(lat, lon);
+        }
     }
 
-    private double[] readPosition(byte[] bytes) {
-        double lat = Double.NaN, lon = Double.NaN;
+    private static final class Position {
+        double lat=Double.NaN,lon=Double.NaN;
+    }
+    private Position readPosition(byte[] bytes) {
+        Position position=new Position();
         ProtoWire.Reader r = new ProtoWire.Reader(bytes);
         while (r.next()) {
-            if (r.field == 1) lat = (int)r.number() / 1e7;
-            else if (r.field == 2) lon = (int)r.number() / 1e7;
+            if (r.field == 1) position.lat = (int)r.number() / 1e7;
+            else if (r.field == 2) position.lon = (int)r.number() / 1e7;
             else r.skip();
         }
-        if (lat == 0 && lon == 0) return new double[]{Double.NaN, Double.NaN};
-        return new double[]{lat, lon};
+        if (position.lat==0 && position.lon==0)position.lat=position.lon=Double.NaN;
+        return position;
     }
 
     private String hardwareModel(int model) {
@@ -441,7 +454,7 @@ final class MeshtasticProtocol implements RadioProtocol {
             else data.skip();
         }
         String sender = "!" + String.format("%08x", from);
-        if(from!=myNode) events.lastHeard(sender,receivedAt);
+        if(from!=myNode) events.lastHeard(sender,receivedAt,!mqtt);
         int hops=hopStart>=0 && hopLimit>=0 && hopStart>=hopLimit ? hopStart-hopLimit : -1;
         // Old firmware omits hop_start: zero without a modern Data bitfield is not proof of direct RF.
         int signalStart=hopStart<0&&hasBitfield?0:hopStart;
@@ -477,8 +490,8 @@ final class MeshtasticProtocol implements RadioProtocol {
             else events.channelMessage(channel,sender,text,receivedAt,hops,packetId,replyId);
         }
         else if (port == 3 && body != null) {
-            double[] position = readPosition(body);
-            if (Double.isFinite(position[0]) && Double.isFinite(position[1])) events.position(sender, position[0], position[1]);
+            Position position=readPosition(body);
+            if (Double.isFinite(position.lat) && Double.isFinite(position.lon)) events.position(sender,position.lat,position.lon);
         } else if (port == 8 && body != null) {
             ProtoWire.Reader waypoint=new ProtoWire.Reader(body);long id=0,expires=0;int lat=0,lon=0;String name="",description="";
             while(waypoint.next()){
@@ -690,6 +703,7 @@ final class MeshCoreProtocol implements RadioProtocol {
         begin(action.equals("copy")?"export":"advert");
         return action.equals("copy")?new byte[]{17}:new byte[]{7,(byte)(action.equals("flood")?1:0)};
     }
+    boolean hasContactKey(String id){return contactKeys.containsKey(id);}
     private final java.util.Map<String, byte[]> contactKeys = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<String, byte[]> contactPaths = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<String, Integer> contactPathWidths = new java.util.concurrent.ConcurrentHashMap<>();
@@ -828,7 +842,7 @@ final class MeshCoreProtocol implements RadioProtocol {
             }
             if(packet.length>=58){long freq=littleInt(packet,48)&0xffffffffL,bw=littleInt(packet,52)&0xffffffffL;int sf=packet[56]&255,cr=packet[57]&255;
                 if(freq>=300000&&freq<=2500000&&bw>=7800&&bw<=500000&&sf>=5&&sf<=12&&cr>=5&&cr<=8)
-                    events.radioSettings(String.format(java.util.Locale.ROOT,"%.3f MHz · BW %.1f kHz · SF%d · CR4/%d",freq/1000.0,bw/1000.0,sf,cr));
+                    events.radioSettings(String.format(java.util.Locale.ROOT,"%.3f MHz · BW %s kHz · SF%d · CR4/%d",freq/1000.0,bw/1000.0,sf,cr));
             }
             if (packet.length >= 44) events.ownPosition(littleInt(packet, 36) / 1e6, littleInt(packet, 40) / 1e6);
         }
@@ -837,6 +851,9 @@ final class MeshCoreProtocol implements RadioProtocol {
             events.status("MeshCore device info loaded");
             if (packet.length > 3) maxChannels = Math.min(40, Math.max(1, packet[3] & 255));
             pending = new byte[]{4};
+        }
+        else if (type == 0x80 && packet.length == 33) {
+            events.lastHeard(hex(packet,1,6),System.currentTimeMillis()/1000,true);
         }
         else if ((type == 3 || type == 0x8a) && packet.length >= 132) {
             int end = 100; while (end < 132 && packet[end] != 0) end++;
@@ -865,7 +882,8 @@ final class MeshCoreProtocol implements RadioProtocol {
             }
             events.node(id.toString(), new String(packet, 100, end - 100, StandardCharsets.UTF_8),
                     contactType(packet[33] & 255), "", 0, hops, lat, lon);
-            if(packet.length>=136) events.lastHeard(id.toString(),littleInt(packet,132)&0xffffffffL);
+            if(type==0x8a && Double.isFinite(lat) && Double.isFinite(lon)) events.position(id.toString(),lat,lon);
+            if(packet.length>=136) events.lastHeard(id.toString(),littleInt(packet,132)&0xffffffffL,true);
         }
         else if (type == 4) { events.status("MeshCore loading channels"); channelQuery = 0; pending = new byte[]{0x1f, 0}; }
         else if (type == 0 && !operation.isEmpty()) {

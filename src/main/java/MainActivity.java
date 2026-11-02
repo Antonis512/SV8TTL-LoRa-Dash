@@ -34,6 +34,9 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.provider.OpenableColumns;
 import android.net.Uri;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.content.ActivityNotFoundException;
@@ -90,6 +93,7 @@ public final class MainActivity extends Activity {
     private final java.util.concurrent.ExecutorService updateWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
     private AppUpdater.Version availableUpdate;
     private File downloadedUpdate;
+    private boolean startupCheckStarted, offerStartupUpdate;
     private boolean updateBusy, awaitingInstallPermission;
     private DebugLog debugLog;
     private static final int EXPORT_DEBUG_LOG=490;
@@ -148,7 +152,7 @@ public final class MainActivity extends Activity {
     private final Map<String,Runnable> pendingKnownConnections=new LinkedHashMap<>();
     private boolean knownConnectionTickPending;
     private boolean blePermissionPending,bleEnablePending,bleNeedsScan;
-    private static final int BLE_PERMISSIONS=41, ENABLE_BLUETOOTH=409;
+    private static final int BLE_PERMISSIONS=41, MARK_LOCATION_PERMISSION=42, ENABLE_BLUETOOTH=409;
     private BluetoothAdapter bluetoothAdapter() {
         BluetoothManager manager=(BluetoothManager)getSystemService(BLUETOOTH_SERVICE);
         return manager==null?null:manager.getAdapter();
@@ -236,7 +240,9 @@ public final class MainActivity extends Activity {
         super.onStart();visible=true;MessageNotifications.cancel(this);
     }
     @Override protected void onStop() {
-        visible=false;super.onStop();
+        visible=false;
+        if(markLocationListener!=null)finishMarkLocation(null,"Phone position request stopped.");
+        super.onStop();
     }
     @Override protected void onResume() {
         super.onResume();debug("Lifecycle resume");if(closing)return;resumed=true;reconcileBleState();notificationText="";updateRunningNotification();displayConnectionWarning();publish();
@@ -304,6 +310,11 @@ public final class MainActivity extends Activity {
         final Map<String,Long> readThrough=new java.util.HashMap<>();
         final Map<String, NodeEntry> knownNodes = new TreeMap<>();
         String rfLabel="";
+        int settingsGeneration=-1;
+        long settingsSince;
+        String observedSettings(long seconds) {
+            return settingsGeneration==generation && seconds>=settingsSince && seconds<=System.currentTimeMillis()/1000 ? rfLabel : "";
+        }
         final ArrayDeque<ChatEntry> pendingSends = new ArrayDeque<>();
         final Map<Long,ChatEntry> trackedMessages=new java.util.LinkedHashMap<>();
         final ArrayDeque<SplitSend> splitSends=new ArrayDeque<>();
@@ -314,6 +325,11 @@ public final class MainActivity extends Activity {
         }
         void written(byte[] payload,boolean success,String reason) {
             debug(key+" write bytes="+payload.length+" success="+success+(success?"":" reason="+reason));
+            if(this==mapSenseRadio && payload==mapSensePacket){
+                if(!success)lastMapSense=0;
+                finishMapSense(success?"Sent to radio":"Write failed",success?"Position request written to the connected radio.":reason);
+                return;
+            }
             Long token=outgoingWrites.remove(payload); if(token==null) return;
             ChatEntry entry=trackedMessages.get(token);
             if(!success) {
@@ -499,6 +515,7 @@ public final class MainActivity extends Activity {
         }
 
         void close() {
+            if(this==mapSenseRadio)finishMapSense("Send unconfirmed","The radio disconnected before confirming the write.");
             if(closing)stopSplits(this,"App closed; unsent split parts cancelled");
             if (ble != null) { ble.close(); ble = null; }
             if (usb != null) { usb.close(); usb = null; }
@@ -597,6 +614,8 @@ public final class MainActivity extends Activity {
         @Override public void radioSettings(String label) {
             int currentGeneration=generation;
             main.post(()->{if(generation!=currentGeneration||label.isEmpty())return;
+                if(settingsGeneration!=generation || !label.equals(rfLabel)) settingsSince=System.currentTimeMillis()/1000;
+                settingsGeneration=generation;
                 rfLabel=label;if(!ownId.isEmpty())getPreferences(0).edit().putString("radio_rf:"+(meshcore?"mc":"mt")+":"+ownId,label).apply();
                 publishRadioUpdate();
                 if(pageReady&&web!=null)web.evaluateJavascript("if(!document.getElementById('tab-map').hidden)AndroidBridge.loadMap()",null);
@@ -634,7 +653,7 @@ public final class MainActivity extends Activity {
                 if (!id.equals(ownId)) {
                     readThrough.clear();
                     ownId = id; ownName = name; chats.clear(); directs.clear();
-                    rfLabel=getPreferences(0).getString("radio_rf:"+radio+":"+id,"");
+                    if(settingsGeneration!=generation)rfLabel=getPreferences(0).getString("radio_rf:"+radio+":"+id,"");
                     loadSessionHistory(this);
                 }
                 if(!rfLabel.isEmpty())getPreferences(0).edit().putString("radio_rf:"+radio+":"+id,rfLabel).apply();
@@ -662,9 +681,9 @@ public final class MainActivity extends Activity {
                 publish();
             });
         }
-        @Override public void lastHeard(String id,long seconds) {
+        @Override public void lastHeard(String id,long seconds,boolean viaRadio) {
             int currentGeneration=generation;
-            main.post(()->{if(generation!=currentGeneration) return;chatStore.heard(meshcore?"mc":"mt",ownId,id,seconds);publishRadioUpdate();});
+            main.post(()->{if(generation!=currentGeneration) return;chatStore.heard(meshcore?"mc":"mt",ownId,id,seconds,viaRadio?observedSettings(seconds):"");publishRadioUpdate();});
         }
         @Override public void signalSample(String target,long seconds,Float snr,Integer rssi,int hops,String stats,boolean requested,boolean mqtt) {
             int currentGeneration=generation;
@@ -703,6 +722,7 @@ public final class MainActivity extends Activity {
                 if(captured!=null)entry.paths=captured.toString();
                 entry.id=chatStore.saveIncoming(meshcore?"mc":"mt",ownId,channel,entry.sender,
                     entry.text,entry.time,entry.receivedAt,"",hops,packetId,replyId,entry.paths);
+                saveIncomingMarker(channel,sender,text);
                 chats.computeIfAbsent(channel, ignored -> new ArrayList<>()).add(entry);
                 unread = true;
                 showMessageNotification(this, sender, text);
@@ -722,7 +742,8 @@ public final class MainActivity extends Activity {
                 entry.hops=hops;entry.packetId=packetId;entry.replyId=replyId;entry.unread=true;
                 entry.id=chatStore.saveIncoming(meshcore?"mc":"mt",ownId,-1,id,text,entry.time,
                     entry.receivedAt,id,hops,packetId,replyId,entry.paths);
-                chatStore.heard(meshcore?"mc":"mt",ownId,id,receivedAt);
+                saveIncomingMarker(-1,id,text);
+                chatStore.heard(meshcore?"mc":"mt",ownId,id,receivedAt,meshcore?observedSettings(receivedAt):"");
                 directs.computeIfAbsent(id, ignored -> new ArrayList<>()).add(entry);
                 unread = true;
                 showMessageNotification(this, id, text);
@@ -763,6 +784,7 @@ public final class MainActivity extends Activity {
             int currentGeneration = generation;
             main.post(() -> {
                 if (generation != currentGeneration) return;
+                if(id.equals(ownId)&&MapData.valid(latitude,longitude)){ownLatitude=latitude;ownLongitude=longitude;}
                 NodeEntry old = knownNodes.get(id);
                 if (old != null) knownNodes.put(id, new NodeEntry(id, old.name, old.role,
                         old.model, old.channel, old.hops, latitude, longitude));
@@ -774,6 +796,26 @@ public final class MainActivity extends Activity {
                 publishRadioUpdate();
                 sendMapData();
             });
+        }
+        private void saveIncomingMarker(int channel,String sender,String text) {
+            if(!meshcore)return;
+            MeshCoreMarker marker=MeshCoreMarker.parse(sender,text,channel>=0);
+            if(marker==null)return;
+            try {
+                String identity=new JSONArray().put(ownId).put(channel).put(marker.sender)
+                        .put(marker.latitude).put(marker.longitude).put(marker.title).toString();
+                String id="mc-"+java.util.UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8));
+                String name=marker.sender;
+                NodeEntry contact=channel<0?knownNodes.get(name):null;
+                if(contact!=null&&!contact.name.isEmpty())name=contact.name;
+                JSONObject point=new JSONObject().put("type","Point")
+                        .put("coordinates",new JSONArray().put(marker.longitude).put(marker.latitude));
+                JSONObject item=new JSONObject().put("id",id).put("kind","mark").put("title",marker.title)
+                        .put("description","Shared by "+name+" · MeshCore").put("geometry",point)
+                        .put("radio","mc").put("device",ownId).put("channel",channel);
+                mapData.put(item,false);
+                sendMapData();
+            }catch(JSONException error){debug("Invalid MeshCore marker ignored");}
         }
         @Override public void waypoint(String sender,long waypointId,String name,String description,double latitude,double longitude,boolean deleted) {
             int currentGeneration=generation;
@@ -796,7 +838,7 @@ public final class MainActivity extends Activity {
             int currentGeneration = generation;
             main.post(() -> {
                 if (generation != currentGeneration) return;
-                if (latitude == 0 && longitude == 0) return;
+                if (!MapData.valid(latitude,longitude)) return;
                 ownLatitude = latitude; ownLongitude = longitude; publishRadioUpdate();
             });
         }
@@ -974,6 +1016,11 @@ public final class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view, String url) {
                 debug("WebView page finished app="+APP_URL.equals(url));
                 pageReady = APP_URL.equals(url); publish();
+                if(pageReady&&!closing&&!startupCheckStarted){
+                    startupCheckStarted=true;
+                    offerStartupUpdate=true;
+                    checkForUpdates();
+                }
                 if(pageReady&&!mapPackStatus.isEmpty())mapPackImportStatus(mapPackStatus,mapPackStatusBusy,mapPackStatusPercent);
             }
         });
@@ -1152,6 +1199,8 @@ public final class MainActivity extends Activity {
             finally{if(pack!=null)pack.delete();main.post(()->satelliteDownloadRunning=false);}});
         });}
         @JavascriptInterface public void cancelSatelliteDownload(){satelliteDownloadCancelled=true;}
+        @JavascriptInterface public void fetchMarkPosition(int token){main.post(()->requestMarkLocation(token));}
+        @JavascriptInterface public void cancelMarkPosition(int token){main.post(()->{if(markLocationToken==token)clearMarkLocation();});}
         @JavascriptInterface public void saveMapItem(String json){main.post(()->{
             try{mapData.put(new JSONObject(json),false);sendMapData();}
             catch(Exception error){nodeActionResult("Could not save map item: "+error.getMessage());}
@@ -1191,7 +1240,7 @@ public final class MainActivity extends Activity {
         });}
         @JavascriptInterface public void mapNodeAction(String key,String id,String action){main.post(()->MainActivity.this.nodeAction(session(key),id,action,""));}
         @JavascriptInterface public void senseMesh(String key,int channel){main.post(()->requestMapSense(key,channel));}
-        @JavascriptInterface public void sendMapMark(String id,String key,int channel){main.post(()->sendMapMark(id,key,channel));}
+        @JavascriptInterface public void sendMapMark(String id,String key,int channel,String peer){main.post(()->MainActivity.this.sendMapMark(id,key,channel,peer));}
         @JavascriptInterface public void exportMapItem(String id){main.post(()->{
             pendingMapExportId=id;
             Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/geo+json")
@@ -1455,7 +1504,7 @@ public final class MainActivity extends Activity {
                 } catch(Exception error) {nodeActionResult("Could not load app notices");}
             });
         }
-        @JavascriptInterface public void checkForUpdates() {main.post(MainActivity.this::checkForUpdates);}
+        @JavascriptInterface public void checkForUpdates() {main.post(()->{offerStartupUpdate=false;MainActivity.this.checkForUpdates();});}
         @JavascriptInterface public void downloadUpdate() {main.post(MainActivity.this::downloadUpdate);}
         @JavascriptInterface public void selectChatDevice(String side,String radio,String key) {
             main.post(()->{
@@ -1981,7 +2030,7 @@ public final class MainActivity extends Activity {
     private int[] mergeNodeBackup(JSONObject json) throws JSONException {
         String radio=json.getString("radio"), id=json.getString("nodeId");
         JSONObject heard=json.optJSONObject("lastHeard");
-        if(heard!=null) {Iterator<String> peers=heard.keys();while(peers.hasNext()){String peer=peers.next();chatStore.heard(radio,id,peer,heard.getLong(peer));}}
+        if(heard!=null) {Iterator<String> peers=heard.keys();while(peers.hasNext()){String peer=peers.next();JSONObject settings=json.optJSONObject("heardSettings");chatStore.heard(radio,id,peer,heard.getLong(peer),settings==null?"":settings.optString(peer));}}
         int radios=chatStore.importRadio(radio,id,json.optString("name",id),
                 json.optString("address",""),json.optLong("lastSeen",System.currentTimeMillis()))?1:0;
         Map<Integer,String> existing=new TreeMap<>();
@@ -2036,7 +2085,6 @@ public final class MainActivity extends Activity {
     private void sendMapData(){
         if(!pageReady||closing||web==null)return;
         try{JSONObject data=mapData.snapshot().put("displayStyle",getPreferences(0).getString("map_display_style","full")).put("packs",mapPacks.list()).put("selectedPackId",getPreferences(0).getString("active_map_pack_id",""));
-            JSONArray nodes=data.getJSONArray("nodes");for(int i=0;i<nodes.length();i++){JSONObject node=nodes.getJSONObject(i);node.put("receivingRf",getPreferences(0).getString("radio_rf:"+node.getString("radio")+":"+node.getString("device"),""));}
             web.evaluateJavascript("window.onMapData("+data+")",null);}
         catch(Exception error){nodeActionResult("Could not load Map: "+error.getMessage());}
     }
@@ -2089,9 +2137,27 @@ public final class MainActivity extends Activity {
         web.evaluateJavascript("window.onSatelliteAccount("+(saved!=null)+","+signedIn+","+JSONObject.quote(label)+")",null);
     }
     private long lastMapSense;
+    private RadioSession mapSenseRadio;
+    private byte[] mapSensePacket;
+    private String mapSenseDestination;
+    private final Runnable mapSenseTimeout=()->finishMapSense("Send unconfirmed","Timed out waiting for the radio write to complete.");
+
+    private void showMapSenseResult(String title,String destination,String detail){
+        String time=DateFormat.getDateTimeInstance().format(new Date());
+        debug("Ask positions · "+title+" · "+destination+" · "+detail);
+        if(!closing&&!isFinishing()&&!isDestroyed())
+            new AlertDialog.Builder(this).setTitle(title).setMessage(destination+"\n"+time+"\n\n"+detail)
+                    .setPositiveButton("OK",null).show();
+    }
+    private void finishMapSense(String title,String detail){
+        main.removeCallbacks(mapSenseTimeout);
+        mapSenseRadio=null;
+        mapSensePacket=null;
+        showMapSenseResult(title,mapSenseDestination,detail);
+    }
     private void showMapGeofenceAlerts(String radio,String device,String id,String name,double latitude,double longitude){
         try{JSONArray alerts=mapData.geofenceChanges(radio,device,id,latitude,longitude);
-            for(int i=0;i<alerts.length();i++){JSONObject alert=alerts.getJSONObject(i);String message=name+(alert.getBoolean("inside")?" entered ":" left ")+alert.getString("title");
+            for(int i=0;i<alerts.length();i++){JSONObject alert=alerts.getJSONObject(i);String message=(name.isEmpty()?id:name)+" "+alert.getString("event")+" "+alert.getString("title");
                 if(pageReady&&visible)web.evaluateJavascript("window.onMapAlert("+JSONObject.quote(message)+")",null);
                 MessageNotifications.show(this,"Map geofence",message);
             }
@@ -2103,24 +2169,117 @@ public final class MainActivity extends Activity {
             nodeActionResult("Choose a connected Meshtastic device and one of its reported channels");return;
         }
         long now=System.currentTimeMillis();if(now-lastMapSense<180000){nodeActionResult("Wait three minutes between mesh-wide position requests");return;}
+        int generation=s.generation;
+        String channelName=s.channelNames.get(channel);
+        String destination=(s.ownName.isEmpty()?s.name:s.ownName)+" · "+channelName+" · Hop limit 3";
         new AlertDialog.Builder(this).setTitle("Ask the mesh for positions?")
-                .setMessage("This sends one radio request to the selected Meshtastic channel. Replies depend on the nodes and radio coverage. It uses shared airtime.")
+                .setMessage(destination+"\n\nBroadcast one Meshtastic position request on this channel?")
                 .setNegativeButton("Cancel",null).setPositiveButton("Send request",(dialog,which)->{
-                    try{s.sendTracked(s.protocol.nodeCommand("pos","!ffffffff","",channel));lastMapSense=System.currentTimeMillis();nodeActionResult("Position request sent. Watch Map as replies arrive.");}
-                    catch(Exception error){nodeActionResult("Could not request positions: "+error.getMessage());}
+                    if(s.generation!=generation||!s.connected||s.loading||s.protocol==null||!channelName.equals(s.channelNames.get(channel))){
+                        showMapSenseResult("Request not sent",destination,"The selected radio or channel is no longer available.");return;
+                    }
+                    if(mapSenseRadio!=null||System.currentTimeMillis()-lastMapSense<180000){
+                        showMapSenseResult("Request not sent",destination,"Wait three minutes between position requests.");return;
+                    }
+                    try{
+                        byte[] packet=s.protocol.nodeCommand("pos","!ffffffff","",channel);
+                        mapSenseRadio=s;mapSensePacket=packet;mapSenseDestination=destination;
+                        lastMapSense=System.currentTimeMillis();
+                        main.postDelayed(mapSenseTimeout,15000);
+                        s.send(packet);
+                    }catch(RuntimeException error){
+                        if(mapSenseRadio==s){lastMapSense=0;finishMapSense("Send failed",error.toString());}
+                        else showMapSenseResult("Request not sent",destination,error.toString());
+                    }
                 }).show();
     }
-    private void sendMapMark(String id,String key,int channel){
-        RadioSession s=session(key);if(s==null||s.meshcore||!s.connected||s.loading||!(s.protocol instanceof MeshtasticProtocol)||!s.channelNames.containsKey(channel)){
-            nodeActionResult("Choose a connected Meshtastic device and one of its reported channels");return;
+    private int markLocationToken;
+    private boolean markPermissionPending;
+    private LocationListener markLocationListener;
+    private final Runnable markLocationTimeout=()->finishMarkLocation(null,"No phone position received. Try again with a clearer view of the sky.");
+
+    private boolean hasMarkLocationPermission(){
+        return checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED
+                || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+    }
+    private void requestMarkLocation(int token){
+        clearMarkLocation();
+        markLocationToken=token;
+        if(hasMarkLocationPermission())startMarkLocation();
+        else if(!markPermissionPending){
+            markPermissionPending=true;
+            requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION},MARK_LOCATION_PERMISSION);
+        }
+    }
+    private void startMarkLocation(){
+        LocationManager manager=getSystemService(LocationManager.class);
+        try{
+            boolean fine=checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+            String provider=null;
+            if(manager!=null){
+                if(Build.VERSION.SDK_INT>=31 && manager.isProviderEnabled(LocationManager.FUSED_PROVIDER))provider=LocationManager.FUSED_PROVIDER;
+                else if(fine && manager.isProviderEnabled(LocationManager.GPS_PROVIDER))provider=LocationManager.GPS_PROVIDER;
+                else if(manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER))provider=LocationManager.NETWORK_PROVIDER;
+            }
+            if(provider==null){finishMarkLocation(null,"No location provider available. Turn on phone location and try again.");return;}
+            markLocationListener=new LocationListener(){
+                @Override public void onLocationChanged(Location fix){
+                    if(markLocationListener==this)finishMarkLocation(fix,fix.hasAccuracy()?"Phone position · accuracy about "+Math.round(fix.getAccuracy())+" m":"Phone position");
+                }
+                @Override public void onProviderDisabled(String name){
+                    if(markLocationListener==this)finishMarkLocation(null,"Phone location was turned off.");
+                }
+                @Override public void onProviderEnabled(String name){}
+                @Override public void onStatusChanged(String name,int status,Bundle extras){}
+            };
+            manager.requestSingleUpdate(provider,markLocationListener,Looper.getMainLooper());
+            main.postDelayed(markLocationTimeout,45000);
+        }catch(SecurityException|IllegalArgumentException error){finishMarkLocation(null,"Phone location unavailable. Check Android location permissions and try again.");}
+    }
+    private void clearMarkLocation(){
+        main.removeCallbacks(markLocationTimeout);
+        if(markLocationListener!=null){
+            try{getSystemService(LocationManager.class).removeUpdates(markLocationListener);}catch(SecurityException ignored){}
+            markLocationListener=null;
+        }
+        markLocationToken=0;
+    }
+    private void finishMarkLocation(Location fix,String message){
+        int token=markLocationToken;
+        clearMarkLocation();
+        if(token!=0&&pageReady&&web!=null)
+            web.evaluateJavascript("window.onMarkPhonePosition("+token+","+(fix==null?"null,null":fix.getLatitude()+","+fix.getLongitude())+","+JSONObject.quote(message)+")",null);
+    }
+    private void sendMapMark(String id,String key,int channel,String peer){
+        RadioSession s=session(key);
+        if(s==null||!s.connected||s.loading||s.protocol==null){
+            nodeActionResult("Choose a connected radio");return;
         }
         try{
+            boolean direct=peer!=null&&!peer.isEmpty();
+            NodeEntry recipient=direct?s.knownNodes.get(peer):null;
+            if(direct){
+                if(channel!=-1||recipient==null||peer.equals(s.ownId)
+                        ||(s.meshcore && !("User".equals(recipient.role)||"Room server".equals(recipient.role))))
+                    throw new IllegalArgumentException("Choose a messageable contact on this radio");
+                channel=recipient.channel;
+            }else if(channel<0||!s.channelNames.containsKey(channel))
+                throw new IllegalArgumentException("Choose a reported channel or a recipient");
             JSONObject mark=null;JSONArray items=mapData.items();for(int i=0;i<items.length();i++)if(id.equals(items.getJSONObject(i).getString("id"))){mark=items.getJSONObject(i);break;}
             if(mark==null||!"mark".equals(mark.optString("kind")))throw new IllegalArgumentException("Select a saved mark");
             JSONArray coords=mark.getJSONObject("geometry").getJSONArray("coordinates");double lon=coords.getDouble(0),lat=coords.getDouble(1);
             String name=mark.getString("title"),description=mark.optString("description","");
             if(!MapData.valid(lat,lon))throw new IllegalArgumentException("Mark needs valid coordinates");
-            byte[] packet=((MeshtasticProtocol)s.protocol).waypointCommand(id,name,description,lat,lon,channel);
+            if(s.meshcore){
+                String label=name.replace('|',' ').replace('\n',' ').replace('\r',' ').trim();
+                String marker=String.format(java.util.Locale.ROOT,"m:%.6f,%.6f|%s|poi",lat,lon,label);
+                if(marker.getBytes(StandardCharsets.UTF_8).length>s.protocol.textLimit(direct))
+                    throw new IllegalArgumentException("Shorten the mark name to fit one MeshCore message");
+                if(direct)nodeAction(s,peer,"dm",marker);
+                else sendMessage(s,channel,marker);
+                return;
+            }
+            byte[] packet=((MeshtasticProtocol)s.protocol).waypointCommand(id,name,description,lat,lon,channel,peer);
             s.sendTracked(packet);nodeActionResult("Mark sent to the Meshtastic radio. Mesh delivery is not guaranteed.");
         }catch(Exception error){nodeActionResult("Could not send mark: "+error.getMessage());}
     }
@@ -2253,12 +2412,25 @@ public final class MainActivity extends Activity {
                     .put("sideMcFontStep",getPreferences(0).getInt("side_mc_font_step",0))
                     .put("sideMtFontStep",getPreferences(0).getInt("side_mt_font_step",0));
             JSONArray active=new JSONArray();
-            for(RadioSession s:sessions.values()) if(s.connected)
+            for(RadioSession s:sessions.values()) if(s.connected){
+                JSONArray pathNodes=new JSONArray();
+                if(!s.loading)for(NodeEntry n:s.knownNodes.values()){
+                    if(n.id.equals(s.ownId))continue;
+                    if(s.meshcore){
+                        if(!(s.protocol instanceof MeshCoreProtocol)||!((MeshCoreProtocol)s.protocol).hasContactKey(n.id))continue;
+                    }else if(!n.id.matches("![0-9a-fA-F]{8}")||"!ffffffff".equalsIgnoreCase(n.id)||"!00000000".equals(n.id))continue;
+                    pathNodes.put(new JSONObject().put("id",n.id).put("name",n.name));
+                }
                 active.put(new JSONObject().put("key",s.key).put("radio",s.meshcore?"mc":"mt")
                         .put("id",s.ownId).put("name",s.ownName.isEmpty()?s.name:s.ownName)
+                        .put("channels",s.meshcore||s.loading?null:reportedChannels(s))
+                        .put("pathNodes",pathNodes).put("loading",s.loading).put("lastTrace",s.lastTrace)
+                        .put("ownLatitude",Double.isFinite(s.ownLatitude)?Double.valueOf(s.ownLatitude):null)
+                        .put("ownLongitude",Double.isFinite(s.ownLongitude)?Double.valueOf(s.ownLongitude):null)
                         .put("rfLabel",sessionRfLabel(s))
                         .put("unread",hasUnread(s)).put("dmUnread",hasUnreadDm(s))
                         .put("channelUnread",hasUnreadChannel(s)));
+            }
             data.put("devices",active).put("selectedMc",selectedMc.key).put("selectedMt",selectedMt.key);
             web.evaluateJavascript("window.onRadioState(" + data.toString() + ")", null);
         } catch (JSONException error) { android.util.Log.e("OverMesh", "Could not encode radio state", error); }
@@ -2276,6 +2448,12 @@ public final class MainActivity extends Activity {
         return current;
     }
 
+    private JSONArray reportedChannels(RadioSession session) throws JSONException {
+        JSONArray channelsJson = new JSONArray();
+        for (Map.Entry<Integer, String> entry : session.channelNames.entrySet())
+            channelsJson.put(new JSONObject().put("index", entry.getKey()).put("name", entry.getValue()));
+        return channelsJson;
+    }
     private JSONObject sessionJson(RadioSession session) throws JSONException {
         JSONObject obj = new JSONObject().put("radio",session.meshcore?"mc":"mt").put("name", session.name).put("state", session.state)
                 .put("rfLabel",sessionRfLabel(session))
@@ -2288,19 +2466,18 @@ public final class MainActivity extends Activity {
                 .put("unread",hasUnread(session)).put("loading",session.loading);
         if (Double.isFinite(session.ownLatitude) && Double.isFinite(session.ownLongitude))
             obj.put("ownLatitude", session.ownLatitude).put("ownLongitude", session.ownLongitude);
-        JSONArray channelsJson = new JSONArray();
-        for (Map.Entry<Integer, String> entry : session.channelNames.entrySet())
-            channelsJson.put(new JSONObject().put("index", entry.getKey()).put("name", entry.getValue()));
+        JSONArray channelsJson = reportedChannels(session);
         if(!session.connected&&!session.ownId.isEmpty()) {
             channelsJson=new JSONArray();
             for(ChatStore.SavedChannel saved:chatStore.channels(session.meshcore?"mc":"mt",session.ownId))
                 channelsJson.put(new JSONObject().put("index",saved.index).put("name",saved.name));
         }
         JSONArray nodesJson = new JSONArray();
+        Map<String,String> heardSettings=chatStore.heardSettings(session.meshcore?"mc":"mt",session.ownId);
         for (NodeEntry node : session.knownNodes.values())
             {
                 JSONObject item = new JSONObject().put("id", node.id).put("name", node.name)
-                        .put("lastHeard",chatStore.lastHeard(session.meshcore?"mc":"mt",session.ownId,node.id)).put("role", node.role).put("model", node.model).put("hops", node.hops)
+                        .put("heardSettings",heardSettings.get(node.id)).put("lastHeard",chatStore.lastHeard(session.meshcore?"mc":"mt",session.ownId,node.id)).put("role", node.role).put("model", node.model).put("hops", node.hops)
                         .put("favorite", getPreferences(0).getBoolean((session.meshcore ? "mc:" : "mt:") + session.ownId + ":" + node.id, false));
                 if (Double.isFinite(node.latitude) && Double.isFinite(node.longitude))
                     item.put("latitude", node.latitude).put("longitude", node.longitude);
@@ -3457,6 +3634,14 @@ public final class MainActivity extends Activity {
     }
     @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grants) {
         super.onRequestPermissionsResult(requestCode,permissions,grants);
+        if(requestCode==MARK_LOCATION_PERMISSION){
+            markPermissionPending=false;
+            if(markLocationToken!=0){
+                if(hasMarkLocationPermission())startMarkLocation();
+                else finishMarkLocation(null,"Location permission was denied. Allow location in Android settings or choose another position source.");
+            }
+            return;
+        }
         if(requestCode==40){
             if(grants.length==0 || grants[0]!=PackageManager.PERMISSION_GRANTED)
                 getPreferences(0).edit().putBoolean("background_message_notifications",false).apply();
@@ -3597,7 +3782,7 @@ public final class MainActivity extends Activity {
 
     private void updateStatus(String status,String message) {
         if(closing||web==null)return;
-        web.evaluateJavascript("window.onUpdateStatus("+JSONObject.quote(status)+","+JSONObject.quote(message)+")",null);
+        web.evaluateJavascript("window.onUpdateStatus("+JSONObject.quote(status)+","+JSONObject.quote(message)+","+(offerStartupUpdate&&"available".equals(status))+")",null);
     }
 
     private void checkForUpdates() {
@@ -3666,6 +3851,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        clearMarkLocation();
         MessageNotifications.cancel(this);
         debug("Lifecycle closing");closing=true;pendingBleActions.clear();
         if(RadioConnectionService.owner.get()==this)RadioConnectionService.owner.clear();

@@ -36,7 +36,7 @@ final class ChatStore extends SQLiteOpenHelper {
         final String name;
         SavedChannel(int index, String name) { this.index=index; this.name=name; }
     }
-    ChatStore(Context context) { super(context, "chat-history.db", null, 15); setWriteAheadLoggingEnabled(true); }
+    ChatStore(Context context) { super(context, "chat-history.db", null, 16); setWriteAheadLoggingEnabled(true); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, radio TEXT NOT NULL, " +
                 "node_id TEXT NOT NULL DEFAULT '', channel INTEGER NOT NULL, sender TEXT NOT NULL, " +
@@ -44,6 +44,7 @@ final class ChatStore extends SQLiteOpenHelper {
                 "own INTEGER NOT NULL, delivery TEXT NOT NULL, peer TEXT NOT NULL DEFAULT '', unread INTEGER NOT NULL DEFAULT 0, hops INTEGER NOT NULL DEFAULT -1, heard_repeats INTEGER NOT NULL DEFAULT -1, paths TEXT NOT NULL DEFAULT '[]', packet_id INTEGER NOT NULL DEFAULT 0, reply_id INTEGER NOT NULL DEFAULT 0, reaction INTEGER NOT NULL DEFAULT 0)");
         db.execSQL("CREATE INDEX messages_node ON messages(radio,node_id,channel,id)");
         createRadioTables(db);
+        addHeardSettings(db);
         createHistoryIndex(db);
         createSignalHistory(db);
         createLogTable(db);
@@ -89,6 +90,10 @@ final class ChatStore extends SQLiteOpenHelper {
         if (oldVersion < 6) db.execSQL("ALTER TABLE messages ADD COLUMN hops INTEGER NOT NULL DEFAULT -1");
         if (oldVersion < 11) createHistoryIndex(db);
         if (oldVersion < 12) db.execSQL("CREATE TABLE IF NOT EXISTS pending_backup_settings(id INTEGER PRIMARY KEY,body TEXT NOT NULL)");
+        if(oldVersion<16)addHeardSettings(db);
+    }
+    private void addHeardSettings(SQLiteDatabase db) {
+        db.execSQL("ALTER TABLE node_heard ADD COLUMN settings TEXT NOT NULL DEFAULT ''");
     }
     private void createMapTables(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS map_nodes(radio TEXT NOT NULL,device TEXT NOT NULL,id TEXT NOT NULL,name TEXT NOT NULL DEFAULT '',role TEXT NOT NULL DEFAULT '',lat REAL,lon REAL,position_at INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(radio,device,id))");
@@ -200,9 +205,12 @@ final class ChatStore extends SQLiteOpenHelper {
         try(Cursor c=getReadableDatabase().rawQuery("SELECT heard FROM node_heard WHERE radio=? AND node_id=? AND peer=?",new String[]{radio,nodeId,peer})) {return c.moveToFirst()?c.getLong(0):0;}
     }
     void heard(String radio,String nodeId,String peer,long seconds) {
+        heard(radio,nodeId,peer,seconds,"");
+    }
+    void heard(String radio,String nodeId,String peer,long seconds,String settings) {
         if(nodeId.isEmpty()||seconds<=0||seconds>System.currentTimeMillis()/1000+300) return;
         if(seconds<=lastHeard(radio,nodeId,peer)) return;
-        ContentValues v=new ContentValues();v.put("radio",radio);v.put("node_id",nodeId);v.put("peer",peer);v.put("heard",seconds);
+        ContentValues v=new ContentValues();v.put("radio",radio);v.put("node_id",nodeId);v.put("peer",peer);v.put("heard",seconds);v.put("settings",settings);
         getWritableDatabase().insertWithOnConflict("node_heard",null,v,SQLiteDatabase.CONFLICT_REPLACE);
         new MapData(this).heard(radio,nodeId,peer,seconds);
     }
@@ -329,6 +337,13 @@ final class ChatStore extends SQLiteOpenHelper {
                 message.packetId=c.getLong(15);message.replyId=c.getLong(16);result.add(message);
             }
         }return new SearchPage(result,more);
+    }
+    java.util.Map<String,String> heardSettings(String radio,String device) {
+        java.util.Map<String,String> result=new java.util.HashMap<>();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT peer,settings FROM node_heard WHERE radio=? AND node_id=? AND settings<>''",new String[]{radio,device})) {
+            while(c.moveToNext())result.put(c.getString(0),c.getString(1));
+        }
+        return result;
     }
     java.util.Map<String,Long> heardNodes(String radio,String nodeId) {
         java.util.Map<String,Long> result=new java.util.LinkedHashMap<>();

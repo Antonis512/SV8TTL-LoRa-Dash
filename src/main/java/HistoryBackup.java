@@ -45,6 +45,7 @@ final class HistoryBackup {
     static void writeNode(JsonWriter out,ChatStore store,ChatStore.KnownRadio radio) throws Exception {
         out.beginObject();out.name("version").value(2);out.name("radio").value(radio.radio);out.name("nodeId").value(radio.id);
         out.name("name").value(radio.name);out.name("address").value(radio.address);out.name("lastSeen").value(radio.lastSeen);
+        out.name("heardSettings");writeValue(out,new JSONObject(store.heardSettings(radio.radio,radio.id)));
         out.name("lastHeard");writeValue(out,new JSONObject(store.heardNodes(radio.radio,radio.id)));
         out.name("channels").beginArray();for(ChatStore.SavedChannel c:store.channels(radio.radio,radio.id))writeValue(out,new JSONObject().put("index",c.index).put("name",c.name));out.endArray();
         out.name("messages").beginArray();store.visitMessages(radio.radio,radio.id,m->writeValue(out,message(m)));out.endArray();out.endObject();

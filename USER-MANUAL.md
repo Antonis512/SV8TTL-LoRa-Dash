@@ -286,11 +286,11 @@ Choose **All**, **MC** or **MT** in the network filter. Narrow the view by recei
 The six Map tools have short steps in the app:
 
 - **Passive activity:** Connect a radio and let it listen. Filter the saved hearing and position history later; this tool sends nothing.
-- **Ask positions:** Choose a connected MT radio and one of its reported channels, then tap **Ask for positions**. This broadcasts a position request, which some nodes may ignore. The app limits requests to one every three minutes.
+- **Ask positions:** Choose a connected MT radio and one of its reported channels, then tap **Ask for positions**. This broadcasts a position request with a hop limit of 3. A timestamped popup shows the radio, channel, and write result. The app limits requests to one every three minutes.
 - **Radio path:** Choose a node and request a trace. Hops describe radio routing, not the node's movement. The map draws only hops with known positions.
-- **Marks:** Tap the map or enter coordinates, name and save the mark. Optionally send it as a Meshtastic waypoint on a reported channel. Received MT waypoints appear as saved marks. A GeoJSON file can also be shared without internet using a nearby file transfer method.
+- **Marks:** Tap the map, enter coordinates, or fetch a phone position. The phone asks for foreground location permission when needed. Use × to clear a field, then name and save the mark. Optionally send it on a reported channel or directly to a selected contact as a Meshtastic waypoint or a MeshCore marker message containing the coordinates and name. Received MT waypoints and MC marker messages appear as pins under **Saved map items**. An MC marker stays visible in Chat, for example `m:37.975500,23.734800|Meet at the gate|poi`. Use **Delete** beside a saved mark to remove the local pin. A GeoJSON file can also be shared without internet using a nearby file transfer method.
 - **Overlays:** Draw a line or area and save it. Export or import the GeoJSON file to share it between phones.
-- **Geofences:** Draw an area and save it. On later position reports, the phone alerts when a tracked node crosses its edge. Importing a shared geofence leaves alerts off until you review and enable it. These alerts depend on fresh positions, not continuous tracking.
+- **Geofences:** Draw an area and save it. If the first position reported for a node is inside the area, the phone shows “appeared in”. Later reports trigger an alert only when the node enters or leaves. Importing a shared geofence leaves alerts off until you review and enable it.
 
 ## 8. Notifications and background use
 

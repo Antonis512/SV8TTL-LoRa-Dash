@@ -46,9 +46,9 @@ final class MapData {
     }
     JSONArray nodes() throws JSONException {
         JSONArray out=new JSONArray();
-        try(Cursor c=db().rawQuery("SELECT n.radio,n.device,n.id,n.name,n.role,n.lat,n.lon,n.position_at,COALESCE((SELECT MAX(h.heard_at) FROM map_heard h WHERE h.radio=n.radio AND h.device=n.device AND h.node=n.id),0) FROM map_nodes n ORDER BY n.name,n.id",null)){
+        try(Cursor c=db().rawQuery("SELECT n.radio,n.device,n.id,n.name,n.role,n.lat,n.lon,n.position_at,COALESCE((SELECT MAX(h.heard_at) FROM map_heard h WHERE h.radio=n.radio AND h.device=n.device AND h.node=n.id),0) , r.settings FROM map_nodes n LEFT JOIN node_heard r ON r.radio=n.radio AND r.node_id=n.device AND r.peer=n.id ORDER BY n.name,n.id",null)){
             while(c.moveToNext()){
-                JSONObject item=new JSONObject().put("radio",c.getString(0)).put("device",c.getString(1)).put("id",c.getString(2)).put("name",c.getString(3)).put("role",c.getString(4)).put("positionAt",c.getLong(7)).put("lastHeard",c.getLong(8));
+                JSONObject item=new JSONObject().put("radio",c.getString(0)).put("device",c.getString(1)).put("id",c.getString(2)).put("name",c.getString(3)).put("role",c.getString(4)).put("positionAt",c.getLong(7)).put("lastHeard",c.getLong(8)).put("receivingRf",c.getString(9));
                 if(!c.isNull(5)&&!c.isNull(6))item.put("lat",c.getDouble(5)).put("lon",c.getDouble(6));out.put(item);
             }
         }return out;
@@ -92,7 +92,10 @@ final class MapData {
             boolean inside=insidePolygon(geometry.getJSONArray("coordinates").getJSONArray(0),lat,lon);String id=item.getString("id");boolean known=false,old=false;
             try(Cursor c=db().rawQuery("SELECT inside FROM map_geofence_state WHERE item=? AND radio=? AND device=? AND node=?",new String[]{id,radio,device,node})){if(c.moveToFirst()){known=true;old=c.getInt(0)!=0;}}
             ContentValues v=new ContentValues();v.put("item",id);v.put("radio",radio);v.put("device",device);v.put("node",node);v.put("inside",inside?1:0);db().insertWithOnConflict("map_geofence_state",null,v,SQLiteDatabase.CONFLICT_REPLACE);
-            if(known&&old!=inside)changes.put(new JSONObject().put("title",item.getString("title")).put("node",node).put("inside",inside));
+            if(known ? old!=inside : inside){
+                String event=!known ? "appeared in" : inside ? "entered" : "left";
+                changes.put(new JSONObject().put("title",item.getString("title")).put("node",node).put("event",event));
+            }
         }return changes;
     }
     private static boolean insidePolygon(JSONArray points,double lat,double lon){

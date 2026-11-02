@@ -139,6 +139,7 @@ function appendLinkedText(container, text) {
   container.appendChild(document.createTextNode(text.slice(offset)));
 }
 function switchTab(tab) {
+  if(tab!=='map'&&activeTab==='map')window.cancelMarkPosition?.();
   activeTab=tab;
   for(const id of ['nodes-action-status','dm-chat-status']) el(id).textContent='';
   el('dm-context').hidden=true;
@@ -243,7 +244,8 @@ function checkForUpdates() {
   openSettingsWindow('update');
   AndroidBridge.checkForUpdates();
 }
-window.onUpdateStatus=function(status,message) {
+window.onUpdateStatus=function(status,message,offerUpdate=false) {
+  if(offerUpdate && status==='available')openSettingsWindow('update');
   el('update-message').textContent=message;
   el('update-confirm').hidden=status!=='available';
 };
@@ -501,7 +503,7 @@ function nodeButton(parent, label, action, radio, entry, handler) {
 function nodeDetails(radio, entry) {
   const details = node('div', 'node-details');
   details.appendChild(node('div', 'node-facts', displayRole(radio,entry.role) + (entry.model ? ' · ' + entry.model : '') + ' · ' + entry.id));
-  details.appendChild(node('div','node-facts','Receiving radio RF (last known): '+(state[radio]?.rfLabel||'Unknown')));
+  details.appendChild(node('div','node-facts',heardDescription(radioType(radio),entry.heardSettings)));
   nodeButton(details,'Enter Name','',radio,entry,()=>enterNodeName(radio,entry));
   if (state[radio].connected && !entry.savedOnly) {
     const actions = node('div', 'node-actions');
@@ -820,8 +822,8 @@ function renderNodes() {
   const roleMenu=el('nodes-role');
   nodeRole=populateRoleMenu(roleMenu,['mc','mt'].flatMap(radio=>state[radio].nodes.map(entry=>({radio,role:entry.role}))),nodeRole);
   const rfMenu=el('nodes-rf'),oldRf=rfMenu.value;clear(rfMenu);
-  const allRf=node('option','','All radio RF');allRf.value='all';rfMenu.appendChild(allRf);
-  const rfValues=[...new Set(['mc','mt'].filter(id=>state[id].nodes.length).map(id=>state[id].rfLabel||''))].sort();
+  const allRf=node('option','','All settings');allRf.value='all';rfMenu.appendChild(allRf);
+  const rfValues=[...new Set(['mc','mt'].flatMap(id=>state[id].nodes.map(entry=>heardProfile(id,entry.heardSettings))))].sort();
   for(const value of rfValues){const option=node('option','',value||'Unknown');option.value=value;rfMenu.appendChild(option);}
   rfMenu.value=rfValues.includes(oldRf)?oldRf:'all';
   for(const id of ['mc','mt']) {
@@ -843,7 +845,7 @@ function renderNodes() {
       if(nodeKind==='infrastructure'&&!nodeInfrastructure(entry)) continue;
       if(nodeKind==='users'&&nodeInfrastructure(entry)) continue;
       if(nodeRole!=='all'&&id+':'+entry.role!==nodeRole) continue;
-      if(rfMenu.value!=='all'&&(state[id].rfLabel||'')!==rfMenu.value) continue;
+      if(rfMenu.value!=='all'&&heardProfile(id,entry.heardSettings)!==rfMenu.value) continue;
       if(el('nodes-hide-unmessageable').checked&&!nodeMessageable(id,entry)) continue;
       if (!(entry.name + ' ' + localNodeName(id,entry.id) + ' ' + entry.id + ' ' + displayRole(id,entry.role)).toLowerCase().includes(search)) continue;
       const row = node('div', 'android-node');
@@ -858,7 +860,7 @@ function renderNodes() {
       row.onclick=event=>{if(event.target.closest('button,input,select,textarea,a,.node-details'))return;toggle();};
       row.appendChild(heading);
       row.appendChild(node('div', 'node-subtitle', (entry.model || displayRole(id,entry.role)) + (entry.model ? ' · ' + displayRole(id,entry.role) : '')));
-      const facts = [heard?'Last heard '+new Date(heard*1000).toLocaleString(undefined,{hourCycle:'h23'}):'Last heard unknown','Radio RF (last known) '+(state[id].rfLabel||'Unknown')];
+      const facts = [heard?'Last heard '+new Date(heard*1000).toLocaleString(undefined,{hourCycle:'h23'}):'Last heard unknown',heardDescription(id,entry.heardSettings)];
       if (entry.hops >= 0) facts.push((id === 'mc' ? 'Route hops ' : 'Hops ') + entry.hops);
       if (Number.isFinite(entry.latitude) && Number.isFinite(entry.longitude)) {
         if (Number.isFinite(state[id].ownLatitude) && Number.isFinite(state[id].ownLongitude))
@@ -917,6 +919,9 @@ window.onRadioState = function (next) {
   const previousChatKey=state?.[network]?.key;
   if(state&&['left','right'].some(slot=>state[slot]?.historyRevision!==next[slot]?.historyRevision))historyPages.clear();
   state = next;
+  el('map-send-mark')?.refreshTargets?.();
+  el('map-route-device')?.refreshTargets?.();
+  el('map-sense-device')?.refreshTargets?.();
   el('message-split-enabled').checked=next.messageSplitEnabled!==false;
   if(document.activeElement!==el('message-split-interval'))el('message-split-interval').value=next.messageSplitIntervalSeconds??5;
   el('connect-all-available').disabled=!!next.connectingAvailable;

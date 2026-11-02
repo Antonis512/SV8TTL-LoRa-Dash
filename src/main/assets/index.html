@@ -76,7 +76,7 @@
     <select id="nodes-kind" class="form-input" onchange="setNodeKind(this.value)"><option value="all">All</option><option value="infrastructure">Infrastructure</option><option value="users">Users</option></select>
     <label class="node-hide-label">Sort <select id="nodes-sort" class="form-input" onchange="setNodeSort(this.value)"><option value="name">Name</option><option value="hops-asc">Hop count: lowest first</option><option value="hops-desc">Hop count: highest first</option><option value="heard-desc">Last Heard: newest first</option><option value="heard-asc">Last Heard: oldest first</option></select></label>
     <select id="nodes-role" class="form-input" onchange="setNodeRole(this.value)"><option value="all">All roles</option></select>
-    <select id="nodes-rf" class="form-input" aria-label="Receiving radio RF filter" onchange="renderNodes()"><option value="all">All radio RF</option></select>
+    <select id="nodes-rf" class="form-input" aria-label="Last heard settings filter" onchange="renderNodes()"><option value="all">All settings</option></select>
     <label class="node-device-label">MC <select id="nodes-mc-device" class="form-input" onchange="AndroidBridge.selectDevice('mc',this.value)"></select></label>
     <label class="node-device-label">MT <select id="nodes-mt-device" class="form-input" onchange="AndroidBridge.selectDevice('mt',this.value)"></select></label>
   </div>
@@ -95,7 +95,7 @@
     <label>Network<select id="map-network" class="form-input" onchange="renderMap()"><option value="all">All</option><option value="mc">MC</option><option value="mt">MT</option></select></label>
     <label>Device<select id="map-device" class="form-input" onchange="renderMap()"><option value="all">All devices</option></select></label>
     <label>Role<select id="map-role" class="form-input" onchange="renderMap()"><option value="all">All roles</option></select></label>
-    <label>Radio RF<select id="map-rf" class="form-input" onchange="renderMap()"><option value="all">All settings</option></select></label>
+    <label>Heard settings<select id="map-rf" class="form-input" onchange="renderMap()"><option value="all">All settings</option></select></label>
     <label>Heard from<input id="map-from" class="form-input" type="datetime-local" onchange="renderMap()"></label>
     <label>To<input id="map-to" class="form-input" type="datetime-local" onchange="renderMap()"></label>
     <button type="button" onclick="clearMapFilters()">Clear filters</button>
@@ -330,7 +330,7 @@
   <button class="nav-btn" data-tab="log" onclick="switchTab('log')"><span class="nav-icon">≡</span><span>Log</span></button>
   <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')"><span class="nav-icon">⊞</span><span>Config</span></button>
 </nav>
-<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
+<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="radio-presets.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
 </body>
 </html>
 

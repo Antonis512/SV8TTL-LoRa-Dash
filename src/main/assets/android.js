@@ -505,6 +505,7 @@ function nodeDetails(radio, entry) {
   details.appendChild(node('div', 'node-facts', displayRole(radio,entry.role) + (entry.model ? ' · ' + entry.model : '') + ' · ' + entry.id));
   details.appendChild(node('div','node-facts',heardDescription(radioType(radio),entry.heardSettings)));
   nodeButton(details,'Enter Name','',radio,entry,()=>enterNodeName(radio,entry));
+  if(entry.id!==state[radio].ownId) nodeButton(details,'Forget Node','',radio,entry,()=>forgetNode(radio,entry));
   if (state[radio].connected && !entry.savedOnly) {
     const actions = node('div', 'node-actions');
     nodeButton(actions, entry.favorite ? '★ Favorited' : '☆ Add to Favorites', 'favorite', radio, entry);
@@ -536,14 +537,23 @@ function namedNode(radio,id,name) {const label=localNodeName(radio,id);return (n
 function enterNodeName(radio,entry) {
   const card=dialogCard('Enter Name · '+(entry.name||entry.id));
   card.appendChild(node('p','help','A private name on this phone. Leave blank to remove it.'));
+  if(entry.id.startsWith('heard-name:'))card.appendChild(node('p','help','Only the sender’s advertised name is available in this message. This label applies to messages using that name.'));
   const input=node('input','form-input');input.type='text';input.maxLength=80;input.value=localNodeName(radio,entry.id);input.setAttribute('aria-label','Node name');card.appendChild(input);
   dialogAction(card,'Save',()=>{AndroidBridge.setNodeName(radioType(radio),entry.id,input.value.trim());el('dm-context').hidden=true;});
   cancelDialog(card);input.focus();
 }
+function forgetNode(radio,entry) {
+  const key=state[radio].key;
+  const card=dialogCard('Forget Node · '+(entry.name||entry.id));
+  card.appendChild(node('p','help','Delete this node’s local name, messages, heard history and map/position details from this app across all '+radioType(radio).toUpperCase()+' devices? It can reappear when heard or loaded from a radio again.'));
+  dialogAction(card,'Forget Node',()=>{AndroidBridge.forgetNode(key,entry.id,entry.name||'');el('dm-context').hidden=true;});
+  cancelDialog(card);
+}
 function showMessageNodeActions(radio,id) {
   window.getSelection()?.removeAllRanges();
   closeSideZoom();
-  const entry=state[radio].nodes.find(item=>item.id===id);
+  const entry=state[radio].nodes.find(item=>item.id===id)||
+    {id,name:id.startsWith('heard-name:')?id.slice(11):id,role:'Heard sender',savedOnly:true};
   if(!entry) return;
   const card=dialogCard(namedNode(radio,entry.id,entry.name));
   const overlay=el('dm-context');

@@ -8,6 +8,13 @@ await page.evaluate(()=>{
  window.f={mc:radio('mc'),mt:radio('mt'),devices:[],myNodes:[],sound:{mode:'shared',shared:{}},nodeNames:{}};onRadioState(f);switchTab('nodes');
 });
 assert.equal(await page.title(),'SV8TTL LoRa Dash');
+for(const kind of ['channel','dm']){
+  await page.evaluate(kind=>ensureMessageSearch(kind,'mc','own-mc',kind==='dm'?'abcdefabcdef':'',kind==='dm'?-1:0),kind);
+  assert.equal(await page.locator('#'+kind+'-message-search').evaluate(e=>e.hidden),true);
+  await page.evaluate(kind=>toggleMessageSearch(kind),kind);
+  assert.equal(await page.locator('#'+kind+'-message-search').evaluate(e=>e.hidden),false);
+  await page.evaluate(kind=>toggleMessageSearch(kind),kind);
+}
 const row=page.locator('.android-node').first();
 await row.locator('.node-subtitle').click();assert.equal(await row.locator('.node-details').count(),1,'Whole card subtitle opens actions');
 assert.equal(await page.locator('.node-dm-history,.node-direct').count(),0);
@@ -30,4 +37,21 @@ await row.locator('.node-subtitle').click();assert.equal(await row.locator('.nod
 for(const width of [320,390,780]){await page.setViewportSize({width,height:640});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Header must fit viewport');}
 await page.setViewportSize({width:390,height:780});await page.screenshot({path:'build/node-labels.png'});
 assert.deepEqual(errors,[]);console.log('Node labels, clear/edit, message menu, whole-card taps and hidden DM history passed');
+await page.evaluate(()=>showMessageMenu('mc',{id:2,sender:'MeshCore',text:'Unadvertised: Hello',own:false,time:'12:01'},{peer:'',channel:0}));
+await page.locator('#dm-context').getByRole('button',{name:'Node actions',exact:true}).click();
+await page.locator('#dm-context').getByRole('button',{name:'Enter Name',exact:true}).click();
+await page.getByRole('textbox',{name:'Node name',exact:true}).fill('Heard friend');
+await page.locator('#dm-context').getByRole('button',{name:'Save',exact:true}).click();
+assert.equal(await page.evaluate(()=>f.nodeNames['mc:heard-name:Unadvertised']),'Heard friend');
+await page.evaluate(()=>showMessageNodeActions('mc','heard-name:Unadvertised'));
+await page.locator('#dm-context').getByRole('button',{name:'Forget Node',exact:true}).click();
+await page.locator('#dm-context').getByRole('button',{name:'Cancel',exact:true}).click();
+assert.equal(await page.evaluate(()=>calls.filter(c=>c[0]==='forgetNode').length),0);
+await page.evaluate(()=>showMessageNodeActions('mc','heard-name:Unadvertised'));
+await page.locator('#dm-context').getByRole('button',{name:'Forget Node',exact:true}).click();
+await page.locator('#dm-context').getByRole('button',{name:'Forget Node',exact:true}).click();
+assert.deepEqual(await page.evaluate(()=>calls.find(c=>c[0]==='forgetNode')),['forgetNode','mc1','heard-name:Unadvertised','Unadvertised']);
+assert.equal(await page.locator('#settings-my-nodes-page .info-toggle').count(),0);
+assert.ok(await page.evaluate(()=>document.getElementById('connect-all-available').compareDocumentPosition(document.getElementById('disconnect-all'))&Node.DOCUMENT_POSITION_FOLLOWING));
+assert.deepEqual(errors,[]);console.log('Unadvertised sender naming, Forget Node confirmation and My Nodes controls passed');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

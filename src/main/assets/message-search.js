@@ -1,7 +1,7 @@
 /* Conversation search. Each scope is one radio, saved device and conversation. */
 const messageSearches=new Map();
 const messageSearchHosts={channel:'channel-message-search',dm:'dm-message-search',saved:'saved-message-search'};
-const messageSearchExpanded={channel:true,dm:true};
+const messageSearchExpanded={channel:false,dm:false};
 function updateMessageSearchToggle(kind){
   const button=el(kind+'-search-toggle');if(!button)return;
   button.disabled=!messageSearches.has(kind);

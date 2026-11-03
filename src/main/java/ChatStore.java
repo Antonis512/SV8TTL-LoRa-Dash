@@ -165,6 +165,19 @@ final class ChatStore extends SQLiteOpenHelper {
         }
         finally{db.endTransaction();}
     }
+    void forgetNode(String radio,String peer,String senderName) {
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
+        try {
+            db.delete("messages","radio=? AND (peer=? OR sender=? OR (own=0 AND sender='MeshCore' AND ?<>'' AND substr(body,1,length(?)+2)=? || ': '))",
+                    new String[]{radio,peer,peer,senderName,senderName,senderName});
+            db.delete("node_heard","radio=? AND peer=?",new String[]{radio,peer});
+            db.delete("map_nodes","radio=? AND id=?",new String[]{radio,peer});
+            for(String table:new String[]{"map_positions","map_heard","map_geofence_state"})
+                db.delete(table,"radio=? AND node=?",new String[]{radio,peer});
+            if("mt".equals(radio))db.delete("signal_history","peer=?",new String[]{peer});
+            db.setTransactionSuccessful();
+        } finally {db.endTransaction();}
+    }
     private void createSignalHistory(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS signal_history(id INTEGER PRIMARY KEY AUTOINCREMENT,node_id TEXT NOT NULL,peer TEXT NOT NULL,body TEXT NOT NULL)");
         db.execSQL("CREATE INDEX IF NOT EXISTS signal_peer ON signal_history(node_id,peer,id)");

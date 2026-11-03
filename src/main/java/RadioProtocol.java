@@ -41,6 +41,7 @@ interface RadioProtocol {
     default boolean automaticDeliveryPending(long id) { return false; }
     default byte[] poll(Events events) { return null; }
     default void cancelAll() {}
+    default void forgetNode(String id) {}
     default boolean tracksRepeats(long id) {return false;}
     default int textLimit(boolean direct) { return 200; }
     default byte[] advert(String action) { throw new IllegalArgumentException("Choose a MeshCore device"); }
@@ -69,6 +70,7 @@ final class MeshtasticProtocol implements RadioProtocol {
     }
 
     private final java.util.Map<String,String> longNames = new java.util.HashMap<>();
+    @Override public void forgetNode(String id) {longNames.remove(id);}
 
     private String reportedName(String id, String longName, String shortName) {
         if (!longName.trim().isEmpty()) longNames.put(id, longName);
@@ -704,6 +706,9 @@ final class MeshCoreProtocol implements RadioProtocol {
         return action.equals("copy")?new byte[]{17}:new byte[]{7,(byte)(action.equals("flood")?1:0)};
     }
     boolean hasContactKey(String id){return contactKeys.containsKey(id);}
+    @Override public void forgetNode(String id) {
+        contactTypes.remove(id);contactKeys.remove(id);contactPaths.remove(id);contactPathWidths.remove(id);
+    }
     private final java.util.Map<String, byte[]> contactKeys = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<String, byte[]> contactPaths = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<String, Integer> contactPathWidths = new java.util.concurrent.ConcurrentHashMap<>();

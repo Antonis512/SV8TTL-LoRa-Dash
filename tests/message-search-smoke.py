@@ -65,6 +65,8 @@ with sync_playwright() as playwright:
       network='left';channel.left=0;dmMode=false;document.getElementById('channels-screen').hidden=false;
       renderChannelsScreen();onMessageSearchSenders(window.testScope,[
         {key:'own',name:'Me',count:0},{key:'sender:Alice',name:'Alice',count:8}]);""")
+    assert not page.locator("#channel-message-search input[type=search]").is_visible()
+    page.locator("#channel-search-toggle").click()
     assert page.locator("#channel-message-search input[type=search]").is_visible()
     page.locator("#channel-message-search input[type=search]").fill("meeting")
     page.wait_for_timeout(300)
@@ -73,6 +75,8 @@ with sync_playwright() as playwright:
     page.evaluate("""state.left.directs={'!alice':[]};dmSelection={radio:'left',peer:'!alice'};
       document.getElementById('dm-screen').hidden=false;renderDmScreen();
       onMessageSearchSenders(window.testScope,[{key:'own',name:'Me',count:0},{key:'sender:!alice',name:'!alice',count:3}]);""")
+    assert not page.locator("#dm-message-search input[type=search]").is_visible()
+    page.locator("#dm-search-toggle").click()
     assert page.locator("#dm-message-search input[type=search]").is_visible()
     page.locator("#dm-message-search input[type=search]").fill("directions")
     page.wait_for_timeout(300)

@@ -1317,6 +1317,40 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void nodeAction(String radio, String id, String action, String text) {
             main.post(() -> MainActivity.this.nodeAction(session(radio), id, action, text));
         }
+        @JavascriptInterface public void forgetNode(String key,String id,String name) {
+            main.post(()->{
+                RadioSession source=session(key);
+                if(source==null||id==null||id.isEmpty())return;
+                String radio=source.meshcore?"mc":"mt";
+                for(RadioSession s:sessions.values())if(s.meshcore==source.meshcore&&id.equals(s.ownId)){
+                    nodeActionResult("Cannot forget your own connected device here");return;
+                }
+                String senderName="";
+                if(source.meshcore){
+                    NodeEntry entry=source.knownNodes.get(id);
+                    senderName=id.startsWith("heard-name:")?id.substring(11):entry==null?"":entry.name;
+                    for(RadioSession s:sessions.values())if(s.meshcore)for(NodeEntry n:s.knownNodes.values())
+                        if(!n.id.equals(id)&&n.name.equals(senderName)){senderName="";break;}
+                }
+                try {
+                    chatStore.forgetNode(radio,id,senderName);
+                    SharedPreferences.Editor editor=getPreferences(0).edit().remove("node_name_"+radio+":"+id);
+                    if(!senderName.isEmpty())editor.remove("node_name_"+radio+":heard-name:"+senderName);
+                    for(String setting:getPreferences(0).getAll().keySet())
+                        if((setting.startsWith("contact_name:"+radio+":")||setting.startsWith(radio+":"))&&setting.endsWith(":"+id))editor.remove(setting);
+                    editor.apply();
+                    for(RadioSession s:sessions.values())if(s.meshcore==source.meshcore){
+                        s.knownNodes.remove(id);
+                        if(s.protocol!=null)s.protocol.forgetNode(id);
+                        if(id.equals(s.traceTarget)){s.lastTrace=null;s.pendingTrace=0;s.traceTarget="";}
+                        if(id.equals(s.signalTarget)){s.pendingSignal=0;s.signalTarget="";s.signalStatus="";}
+                        s.readThrough.remove("d:"+id);
+                        loadSessionHistory(s);
+                    }
+                    publish();sendMapData();nodeActionResult("Node forgotten on this phone");
+                }catch(RuntimeException error){nodeActionResult("Could not forget node: "+error.getMessage());}
+            });
+        }
         @JavascriptInterface public void setNodeName(String radio,String id,String name) {
             main.post(()->{
                 if((!"mc".equals(radio)&&!"mt".equals(radio))||id==null||id.isEmpty()||name==null)return;

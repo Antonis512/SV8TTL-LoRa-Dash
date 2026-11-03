@@ -77,9 +77,9 @@ function messageIdentity(radio,message) {
     const candidates=matches.filter(item=>item.name.length===longest);
     if(candidates.length===1) return {name:candidates[0].name,id:candidates[0].id,text:message.text.slice(longest+2)};
     const colon=message.text.indexOf(': ');
-    if(colon>0) return {name:message.text.slice(0,colon),id:null,text:message.text.slice(colon+2),ambiguous:candidates.length>1};
+    if(colon>0) return {name:message.text.slice(0,colon),id:candidates.length>1?null:'heard-name:'+message.text.slice(0,colon),text:message.text.slice(colon+2),ambiguous:candidates.length>1};
   }
-  return {name:message.senderName||message.sender,id:null,text:message.text};
+  return {name:message.senderName||message.sender,id:message.sender&&message.sender!=='MeshCore'?message.sender:null,text:message.text};
 }
 function deliveryLabel(value) {
   if(value&&value.startsWith('sending: ')) return value.slice(9);
@@ -92,7 +92,8 @@ function deliveryLabel(value) {
 }
 function appendMessageMeta(bubble,radio,message,channelMessage=false) {
   const meta=node('div','meta');
-  meta.appendChild(node('strong','message-sender',messageIdentity(radio,message).name));
+  const identity=messageIdentity(radio,message);
+  meta.appendChild(node('strong','message-sender',namedNode(radio,identity.id,identity.name)));
   meta.appendChild(node('span','message-time',' · '+message.time));
   bubble.appendChild(meta);
 }

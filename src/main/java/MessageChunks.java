@@ -6,6 +6,12 @@ import java.util.List;
 
 /** Splits only between Unicode grapheme clusters; no recipient-side reassembly assumed. */
 final class MessageChunks {
+    static final int MAX_PARTS=3;
+    static List<String> forSending(String text,int limit) {
+        List<String> parts=split(text,limit);
+        if(parts.size()>MAX_PARTS)throw new IllegalArgumentException("Message is too long. Shorten it to fit at most 3 split messages. Nothing was sent.");
+        return parts;
+    }
     static List<String> split(String text,int limit) {
         if(limit<1||text==null||text.trim().isEmpty()||text.indexOf('\0')>=0)
             throw new IllegalArgumentException("Enter text and wait for the radio's message limit");

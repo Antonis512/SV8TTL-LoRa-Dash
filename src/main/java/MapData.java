@@ -87,16 +87,29 @@ final class MapData {
     void delete(String id){db().delete("map_items","id=?",new String[]{id});db().delete("map_geofence_state","item=?",new String[]{id});}
     JSONArray geofenceChanges(String radio,String device,String node,double lat,double lon) throws JSONException {
         JSONArray changes=new JSONArray();if(!valid(lat,lon))return changes;
-        JSONArray fences=items();for(int i=0;i<fences.length();i++){JSONObject item=fences.getJSONObject(i);if(!item.getString("kind").equals("geofence")||!item.getBoolean("enabled"))continue;
+        SQLiteDatabase database=db();database.beginTransaction();
+        try { JSONArray fences=items();for(int i=0;i<fences.length();i++){JSONObject item=fences.getJSONObject(i);if(!item.getString("kind").equals("geofence")||!item.getBoolean("enabled"))continue;
             JSONObject geometry=item.getJSONObject("geometry");if(!geometry.optString("type").equals("Polygon"))continue;
             boolean inside=insidePolygon(geometry.getJSONArray("coordinates").getJSONArray(0),lat,lon);String id=item.getString("id");boolean known=false,old=false;
             try(Cursor c=db().rawQuery("SELECT inside FROM map_geofence_state WHERE item=? AND radio=? AND device=? AND node=?",new String[]{id,radio,device,node})){if(c.moveToFirst()){known=true;old=c.getInt(0)!=0;}}
             ContentValues v=new ContentValues();v.put("item",id);v.put("radio",radio);v.put("device",device);v.put("node",node);v.put("inside",inside?1:0);db().insertWithOnConflict("map_geofence_state",null,v,SQLiteDatabase.CONFLICT_REPLACE);
             if(known ? old!=inside : inside){
                 String event=!known ? "appeared in" : inside ? "entered" : "left";
-                changes.put(new JSONObject().put("title",item.getString("title")).put("node",node).put("event",event));
+                String name=node;
+                try(Cursor c=database.rawQuery("SELECT name FROM map_nodes WHERE radio=? AND device=? AND id=?",new String[]{radio,device,node})){if(c.moveToFirst()&&!c.getString(0).isEmpty())name=c.getString(0);}
+                JSONObject alert=new JSONObject().put("id",java.util.UUID.randomUUID().toString()).put("time",System.currentTimeMillis()).put("fence",id).put("title",item.getString("title")).put("node",node).put("name",name).put("radio",radio).put("device",device).put("lat",lat).put("lon",lon).put("event",event);
+                saveAlert(alert);changes.put(alert);
             }
-        }return changes;
+        }database.setTransactionSuccessful();return changes;
+        }finally{database.endTransaction();}
+    }
+    JSONArray alerts() throws JSONException {
+        JSONArray out=new JSONArray();try(Cursor c=db().rawQuery("SELECT body FROM map_alerts ORDER BY time DESC,id",null)){while(c.moveToNext())out.put(new JSONObject(c.getString(0)));}return out;
+    }
+    void deleteAlert(String id){db().delete("map_alerts","id=?",new String[]{id});}
+    private void saveAlert(JSONObject alert) throws JSONException {
+        if(!alert.getString("id").matches("[a-zA-Z0-9-]{1,80}")||!validIdentity(alert.getString("radio"),alert.getString("device"),alert.getString("node"))||!valid(alert.getDouble("lat"),alert.getDouble("lon")))throw new JSONException("Invalid geofence alert");
+        ContentValues row=new ContentValues();row.put("id",alert.getString("id"));row.put("time",alert.getLong("time"));row.put("body",alert.toString());db().insertWithOnConflict("map_alerts",null,row,SQLiteDatabase.CONFLICT_IGNORE);
     }
     private static boolean insidePolygon(JSONArray points,double lat,double lon){
         boolean inside=false;try {for(int i=0,j=points.length()-1;i<points.length();j=i++){
@@ -117,17 +130,18 @@ final class MapData {
     private static void validatePoint(JSONArray point) throws JSONException {
         if(point.length()!=2||!valid(point.getDouble(1),point.getDouble(0)))throw new JSONException("Invalid map coordinates");
     }
-    JSONObject snapshot() throws JSONException {return new JSONObject().put("nodes",nodes()).put("positions",positions("","","",0,0)).put("heard",heardEvents()).put("items",items());}
+    JSONObject snapshot() throws JSONException {return new JSONObject().put("nodes",nodes()).put("positions",positions("","","",0,0)).put("heard",heardEvents()).put("items",items()).put("alerts",alerts());}
     JSONObject backup() throws JSONException {
         JSONArray fences=new JSONArray();try(Cursor c=db().rawQuery("SELECT item,radio,device,node,inside FROM map_geofence_state",null)){
             while(c.moveToNext())fences.put(new JSONObject().put("item",c.getString(0)).put("radio",c.getString(1)).put("device",c.getString(2)).put("node",c.getString(3)).put("inside",c.getInt(4)));
         }
-        return new JSONObject().put("nodes",nodes()).put("positions",positions("","","",0,0,null)).put("heard",heardEvents(false)).put("items",items()).put("fenceState",fences);
+        return new JSONObject().put("nodes",nodes()).put("positions",positions("","","",0,0,null)).put("heard",heardEvents(false)).put("items",items()).put("fenceState",fences).put("alerts",alerts());
     }
     void mergeBackup(JSONObject data) throws JSONException {
         if(data==null)return;SQLiteDatabase db=db();
         JSONArray ns=data.optJSONArray("nodes"),ps=data.optJSONArray("positions"),hs=data.optJSONArray("heard"),items=data.optJSONArray("items"),fs=data.optJSONArray("fenceState");
         if(ns==null||ps==null||hs==null||items==null)throw new JSONException("Invalid Map backup");
+        JSONArray alerts=data.optJSONArray("alerts");if(alerts!=null)for(int i=0;i<alerts.length();i++)saveAlert(alerts.getJSONObject(i));
         for(int i=0;i<ns.length();i++){JSONObject n=ns.getJSONObject(i);String radio=n.getString("radio"),device=n.getString("device"),id=n.getString("id");if(!validIdentity(radio,device,id))continue;
             ContentValues v=new ContentValues();v.put("radio",radio);v.put("device",device);v.put("id",id);v.put("name",n.optString("name",id));v.put("role",n.optString("role",""));if(n.has("lat")&&n.has("lon")&&valid(n.optDouble("lat"),n.optDouble("lon"))){v.put("lat",n.getDouble("lat"));v.put("lon",n.getDouble("lon"));}v.put("position_at",n.optLong("positionAt",0));db.insertWithOnConflict("map_nodes",null,v,SQLiteDatabase.CONFLICT_IGNORE);
         }

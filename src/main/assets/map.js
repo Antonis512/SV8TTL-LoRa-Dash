@@ -1,6 +1,7 @@
 'use strict';
 let mapData={nodes:[],positions:[],heard:[],items:[],packs:[]};
 let mapView=null,mapMarkers=[],mapToolName='passive',mapDrawing=null,mapDraft=[],mapMode='online',mapLayerKind='street',mapPackId='',mapFocus=null,mapStyleKey='';
+let mapSelected=null,mapFocusWaiting=false,mapAlertPin=null;
 let mapProtocol=null,mapDisplayStyle='full';
 const mapUrl=id=>location.origin+'/packs/'+id+'.pmtiles';
 const mapAsset=path=>location.origin+'/assets/'+path;
@@ -41,6 +42,7 @@ function initMap(){
     mapNotice((mapMode==='offline'?'Offline':'Online')+' map could not load: '+detail,true);
   });
   mapView.on('load',()=>renderMap());
+  mapView.on('zoomend',()=>renderMap());
   mapView.on('style.load',()=>{drawMapItems();renderMap();});
   mapView.on('click',event=>{if(!mapDrawing)return;mapDraft.push([Number(event.lngLat.lng.toFixed(6)),Number(event.lngLat.lat.toFixed(6))]);drawMapItems();mapNotice(mapDraft.length+' point'+(mapDraft.length===1?'':'s')+' chosen. Tap again, then Save.');});
 }
@@ -94,12 +96,20 @@ function setMapStyle(preserveView=false){
 }
 window.onMapData=data=>{
   if(data.displayStyle==='dark'||data.displayStyle==='full')mapDisplayStyle=data.displayStyle;
-  mapData={nodes:data.nodes||[],positions:data.positions||[],heard:data.heard||[],items:data.items||[],packs:data.packs||[]};
+  mapData={nodes:data.nodes||[],positions:data.positions||[],heard:data.heard||[],items:data.items||[],packs:data.packs||[],alerts:data.alerts||[]};
   if(!mapData.packs.some(p=>p.id===mapPackId)){
     const saved=mapData.packs.find(p=>p.id===data.selectedPackId);
     mapPackId=saved?.id||'';if(saved)mapLayerKind=saved.kind;
   }
   if(!mapData.packs.some(p=>p.kind===mapLayerKind))mapLayerKind=mapData.packs.some(p=>p.kind==='street')?'street':mapData.packs.some(p=>p.kind==='satellite')?'satellite':'street';
+  if(mapFocusWaiting){
+    mapFocusWaiting=false;renderMapFilters();
+    for(const id of ['map-network','map-device','map-role','map-rf'])el(id).value='all';
+    el('map-from').value='';el('map-to').value='';
+    el('map-network').value=mapFocus.radio;
+    if(mapFocus.device)el('map-device').value=mapFocus.radio+':'+mapFocus.device;
+  }
+  renderGeofenceHistory();
   initMap();setMapMode(mapMode);renderMap();renderMapItems();el('map-send-mark')?.refreshTargets?.();
 };
 function mapFilterRows(){
@@ -116,7 +126,11 @@ function mapFilterRows(){
 }
 function renderMapFilters(){
   const device=el('map-device'),old=device.value;device.replaceChildren();const all=mapText('option','All devices');all.value='all';device.appendChild(all);
-  for(const d of state?.devices||[]){const option=mapText('option',(d.radio||'').toUpperCase()+' · '+(d.name||d.id));option.value=d.radio+':'+d.id;device.appendChild(option);}
+  const devices=new Map();
+  for(const n of mapData.nodes)devices.set(n.radio+':'+n.device,{radio:n.radio,id:n.device,connected:false});
+  for(const d of state?.myNodes||[])devices.set(d.radio+':'+d.id,d);
+  for(const d of state?.devices||[])devices.set(d.radio+':'+d.id,{...d,connected:true});
+  for(const d of devices.values()){const option=mapText('option',(d.radio||'').toUpperCase()+' · '+(d.name||d.id)+(d.connected?'':' · offline'));option.value=d.radio+':'+d.id;device.appendChild(option);}
   if([...device.options].some(o=>o.value===old))device.value=old;
   const roles=el('map-role');populateRoleMenu(roles,mapData.nodes,roles.value);
   const rf=el('map-rf'),oldRf=rf.value;rf.replaceChildren();const anyRf=mapText('option','All settings');anyRf.value='all';rf.appendChild(anyRf);
@@ -130,13 +144,18 @@ function renderMap(){
   const rows=mapFilterRows(),placed=rows.filter(n=>Number.isFinite(n.lat)&&Number.isFinite(n.lon));
   for(const n of placed){
     const dot=mapText('span','',`map-node-dot ${n.radio}${n.positionAt&&Date.now()-n.positionAt>86400000?' old':''}`);
-    const popup=document.createElement('div');popup.appendChild(mapText('strong',n.name||n.id));popup.appendChild(mapText('div',n.radio.toUpperCase()+' · '+displayRole(n.radio,n.role)));popup.appendChild(mapText('div',heardDescription(n.radio,n.receivingRf)));popup.appendChild(mapText('div','Last heard: '+mapDate(n.lastHeard)));popup.appendChild(mapText('div','Position reported: '+mapDate(n.positionAt)));
-    mapButton(popup,'Show saved positions',()=>showMapTrail(n));
+    const popup=mapNodePopup(n,placed);
     const marker=new maplibregl.Marker({element:dot}).setLngLat([n.lon,n.lat]).setPopup(new maplibregl.Popup({offset:15}).setDOMContent(popup)).addTo(mapView);mapMarkers.push(marker);
+    if(mapSelected&&sameMapNode(n,mapSelected))marker.togglePopup();
   }
   const missing=rows.filter(n=>!Number.isFinite(n.lat)||!Number.isFinite(n.lon));el('map-counts').textContent=placed.length+' positioned · '+missing.length+' without position';
   const list=el('map-no-position-list');list.replaceChildren();for(const n of missing)list.appendChild(mapText('div',n.radio.toUpperCase()+' · '+(n.name||n.id)+' · '+n.id));
-  if(mapFocus){const n=placed.find(x=>x.radio===mapFocus.radio&&x.id===mapFocus.id&&(!mapFocus.device||x.device===mapFocus.device));if(n){mapView.flyTo({center:[n.lon,n.lat],zoom:Math.max(mapView.getZoom(),13)});const marker=mapMarkers[placed.indexOf(n)];marker?.togglePopup();mapFocus=null;}}
+  if(mapFocus&&!mapFocusWaiting){
+    const requested=mapFocus;mapFocus=null;
+    const index=placed.findIndex(n=>sameMapNode(n,requested));
+    if(index>=0){const n=placed[index];mapSelected=n;mapMarkers[index].getPopup().addTo(mapView);mapView.flyTo({center:[n.lon,n.lat],zoom:Math.max(mapView.getZoom(),13)});mapNotice('Selected '+(n.name||n.id)+' · '+n.id);}
+    else {mapSelected=null;mapNotice('No saved position for '+requested.id+' on this receiving device.',true);}
+  }
   for(const item of mapData.items.filter(i=>i.kind==='mark'&&i.enabled)){
     const [lon,lat]=item.geometry.coordinates;if(!Number.isFinite(lon)||!Number.isFinite(lat))continue;
     const pin=mapText('span','📍');pin.style.fontSize='23px';const popup=document.createElement('div');popup.appendChild(mapText('strong',item.title));popup.appendChild(mapText('div',item.description||'Saved mark'));
@@ -145,7 +164,7 @@ function renderMap(){
   drawMapItems();
 }
 function mapFitVisible(){if(!mapView)return;const rows=mapFilterRows().filter(n=>Number.isFinite(n.lat)&&Number.isFinite(n.lon));if(!rows.length){mapNotice('No positioned nodes match these filters.');return;}const bounds=new maplibregl.LngLatBounds();for(const n of rows)bounds.extend([n.lon,n.lat]);mapView.fitBounds(bounds,{padding:45,maxZoom:15});}
-window.openMapNode=(radio,id,device='')=>{mapFocus={radio,id,device};clearMapFilters();el('map-network').value=radio;switchTab('map');AndroidBridge.loadMap();};
+window.openMapNode=(radio,id,device='')=>{mapSelected=null;mapFocus={radio,id,device};mapFocusWaiting=true;mapAlertPin?.remove();mapAlertPin=null;switchTab('map');AndroidBridge.loadMap();};
 window.onMapAlert=message=>mapNotice('Geofence: '+message);
 function showMapTrail(n){
   const points=mapData.positions.filter(p=>p.radio===n.radio&&p.node===n.id&&p.device===n.device);
@@ -347,6 +366,10 @@ function mapTool(name){
       if(target.dataset.device!==device.value){target.value='';target.dataset.device=device.value;}
       target.disabled=!nodes.length;
       button.disabled=!selected||!target.value;
+      button.textContent='Request radio path';button.title='';
+      if(selected?.radio==='mt'){
+        button.dataset.mtTraceroute='Request radio path';button.dataset.traceUnavailable=String(!selected||!target.value);updateTracerouteButtons();
+      }else {delete button.dataset.mtTraceroute;delete button.dataset.traceUnavailable;}
       const trace=selected?.lastTrace;
       result.textContent=trace?[(trace.name||trace.target),trace.note,(trace.forward||[]).map(h=>h.name).join(' → ')].filter(Boolean).join(' · '):'';
     }
@@ -419,3 +442,51 @@ function mapTool(name){
   }
 }
 mapTool('passive');
+
+function sameMapNode(a,b){return a.radio===b.radio&&a.id===b.id&&(!b.device||a.device===b.device);}
+function mapNodePopup(n,placed){
+  const popup=document.createElement('div');
+  popup.appendChild(mapText('strong',n.name||n.id));
+  popup.appendChild(mapText('div',n.radio.toUpperCase()+' · '+n.id));
+  popup.appendChild(mapText('div','Receiver: '+n.device));
+  popup.appendChild(mapText('div',displayRole(n.radio,n.role)+' · '+heardDescription(n.radio,n.receivingRf)));
+  popup.appendChild(mapText('div','Last heard: '+mapDate(n.lastHeard)));
+  popup.appendChild(mapText('div','Position reported: '+mapDate(n.positionAt)));
+  mapButton(popup,'Show saved positions',()=>showMapTrail(n));
+  const point=mapView.project([n.lon,n.lat]);
+  const nearby=placed.filter(other=>{const p=mapView.project([other.lon,other.lat]);return Math.hypot(p.x-point.x,p.y-point.y)<32;});
+  if(nearby.length>1){
+    popup.appendChild(mapText('div',nearby.length+' nodes at or near this point:'));
+    for(const other of nearby)mapButton(popup,(other.name||other.id)+' · '+other.id,()=>openMapNode(other.radio,other.id,other.device));
+  }
+  return popup;
+}
+window.openGeofenceHistory=()=>{
+  switchTab('map');renderGeofenceHistory();
+  if(!el('map-alerts-dialog').open)el('map-alerts-dialog').showModal();
+  AndroidBridge.loadMap();
+};
+function renderGeofenceHistory(){
+  const alerts=mapData.alerts||[],host=el('map-alerts-list');host.replaceChildren();
+  el('map-alerts-button').textContent='Geofence alerts ('+alerts.length+')';
+  if(!alerts.length)host.appendChild(mapText('p','No saved geofence alerts. New alerts stay here until you delete them.'));
+  for(const a of alerts){
+    const row=mapText('article','','map-alert-record');
+    row.appendChild(mapText('strong',(a.name||a.node)+' '+a.event+' '+a.title));
+    row.appendChild(mapText('div',mapDate(a.time)));
+    row.appendChild(mapText('div',a.radio.toUpperCase()+' · '+a.node+' · Receiver: '+a.device));
+    row.appendChild(mapText('div','Reported location: '+a.lat+', '+a.lon));
+    mapButton(row,'Alert location',()=>{
+      el('map-alerts-dialog').close();mapFocus=null;mapFocusWaiting=false;mapSelected=null;initMap();
+      if(!mapView){mapNotice('Map is unavailable. The reported coordinates are saved in the alert.',true);return;}
+      mapAlertPin?.remove();
+      const popup=mapText('div',(a.name||a.node)+' · '+a.node+' · '+a.event+' '+a.title+' · '+mapDate(a.time));
+      mapAlertPin=new maplibregl.Marker({color:'#fbbf24'}).setLngLat([a.lon,a.lat]).setPopup(new maplibregl.Popup().setDOMContent(popup)).addTo(mapView);
+      mapAlertPin.togglePopup();mapView.flyTo({center:[a.lon,a.lat],zoom:Math.max(mapView.getZoom(),15)});
+      mapNotice('Historical alert location · '+mapDate(a.time));
+    });
+    mapButton(row,'Latest node position',()=>{el('map-alerts-dialog').close();openMapNode(a.radio,a.node,a.device);});
+    mapButton(row,'Delete alert',()=>{if(confirm('Delete this saved geofence alert?'))AndroidBridge.deleteGeofenceAlert(a.id);});
+    host.appendChild(row);
+  }
+}

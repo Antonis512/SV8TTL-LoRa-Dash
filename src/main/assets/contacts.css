@@ -1,0 +1,44 @@
+#bottom-nav {overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:var(--accent) var(--bg2);touch-action:pan-x;background:linear-gradient(90deg,var(--bg2),var(--bg2));}
+#bottom-nav .nav-btn {flex:1 0 70px;min-width:70px;}
+#bottom-nav.more-right::after,#bottom-nav.more-left::before {position:fixed;bottom:0;height:var(--nav-h);width:14px;display:flex;align-items:center;justify-content:center;background:var(--bg2);color:var(--accent);font-size:22px;pointer-events:none;z-index:501;}
+#bottom-nav.more-right::after {content:'›';right:0;}
+#bottom-nav.more-left::before {content:'‹';left:0;}
+#tab-contacts {overflow:auto;min-height:0;}
+#contacts-content {padding:12px;max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box;}
+.contact-toolbar {display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:8px 0;}
+.contact-toolbar h2 {margin:0 auto 0 0;}
+#tab-contacts button,.contacts-dialog button {min-height:40px;border:1px solid var(--border);border-radius:7px;padding:8px 10px;background:var(--bg2);color:var(--text);font:inherit;cursor:pointer;}
+#tab-contacts button:hover,.contacts-dialog button:hover {border-color:var(--accent);}
+#tab-contacts select,.contacts-dialog select {background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;min-height:38px;padding:5px;font:inherit;}
+#tab-contacts .contact-person {background:none;border:0;padding:4px;}
+#tab-contacts .contact-row>button:last-child {min-width:40px;}
+#tab-contacts input,#tab-contacts select,.contacts-dialog input,.contacts-dialog select,.contacts-dialog textarea {max-width:100%;box-sizing:border-box;}
+#contacts-search {width:100%;}
+.contact-row {display:flex;gap:10px;align-items:center;border-bottom:1px solid var(--border);padding:10px 0;}
+.contact-person {flex:1;min-width:0;text-align:left;background:none;color:var(--text);border:0;}
+.contact-person strong,.contact-person small {display:block;overflow-wrap:anywhere;}
+.contact-avatar {width:52px;height:52px;flex:0 0 52px;border-radius:50%;object-fit:cover;background:var(--bg2);display:inline-flex;align-items:center;justify-content:center;color:var(--accent);font-size:20px;}
+.contact-match {color:var(--accent);white-space:pre-wrap;overflow-wrap:anywhere;}
+.contact-section {margin:16px 0;padding-top:8px;border-top:1px solid var(--border);}
+.contact-section h3 {margin:4px 0 8px;}
+.contact-value {white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;}
+.contacts-dialog {color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:12px;width:min(650px,calc(100% - 24px));max-height:calc(100dvh - 24px);padding:14px;box-sizing:border-box;overflow:auto;overscroll-behavior:contain;}
+.contacts-dialog::backdrop {background:#0009;}
+.contacts-dialog {margin:auto;}
+#contacts-tools {margin:8px 0;}
+#contacts-tools summary,.contact-section summary {cursor:pointer;color:var(--accent);padding:8px 0;}
+#contacts-sort {width:125px;}
+#contacts-network {width:140px;}
+.contact-fields {display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
+.contact-field {display:flex;flex-direction:column;gap:4px;min-width:0;}
+.contact-field input,.contact-field textarea,.contact-field select {width:100%;}
+.contact-repeat {display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;align-items:center;}
+.contact-repeat>.contact-field {flex:1 1 140px;min-width:0;}
+.contact-repeat textarea {min-height:70px;}
+.contact-check {display:flex;gap:8px;align-items:center;margin:8px 0;overflow-wrap:anywhere;}
+.contact-check input {flex:0 0 auto;}
+.contact-node {border:1px solid var(--border);border-radius:8px;padding:10px;margin:8px 0;overflow-wrap:anywhere;}
+.contact-node>button {text-align:left;width:100%;}
+.contact-toolbar .active {color:var(--accent);border-color:var(--accent);}
+#contacts-status {white-space:pre-wrap;color:var(--accent);}
+.contact-error {color:#ffae9c;white-space:pre-wrap;}

@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="android.css">
   <link rel="stylesheet" href="maplibre-gl.css">
   <link rel="stylesheet" href="map.css">
+  <link rel="stylesheet" href="contacts.css">
 </head>
 <body>
 <div id="app-topo-bg"></div>
@@ -66,6 +67,21 @@
   </div>
 </main>
 
+<main id="tab-contacts" class="tab-panel" hidden>
+  <div id="contacts-content">
+    <div class="contact-toolbar"><h2>Contacts</h2><button type="button" onclick="editContact()">+ Add Contact</button></div>
+    <div id="contacts-status" role="status" aria-live="polite"></div>
+    <div id="contacts-list-view">
+      <input id="contacts-search" class="form-input" type="search" placeholder="Search anything you remember…" aria-label="Search contacts" oninput="contactViewChanged()">
+      <div class="contact-toolbar"><label><input id="contacts-favorites" type="checkbox" onchange="contactViewChanged()"> Favorites</label><select id="contacts-sort" aria-label="Sort contacts" onchange="contactViewChanged()"><option value="name">Name A–Z</option><option value="surname">Surname A–Z</option><option value="edited">Recently edited</option><option value="heard">Node last heard</option></select><select id="contacts-network" aria-label="Contact network" onchange="contactViewChanged()"><option value="all">All networks</option><option value="mc">MeshCore</option><option value="mt">Meshtastic</option><option value="none">No assigned nodes</option></select></div>
+      <div id="contacts-categories" class="contact-toolbar"></div>
+      <details id="contacts-tools"><summary>Tools and import</summary><div class="contact-toolbar"><button type="button" onclick="AndroidBridge.pickAndroidContact('')">Import from Android</button><button type="button" onclick="manageContactCategories()">Categories</button><button type="button" onclick="contactDuplicates()">Find duplicates</button><button type="button" onclick="contactTrash()">Deleted contacts / Undo</button><button type="button" onclick="exportAllContacts()">Export contacts</button><button type="button" onclick="AndroidBridge.importContacts()">Import contacts file</button></div></details>
+      <p id="contacts-count" class="help"></p><div id="contacts-list"></div>
+    </div>
+    <div id="contact-detail" hidden></div>
+  </div>
+</main>
+<dialog id="contacts-dialog" class="contacts-dialog" aria-label="Contact editor"><div id="contacts-dialog-content"></div></dialog>
 <main id="tab-nodes" class="tab-panel" hidden>
   <div id="nodes-filter-bar">
     <input id="nodes-search" class="form-input" type="search" placeholder="Search nodes and contacts…" oninput="renderNodes()">
@@ -81,7 +97,7 @@
     <label class="node-device-label">MT <select id="nodes-mt-device" class="form-input" onchange="AndroidBridge.selectDevice('mt',this.value)"></select></label>
   </div>
   <div class="node-filter-options">
-    <label class="node-hide-label"><input id="nodes-show-unknown" type="checkbox" onchange="renderNodes()">Show unknown last heard</label>
+    <label class="node-hide-label"><input id="nodes-show-unknown" type="checkbox" onchange="renderNodes()" checked>Show unknown last heard</label>
   <label class="node-hide-label node-hide-line"><input id="nodes-hide-unmessageable" type="checkbox" onchange="renderNodes()">Hide unmessageable nodes</label>
   </div>
   <div id="nodes-summary"></div>
@@ -100,6 +116,7 @@
     <label>To<input id="map-to" class="form-input" type="datetime-local" onchange="renderMap()"></label>
     <button type="button" onclick="clearMapFilters()">Clear filters</button>
   </div>
+  <button type="button" id="map-alerts-button" onclick="openGeofenceHistory()">Geofence alerts</button>
   <div id="map-status" role="status" aria-live="polite"></div>
   <div id="map-source"></div>
   <div class="map-canvas-wrap"><div id="offline-map" aria-label="Map"></div>
@@ -110,6 +127,7 @@
   <section id="map-tool-panel" aria-live="polite"></section>
   <div id="map-items"></div>
 </main>
+<dialog id="map-alerts-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><h2>Geofence alerts</h2><button type="button" aria-label="Close geofence alerts" onclick="el('map-alerts-dialog').close()">×</button></div><div class="log-dialog-body" id="map-alerts-list"></div></dialog>
 <dialog id="map-offline-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><h2>Offline maps</h2><button type="button" aria-label="Close Offline maps" onclick="el('map-offline-dialog').close()">×</button></div><div class="log-dialog-body map-offline-choices"><button type="button" onclick="openInstalledMaps()"><strong>Installed maps</strong><span>Choose a map already on this phone.</span></button><button type="button" onclick="openMapImport()"><strong>Import maps</strong><span>Add a BBBike pack or download a Copernicus area.</span></button><button type="button" onclick="openMapDisplayStyle()"><strong>Map Display Style</strong><span>Choose Full or Dark for offline vector maps.</span></button></div></dialog>
 <dialog id="map-style-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><button type="button" aria-label="Back to Offline maps" onclick="backToOfflineMaps('map-style-dialog')">←</button><h2>Map Display Style</h2><button type="button" aria-label="Close Map Display Style" onclick="el('map-style-dialog').close()">×</button></div><div class="log-dialog-body map-style-choices"><label><input type="radio" name="map-display-style" value="full" onchange="setMapDisplayStyle(this.value)"><span><strong>Full</strong><small>Colorful land use, water, roads, buildings and labels.</small></span></label><label><input type="radio" name="map-display-style" value="dark" onchange="setMapDisplayStyle(this.value)"><span><strong>Dark</strong><small>The original dark map style.</small></span></label><p>Applies to offline vector maps. Satellite imagery keeps its original colors.</p></div></dialog>
 <dialog id="map-installed-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><button type="button" aria-label="Back to Offline maps" onclick="backToOfflineMaps('map-installed-dialog')">←</button><h2>Installed maps</h2><button type="button" onclick="el('map-installed-dialog').close()">×</button></div><div class="log-dialog-body"><div id="map-pack-list"></div></div></dialog>
@@ -265,7 +283,7 @@
     <div id="settings-backup-page" class="settings-subpage" hidden>
       <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
       <h2>App backup</h2>
-      <p class="help">Export all known radios, channel names, messages and app settings to one JSON file. Import adds missing data and keeps existing settings and histories on this phone.</p>
+      <p class="help">Full App Backup includes radios, channels, messages, settings, Log, Map and offline packs, plus all Contacts: profiles, photos, notes, custom fields, categories, favorites and node assignments. Deleted contacts kept for undo are included. Import adds missing data and keeps newer contact edits. Android contact links may need to be selected again on another phone.</p>
       <div class="actions"><button type="button" onclick="AndroidBridge.exportAppBackup()">Export full backup</button></div>
       <div class="actions"><button type="button" onclick="AndroidBridge.importAppBackup()">Import full backup</button></div>
       <p class="help">A sound selected on another phone will be used only if it is available here. Bluetooth permission and pairing may still need to be set up on this phone.</p>
@@ -289,7 +307,7 @@
 <dialog id="settings-window-split" class="settings-window" aria-labelledby="settings-window-split-title">
   <div class="settings-window-header"><h2 id="settings-window-split-title">Message Split</h2><button type="button" class="window-x" aria-label="Close Message Split" onclick="closeSettingsWindow('split')">×</button></div>
   <div class="settings-window-body">    <label class="config-switch"><input id="message-split-enabled" type="checkbox" onchange="AndroidBridge.setMessageSplitEnabled(this.checked)"> Enable Message Split</label>
-    <button type="button" class="info-toggle" aria-label="Information 4" aria-expanded="false" aria-controls="settings-sending-page-help-4" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-4" class="help" hidden>Split messages exceeding the radio limit into separate parts. Disabling rejects new oversized messages without removing your draft; already queued parts may finish.</p>
+    <button type="button" class="info-toggle" aria-label="Information 4" aria-expanded="false" aria-controls="settings-sending-page-help-4" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-4" class="help" hidden>Split messages into at most 3 parts, using the selected radio's byte limit. Longer messages are rejected without sending any part or removing your draft. Disabling rejects messages exceeding one part; already queued parts may finish. Send to multiple allows up to 5 destinations and has a 5-minute cooldown after every item succeeds.</p>
     <label>Message Split interval (seconds) <input class="form-input" id="message-split-interval" type="number" min="1" max="300" value="5" onchange="AndroidBridge.setMessageSplitIntervalSeconds(Number(this.value))"></label>
     <button type="button" class="info-toggle" aria-label="Information 5" aria-expanded="false" aria-controls="settings-sending-page-help-5" onclick="toggleInformation(this)">i</button><p id="settings-sending-page-help-5" class="help" hidden>Wait for the previous part's result or observation timeout, then wait this interval (default 5 seconds). Radio retries must finish first. Send to multiple also respects the pause before the next message.</p>
 </div>
@@ -326,10 +344,11 @@
   <button class="nav-btn" data-tab="map" onclick="switchTab('map')"><span class="nav-icon">◎</span><span>Map</span></button>
   <button class="nav-btn" data-tab="nodes" onclick="switchTab('nodes')"><span class="nav-icon">⬡</span><span>Nodes</span></button>
   <button id="nav-chat" class="nav-btn active" data-tab="chat" onclick="switchTab('chat')"><span class="nav-icon">◇</span><span>Chat</span></button>
+  <button class="nav-btn" data-tab="contacts" onclick="switchTab('contacts')"><span class="nav-icon">♙</span><span>Contacts</span></button>
   <button class="nav-btn" data-tab="log" onclick="switchTab('log')"><span class="nav-icon">≡</span><span>Log</span></button>
   <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')"><span class="nav-icon">⊞</span><span>Config</span></button>
 </nav>
-<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="radio-presets.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
+<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="radio-presets.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="contacts.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
 </body>
 </html>
 

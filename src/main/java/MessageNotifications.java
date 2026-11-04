@@ -21,16 +21,22 @@ final class MessageNotifications {
     }
     static void cancel(Context context) {context.getSystemService(NotificationManager.class).cancel(ID);}
     static void show(Context context,String title,String text) {
+        show(context,title,text,false);
+    }
+    static void showGeofence(Context context,String text){show(context,"Map geofence",text,true);}
+    private static void show(Context context,String title,String text,boolean geofence){
         createChannel(context);
         if(!allowed(context))return;
+        int notificationId=geofence?203:ID;
         Intent open=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent pending=PendingIntent.getActivity(context,ID,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        if(geofence)open.putExtra("geofenceHistory",true);
+        PendingIntent pending=PendingIntent.getActivity(context,notificationId,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification notification=new Notification.Builder(context,CHANNEL)
                 .setSmallIcon(R.drawable.ic_radio_unread).setContentTitle(title).setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text)).setContentIntent(pending)
                 .setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE)
                 .setVisibility(Notification.VISIBILITY_PRIVATE).build();
-        try {context.getSystemService(NotificationManager.class).notify(ID,notification);}
+        try {context.getSystemService(NotificationManager.class).notify(notificationId,notification);}
         catch(SecurityException denied) { /* Permission can change while the app is running. */ }
     }
 }

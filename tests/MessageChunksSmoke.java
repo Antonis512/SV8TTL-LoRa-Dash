@@ -15,5 +15,12 @@ public final class MessageChunksSmoke {
         try{MessageChunks.split("👨‍👩‍👧‍👦",4);throw new AssertionError("Must reject indivisible cluster");}catch(IllegalArgumentException expected){}
         if(MessageChunks.split("x".repeat(210),200).size()!=2||MessageChunks.split("👨‍👩‍👧‍👦".repeat(17),200).size()!=3)throw new AssertionError("MT part counts");
         System.out.println("UTF-8 chunking and grapheme boundary checks passed");
+        for(int limit:new int[]{126,138,150,200}) {
+            if(MessageChunks.forSending("x".repeat(limit*3),limit).size()!=3)throw new AssertionError("Three parts allowed");
+            try{MessageChunks.forSending("x".repeat(limit*3+1),limit);throw new AssertionError("Four parts must be rejected");}catch(IllegalArgumentException expected){}
+        }
+        if(MessageChunks.forSending("👨‍👩‍👧‍👦".repeat(24),200).size()!=3)throw new AssertionError("Whole graphemes at limit");
+        try{MessageChunks.forSending("👨‍👩‍👧‍👦".repeat(25),200);throw new AssertionError("Cluster overflow rejected");}catch(IllegalArgumentException expected){}
+        System.out.println("Three-part send limit passed for UTF-8 and whole graphemes");
     }
 }

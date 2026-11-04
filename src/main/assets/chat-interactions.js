@@ -304,7 +304,7 @@ function messageBudget(input) {
       }
     }
   }
-  return {limit,used,parts,split:state?.messageSplitEnabled!==false,invalid:text.includes('\0')||parts<0};
+  return {limit,used,parts,split:state?.messageSplitEnabled!==false,invalid:text.includes('\0')||parts<0||parts>3};
 }
 function updateMessageBudget(input) {
   const {limit,used,invalid,split,parts}=messageBudget(input);
@@ -313,7 +313,7 @@ function updateMessageBudget(input) {
     counter=node('span','message-budget','');counter.id=input.id+'-budget';
     input.parentElement.previousElementSibling.appendChild(counter);
   }
-  counter.textContent=limit?`${used} / ${limit} bytes`+(used>limit?(!split?' · Message Split disabled':parts>0?` · ${parts} split messages`:' · cannot split this character sequence'):''):'Waiting for radio limits';
+  counter.textContent=limit?`${used} / ${limit} bytes`+(used>limit?(!split?' · Message Split disabled':parts>3?' · Too long — maximum 3 split messages':parts>0?` · ${parts} / 3 split messages`:' · cannot split this character sequence'):''):'Waiting for radio limits';
   counter.classList.toggle('over-limit',used>limit||invalid);
   counter.title='UTF-8 bytes: Greek letters and emoji can use more than one byte.';
   const direct=input.id==='dm-input',radio=direct?dmSelection.radio:network,device=state&&state[radio];
@@ -321,10 +321,10 @@ function updateMessageBudget(input) {
   el(direct?'dm-reply':'chat-send').disabled=!ready||input.disabled||!used||!limit||(!split&&used>limit)||invalid;
 }
 function validMessageBudget(input) {
-  const {limit,used,invalid,split}=messageBudget(input);
+  const {limit,used,invalid,split,parts}=messageBudget(input);
   updateMessageBudget(input);
   if(!limit||(!split&&used>limit)||invalid) {
-    onNodeActionResult(invalid?'Remove NUL characters or shorten the character sequence that exceeds the message limit.':`Message uses ${used} UTF-8 bytes; this radio allows ${limit}. Shorten the text to send.`);
+    onNodeActionResult(parts>3?'Message is too long. Shorten it to fit at most 3 split messages. Nothing was sent.':invalid?'Remove NUL characters or shorten the character sequence that exceeds the message limit.':`Message uses ${used} UTF-8 bytes; this radio allows ${limit}. Shorten the text to send.`);
     return false;
   }
   return true;

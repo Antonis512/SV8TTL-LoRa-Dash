@@ -1,5 +1,25 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 4 November 2026 — GitHub update 0.10.24
+
+The user authorized updating GitHub with the current source and debug update APK, including the previously local 0.10.21–0.10.24 changes. Existing application ID, signing configuration, notices and attribution are preserved. Production signing and replacement licensing remain undecided. Earlier local-preview notes below describe their status at the time of development.
+
+## 4 November 2026 — geofence history and map identity — 0.10.24 local preview
+
+Alert persistence, backup integration, notification navigation, exact receiver/node selection and overlapping-node choices are locally authored. No third-party code or assets were added. Existing notices, application ID and signing configuration are preserved.
+
+## 4 November 2026 — Meshtastic traceroute allowance — 0.10.23 local preview
+
+Consulted the official Meshtastic-Android CommonNodeRequestActions.kt and CooldownOutlinedIconButton.kt on main, plus merged PRs #4699 and #7640: one shared 30-second traceroute allowance, claimed before submission and released on failed submission. This app independently implements that behavior using Android elapsed time, with a shared countdown across MT action entry points and separate tracking of outstanding replies. No upstream implementation was copied. The existing application ID, signing configuration and all notices are preserved.
+
+## 4 November 2026 — sending limits and offline node browsing — 0.10.22 local preview
+
+The sending limits, persisted cooldown and offline device browsing changes are locally authored. No third-party implementation or assets were copied. Meshtastic's public ReliableRouter and RoutingModule sources were consulted to assess a future low-airtime ping; that feature is not added here. Existing notices, application ID and signing configuration remain unchanged. Contacts UI is retained as requested. This local preview has not been published.
+
+## 3 November 2026 — Contacts — 0.10.21 local preview
+
+Contact storage, profile editing, search, node associations, backup integration and Android picker/dialer actions are locally authored. Android ContactsContract and common-intent documentation were consulted as API references; no third-party contact manager source or assets were copied. Existing application ID, signing configuration, OverMesh MIT attribution and other notices remain unchanged. A local debug APK was built at the user's request; this version has not been published to GitHub.
+
 ## 1 November 2026 — Full and Dark map display
 
 The Full Shortbread rendering style is locally authored for BBBike-supplied vector data; it is not a copy of BBBike’s website stylesheet. The existing rendering is retained as Dark. No additional third-party code, fonts or sprites were added. Existing map attribution and all notices remain.

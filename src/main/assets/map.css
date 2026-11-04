@@ -67,3 +67,5 @@
 #map-tool-panel .mark-input{position:relative}
 #map-tool-panel .mark-input input{padding-right:48px;min-height:42px;box-sizing:border-box}
 #tab-map #map-tool-panel .mark-input button{position:absolute;right:1px;bottom:1px;width:42px;height:40px;margin:0;border:0;background:transparent;font-size:19px}
+
+.map-alert-record{padding:12px 0;border-bottom:1px solid #53677a;overflow-wrap:anywhere}.map-alert-record button{margin:6px 6px 0 0}.maplibregl-popup-content{max-height:55vh;overflow:auto;overflow-wrap:anywhere}

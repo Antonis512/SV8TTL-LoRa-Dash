@@ -45,7 +45,7 @@ public final class HistoryInstrumentation extends Instrumentation {
             SQLiteDatabase db=store.getWritableDatabase();db.beginTransaction();
             try{store.save("mc","radio-a",0,"test","Must roll back","",5,false,"","");}finally{db.endTransaction();}
             check(store.load("mc","radio-a").size()==252,"Failed transaction rolls back");
-            db.setVersion(10);store.close();store=new ChatStore(context);check(store.load("mc","radio-a").size()==252&&store.getReadableDatabase().getVersion()==13,"v10 migration preserves history");
+            db.execSQL("DROP TABLE contact_items");db.execSQL("DROP TABLE map_alerts");db.setVersion(16);store.close();store=new ChatStore(context);check(store.load("mc","radio-a").size()==252&&store.getReadableDatabase().getVersion()==18,"v16 migration preserves history and creates contacts");
             store.saveSignal("mt-a","peer-a","{\"snr\":0}");store.saveSignal("mt-b","peer-a","{\"rssi\":-102}");
             store.close();store=new ChatStore(context);
             check(store.signals("mt-a","peer-a").length()==1&&store.signals("mt-a","peer-a").getJSONObject(0).getDouble("snr")==0,"Signal history survives reopen and retains zero");
@@ -74,9 +74,30 @@ public final class HistoryInstrumentation extends Instrumentation {
             check(chain.completedSuccessfully(),"Successful resend completes original chain despite failed earlier attempt");
             chain.items().getJSONObject(1).put("state","pending");
             JSONObject settings=new JSONObject().put("destination_set_test",new JSONObject().put("name","Friends").put("targets",new JSONArray().put(new JSONObject().put("nodeId","radio-a").put("peer","peer-a").put("radio","mc").put("channel",-1))).toString());
+            JSONObject person=new JSONObject().put("id","person-roundtrip").put("kind","contact").put("name","Νίκος").put("edited",100)
+                .put("photo","data:image/jpeg;base64,/9j/2Q==").put("favorite",true)
+                .put("categories",new JSONArray().put("category-club"))
+                .put("nodes",new JSONArray().put(new JSONObject().put("radio","mc").put("id","peer").put("assignmentRole","Owner")))
+                .put("phones",new JSONArray().put(new JSONObject().put("label","Mobile").put("value","+306900000000")))
+                .put("notes",new JSONArray().put(new JSONObject().put("date",50).put("text","Private note")))
+                .put("custom",new JSONArray().put(new JSONObject().put("label","Workshop").put("value","Volos").put("type","text")));
+            JSONObject category=new JSONObject().put("id","category-club").put("kind","category").put("title","Club").put("edited",100);
+            ContactsStore.merge(store,new JSONArray().put(person).put(category),false);
             StringWriter fullBackup=new StringWriter();HistoryBackup.export(fullBackup,store,null,null,settings);
             HistoryBackup.Headers fullHeaders=HistoryBackup.read(()->new StringReader(fullBackup.toString()),true,null,null);
             check(fullHeaders.settings.getString("destination_set_test").equals(settings.getString("destination_set_test")),"App backup preserves named destination sets and stable radio identities");
+            check(fullHeaders.contacts.length()==2,"Full App Backup contains contacts and categories");
+            store.getWritableDatabase().delete("contact_items",null,null);ContactsStore.merge(store,fullHeaders.contacts,true);
+            JSONObject restored=null;JSONArray restoredItems=ContactsStore.all(store);for(int i=0;i<restoredItems.length();i++)if(restoredItems.getJSONObject(i).getString("id").equals(person.getString("id")))restored=restoredItems.getJSONObject(i);
+            check(restored!=null&&restored.getString("photo").equals(person.getString("photo")),"Embedded photo survives backup/restore");
+            check(restored.getJSONArray("nodes").length()==1&&restored.getJSONArray("notes").getJSONObject(0).getString("text").equals("Private note"),"Assignments and private notes survive backup/restore");
+            check(restored.getJSONArray("custom").getJSONObject(0).getString("value").equals("Volos")&&restored.getJSONArray("categories").getString(0).equals("category-club"),"Custom fields and categories survive backup/restore");
+            ContactsStore.merge(store,new JSONArray().put(new JSONObject(person.toString()).put("name","Newer").put("edited",200)),false);
+            ContactsStore.merge(store,fullHeaders.contacts,true);check(ContactsStore.all(store).getJSONObject(0).getString("name").equals("Newer"),"Older backup does not overwrite newer contact");
+            JSONObject oldFull=new JSONObject(fullBackup.toString());oldFull.put("version",4);oldFull.remove("contacts");check(HistoryBackup.read(()->new StringReader(oldFull.toString()),true,null,null).contacts==null,"Old full backups remain readable");
+            boolean invalidRejected=false;try{ContactsStore.merge(store,new JSONArray().put(new JSONObject(person.toString()).put("id","should-not-save")).put(new JSONObject(person.toString()).put("id","invalid").put("phones",new JSONArray().put(42))),false);}catch(Exception expected){invalidRejected=true;}
+            check(invalidRejected&&ContactsStore.all(store).length()==2,"Malformed contact batches are rejected atomically");
+            ContactsStore.forgetNode(store,"mc","peer");check(ContactsStore.all(store).getJSONObject(0).getJSONArray("nodes").length()==0&&ContactsStore.all(store).getJSONObject(0).getJSONArray("phones").length()==1,"Forget Node unassigns without deleting the person");
             chain.pause();check(!chain.data.optBoolean("stepOnce"),"Pause cancels a queued manual step");
             chain.sendNext();chain=new SendChain(directory);check(chain.paused()&&!chain.data.optBoolean("stepOnce"),"Restart never executes an armed manual send");chain.data.put("multiple",false);chain.save();chain=new SendChain(directory);check(chain.items().length()==0,"Legacy split resume instructions removed from multi-send");chain.file.delete();
             int historyBeforeCancel=store.load("mc","radio-a").size();
@@ -92,7 +113,41 @@ public final class HistoryInstrumentation extends Instrumentation {
             check(chain.paused()&&!chain.hasPending()&&chain.items().length()==0,"Cancel Chain empties active and pending queue entries");
             chain=new SendChain(directory);check(chain.items().length()==0&&!chain.data.optBoolean("stepOnce"),"Cancelled chain stays empty after restart");
             check(store.load("mc","radio-a").size()==historyBeforeCancel,"Cancel Chain preserves history");chain.file.delete();
-            report.putString("stream","History paging, migration, retention, streaming backup and chain restart tests passed\n");finish(Activity.RESULT_OK,report);
+            JSONArray boundedItems=new JSONArray();
+            for(int destination=0;destination<5;destination++)for(int part=1;part<=3;part++)
+                boundedItems.put(new JSONObject().put("radio","mt").put("nodeId","receiver").put("peer","peer-"+destination).put("channel",-1).put("parts",3).put("part",part).put("state","pending"));
+            chain.data=SendChain.empty().put("multiple",true).put("items",boundedItems);chain.validateLimits();chain.save();
+            chain=new SendChain(directory);chain.validateLimits();check(chain.items().length()==15,"Five destinations with three parts survive restart");
+            chain.items().getJSONObject(0).put("parts",4);
+            boolean rejected=false;try{chain.validateLimits();}catch(IllegalArgumentException expected){rejected=true;}check(rejected,"Restored four-part chain blocked");
+            chain.items().getJSONObject(0).put("parts",3);
+            chain.items().put(new JSONObject().put("radio","mt").put("nodeId","receiver").put("peer","sixth").put("channel",-1).put("parts",1));
+            rejected=false;try{chain.validateLimits();}catch(IllegalArgumentException expected){rejected=true;}check(rejected,"Sixth destination blocked independently of part count");chain.file.delete();
+            store.saveRadio("mt","saved-a","Home receiver","");store.saveRadio("mt","saved-b","Field receiver","");
+            MapData savedMap=new MapData(store);
+            savedMap.node("mt","saved-a","peer","Hilltop","Router",38,23,true);
+            savedMap.node("mt","saved-b","peer","Other observation","Client",39,24,true);
+            savedMap.node("mt","saved-a","no-position","No GPS","Client",Double.NaN,Double.NaN,false);
+            store.heard("mt","saved-a","peer",1000);
+            store.close();store=new ChatStore(context);
+            JSONArray restoredNodes=new MapData(store).nodes();int observations=0;boolean withoutPosition=false;
+            for(int i=0;i<restoredNodes.length();i++){JSONObject n=restoredNodes.getJSONObject(i);if(n.optString("id").equals("peer"))observations++;if(n.optString("id").equals("no-position"))withoutPosition=!n.has("lat");}
+            check(observations==2&&withoutPosition,"Offline node cache retains per-device observations and nodes without GPS");
+            check(store.lastHeard("mt","saved-a","peer")==1000&&store.getRadio("mt","saved-b").name.equals("Field receiver"),"Device names and heard times survive reopen");
+            MapData alertsMap=new MapData(store);
+            JSONObject fence=new JSONObject("{\"id\":\"alert-test\",\"kind\":\"geofence\",\"title\":\"Home\",\"geometry\":{\"type\":\"Polygon\",\"coordinates\":[[[22,37],[24,37],[24,39],[22,39],[22,37]]]}}");
+            alertsMap.put(fence,false);
+            check(alertsMap.geofenceChanges("mt","saved-a","peer",38,23).length()==1,"First inside report saves alert");
+            check(alertsMap.geofenceChanges("mt","saved-a","peer",38,23).length()==0,"Repeated inside report does not duplicate alert");
+            check(alertsMap.geofenceChanges("mt","saved-a","peer",40,25).length()==1,"Leaving saves alert");
+            JSONObject alertBackup=alertsMap.backup();alertsMap.mergeBackup(alertBackup);
+            check(alertsMap.alerts().length()==2,"Backup merges alerts by stable ID");
+            alertsMap.delete("alert-test");store.close();store=new ChatStore(context);alertsMap=new MapData(store);
+            check(alertsMap.alerts().length()==2,"Alerts survive restart and fence deletion");
+            JSONObject savedAlert=alertsMap.alerts().getJSONObject(0);
+            check(savedAlert.getString("node").equals("peer")&&savedAlert.getString("name").equals("Hilltop"),"Alert preserves node identity and name");
+            alertsMap.deleteAlert(savedAlert.getString("id"));check(alertsMap.alerts().length()==1,"Explicit deletion removes only requested alert");
+            report.putString("stream","History, contacts, backup, chain limits/restart and offline node persistence tests passed\n");finish(Activity.RESULT_OK,report);
         }catch(Throwable error){report.putString("stream",android.util.Log.getStackTraceString(error));finish(Activity.RESULT_CANCELED,report);}
         finally{if(store!=null)store.close();}
     }

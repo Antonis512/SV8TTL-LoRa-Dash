@@ -36,7 +36,7 @@ final class ChatStore extends SQLiteOpenHelper {
         final String name;
         SavedChannel(int index, String name) { this.index=index; this.name=name; }
     }
-    ChatStore(Context context) { super(context, "chat-history.db", null, 16); setWriteAheadLoggingEnabled(true); }
+    ChatStore(Context context) { super(context, "chat-history.db", null, 18); setWriteAheadLoggingEnabled(true); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, radio TEXT NOT NULL, " +
                 "node_id TEXT NOT NULL DEFAULT '', channel INTEGER NOT NULL, sender TEXT NOT NULL, " +
@@ -49,6 +49,8 @@ final class ChatStore extends SQLiteOpenHelper {
         createSignalHistory(db);
         createLogTable(db);
         createMapTables(db);
+        ContactsStore.create(db);
+        createGeofenceAlerts(db);
     }
     private void createHistoryIndex(SQLiteDatabase db) {
         db.execSQL("CREATE INDEX IF NOT EXISTS messages_history ON messages(radio,node_id,peer,channel,received_at,id)");
@@ -62,6 +64,8 @@ final class ChatStore extends SQLiteOpenHelper {
                 "channel INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY(radio,node_id,channel))");
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if(oldVersion<18)createGeofenceAlerts(db);
+        if(oldVersion<17)ContactsStore.create(db);
         if(oldVersion<15)createMapTables(db);
         if(oldVersion<14)createLogTable(db);
         if(oldVersion<13)createSignalHistory(db);
@@ -94,6 +98,9 @@ final class ChatStore extends SQLiteOpenHelper {
     }
     private void addHeardSettings(SQLiteDatabase db) {
         db.execSQL("ALTER TABLE node_heard ADD COLUMN settings TEXT NOT NULL DEFAULT ''");
+    }
+    private void createGeofenceAlerts(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS map_alerts(id TEXT PRIMARY KEY,time INTEGER NOT NULL,body TEXT NOT NULL)");
     }
     private void createMapTables(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS map_nodes(radio TEXT NOT NULL,device TEXT NOT NULL,id TEXT NOT NULL,name TEXT NOT NULL DEFAULT '',role TEXT NOT NULL DEFAULT '',lat REAL,lon REAL,position_at INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(radio,device,id))");

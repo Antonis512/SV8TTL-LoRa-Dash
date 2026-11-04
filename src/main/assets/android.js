@@ -4,6 +4,25 @@ function compareContacts(a,b) {
   return Number(unnamed(a))-Number(unnamed(b))||(a.name||a.id).localeCompare(b.name||b.id);
 }
 let state = null;
+let multiSendReadyAt=0;
+let mtTracerouteReadyAt=0;
+function updateTracerouteButton(button) {
+  const seconds=Math.max(0,Math.ceil((mtTracerouteReadyAt-performance.now())/1000));
+  button.disabled=seconds>0||button.dataset.traceUnavailable==='true';
+  button.textContent=button.dataset.mtTraceroute+(seconds?` (${seconds}s)`:'');
+  button.title=seconds?'All Meshtastic destinations share a 30-second traceroute cooldown.':'';
+}
+function updateTracerouteButtons() {
+  for(const button of document.querySelectorAll('[data-mt-traceroute]'))updateTracerouteButton(button);
+}
+setInterval(updateTracerouteButtons,500);
+function updateMultiSendAvailability() {
+  if(!state)return;
+  const seconds=Math.max(0,Math.ceil((multiSendReadyAt-performance.now())/1000)),button=el('new-multi-send');
+  button.disabled=!state.multiSendEnabled||seconds>0;
+  button.textContent=seconds?`Send to multiple · ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`:'Send to multiple';
+}
+setInterval(updateMultiSendAvailability,1000);
 let network = 'left';
 let savedDmMode=false;
 function sideId(slot){return slot==='left'?'mc':slot==='right'?'mt':slot;}
@@ -141,6 +160,7 @@ function appendLinkedText(container, text) {
 function switchTab(tab) {
   if(tab!=='map'&&activeTab==='map')window.cancelMarkPosition?.();
   activeTab=tab;
+  AndroidBridge.contactsActive(tab==='contacts');
   for(const id of ['nodes-action-status','dm-chat-status']) el(id).textContent='';
   el('dm-context').hidden=true;
   closeSideZoom();
@@ -148,6 +168,8 @@ function switchTab(tab) {
   for (const button of document.querySelectorAll('.nav-btn')) button.classList.toggle('active', button.dataset.tab === tab);
   if (tab === 'chat') AndroidBridge.markRead(network);
   if (tab === 'log') loadLog();
+  if (tab === 'contacts') {AndroidBridge.loadContacts();window.renderContacts?.();}
+  document.querySelector('.nav-btn.active')?.scrollIntoView({block:'nearest',inline:'nearest'});
   if (tab === 'map') { AndroidBridge.loadMap(); if(window.mapShown)window.mapShown(); }
 }
 function showSettingsPage(page) {
@@ -475,7 +497,7 @@ function nodeInfrastructure(entry) {
   return /repeater|router|sensor|room server/i.test(entry.role||'');
 }
 function nodeMessageable(radio,entry) {
-  if(!entry || entry.id===state[radio].ownId || !state[radio].connected) return false;
+  if(!entry || entry.savedOnly || entry.id===state[radio].ownId || !state[radio].connected) return false;
   if(radioType(radio)==='mc') return entry.role==='User' || entry.role==='Room server';
   return /^![0-9a-fA-F]{8}$/.test(entry.id) &&
     !/^!(00000000|ffffffff)$/i.test(entry.id);
@@ -483,7 +505,7 @@ function nodeMessageable(radio,entry) {
 function openDmForNode(radio,entry) {
   el('dm-context').hidden=true;
   if(!nodeMessageable(radio,entry)) return;
-  if(radio==='mc'||radio==='mt'){const slot=chatSlot(radio);AndroidBridge.selectChatDevice(slot,radio,state[radio].key);state[slot]=state[radio];radio=slot;}
+  if(radio!=='left'&&radio!=='right'){const type=radioType(radio),slot=chatSlot(type);AndroidBridge.selectChatDevice(slot,type,state[radio].key);state[slot]=state[radio];radio=slot;}
   savedDmMode=false;switchTab('chat');
   selectDmPeer(radio,entry.id);
   el('dm-input').focus();
@@ -497,14 +519,16 @@ function distanceKm(a, b, c, d) {
 function nodeButton(parent, label, action, radio, entry, handler) {
   const button = node('button', '', label);
   button.type = 'button';
-  button.onclick = handler || (() => AndroidBridge.nodeAction(radio, entry.id, action, ''));
+  button.onclick = handler || (() => AndroidBridge.nodeAction(state[radio]?.key||radio, entry.id, action, ''));
   parent.appendChild(button);
+  if(action==='tr'&&radioType(radio)==='mt'){button.dataset.mtTraceroute=label;updateTracerouteButton(button);}
 }
 function nodeDetails(radio, entry) {
   const details = node('div', 'node-details');
   details.appendChild(node('div', 'node-facts', displayRole(radio,entry.role) + (entry.model ? ' · ' + entry.model : '') + ' · ' + entry.id));
   details.appendChild(node('div','node-facts',heardDescription(radioType(radio),entry.heardSettings)));
   nodeButton(details,'Enter Name','',radio,entry,()=>enterNodeName(radio,entry));
+  nodeButton(details,'Assign to Contact','',radio,entry,()=>assignNodeToContact(radio,entry));
   if(entry.id!==state[radio].ownId) nodeButton(details,'Forget Node','',radio,entry,()=>forgetNode(radio,entry));
   if (state[radio].connected && !entry.savedOnly) {
     const actions = node('div', 'node-actions');
@@ -545,7 +569,7 @@ function enterNodeName(radio,entry) {
 function forgetNode(radio,entry) {
   const key=state[radio].key;
   const card=dialogCard('Forget Node · '+(entry.name||entry.id));
-  card.appendChild(node('p','help','Delete this node’s local name, messages, heard history and map/position details from this app across all '+radioType(radio).toUpperCase()+' devices? It can reappear when heard or loaded from a radio again.'));
+  card.appendChild(node('p','help','Delete this node’s local name, messages, heard history, map/position details and contact assignments from this app across all '+radioType(radio).toUpperCase()+' devices? People’s profiles are kept. The node can reappear when heard or loaded from a radio again.'));
   dialogAction(card,'Forget Node',()=>{AndroidBridge.forgetNode(key,entry.id,entry.name||'');el('dm-context').hidden=true;});
   cancelDialog(card);
 }
@@ -754,7 +778,7 @@ function renderMyNodes() {
   updateConnectSelected();
 }
 window.onSavedNodeRemoved = function () { closeSettingsWindow('history');savedNode=null; clear(el('my-node-history')); };
-window.onAppBackupImported = function () { closeSettingsWindow('history');historyPages.clear();savedNode=null; clear(el('my-node-history')); };
+window.onAppBackupImported = function () { closeSettingsWindow('history');historyPages.clear();savedNode=null; clear(el('my-node-history'));window.resetContactPreferences?.(); };
 window.openSavedChatView=ch=>{closeSettingsWindow('history');switchTab('chat');if(ch<0)openDmScreen(true);else selectChannel('left',ch);};
 window.onSavedNode = function (data) {
   if(!pendingSavedView||pendingSavedView.radio!==data.radio||pendingSavedView.id!==data.id)return;
@@ -839,9 +863,12 @@ function renderNodes() {
   for(const id of ['mc','mt']) {
     const menu=el('nodes-'+id+'-device');clear(menu);
     const devices=state.devices.filter(item=>item.radio===id);
+    for(const saved of state.myNodes||[])if(saved.radio===id&&!devices.some(d=>d.id===saved.id))
+      devices.push({...saved,key:'saved:'+saved.id,connected:false});
     if(!devices.length){const option=node('option','','No device');option.value='';menu.appendChild(option);menu.disabled=true;}
-    else {menu.disabled=false;for(const item of devices){const option=node('option','',(item.unread?'● ':'')+(item.name||item.id));option.value=item.key;menu.appendChild(option);}}
-    menu.value=id==='mc'?state.selectedMc:state.selectedMt;
+    else {menu.disabled=false;for(const item of devices){const option=node('option','',(item.unread?'● ':'')+(item.name||item.id)+(item.connected===false?' · offline':''));option.value=item.key;menu.appendChild(option);}}
+    const selected=devices.find(d=>d.id===state[id].ownId||d.key===(id==='mc'?state.selectedMc:state.selectedMt));
+    menu.value=selected?.key||'';
   }
   el('nodes-sort').value=nodeSort;
   let count = 0;
@@ -849,7 +876,6 @@ function renderNodes() {
   for(const {id,entry} of sortedRows) {
       if(isOwnNode(id,entry.id)) continue;
       const heard=Number(entry.lastHeard)||0;
-      if(heard>0&&heard<Date.now()/1000-30*86400) continue;
       if(!heard&&!el('nodes-show-unknown').checked) continue;
       if (favoritesOnly && !entry.favorite) continue;
       if(nodeKind==='infrastructure'&&!nodeInfrastructure(entry)) continue;
@@ -871,6 +897,7 @@ function renderNodes() {
       row.appendChild(heading);
       row.appendChild(node('div', 'node-subtitle', (entry.model || displayRole(id,entry.role)) + (entry.model ? ' · ' + displayRole(id,entry.role) : '')));
       const facts = [heard?'Last heard '+new Date(heard*1000).toLocaleString(undefined,{hourCycle:'h23'}):'Last heard unknown',heardDescription(id,entry.heardSettings)];
+      if(!state[id].connected||entry.savedOnly)facts.push('Saved node · availability unknown');
       if (entry.hops >= 0) facts.push((id === 'mc' ? 'Route hops ' : 'Hops ') + entry.hops);
       if (Number.isFinite(entry.latitude) && Number.isFinite(entry.longitude)) {
         if (Number.isFinite(state[id].ownLatitude) && Number.isFinite(state[id].ownLongitude))
@@ -881,9 +908,9 @@ function renderNodes() {
       if (openedNode === id + ':' + entry.id) row.appendChild(nodeDetails(id, entry));
       list.appendChild(row); count++;
   }
-  el('nodes-summary').textContent = count + ' nodes and contacts · last 30 days (unknown hidden unless selected)';
+  el('nodes-summary').textContent = count + ' known nodes · saved and live discoveries';
   if (!count && !Object.keys(state.mc.directs).length && !Object.keys(state.mt.directs).length)
-    list.appendChild(node('div', 'empty-panel', favoritesOnly ? 'No favorite nodes in this view.' : 'Connect a radio in Config to load nodes and contacts.'));
+    list.appendChild(node('div', 'empty-panel', favoritesOnly ? 'No favorite nodes in this view.' : 'No known nodes match this view. Select a remembered device or connect a radio in Config.'));
   if(scrollToOpenedNode&&openedNode){
     const row=[...list.querySelectorAll('.android-node')].find(item=>item.dataset.nodeKey===openedNode);
     if(row) requestAnimationFrame(()=>row.scrollIntoView({block:'center',behavior:'smooth'}));
@@ -929,6 +956,9 @@ window.onRadioState = function (next) {
   const previousChatKey=state?.[network]?.key;
   if(state&&['left','right'].some(slot=>state[slot]?.historyRevision!==next[slot]?.historyRevision))historyPages.clear();
   state = next;
+  mtTracerouteReadyAt=performance.now()+Math.max(0,Number(next.mtTracerouteCooldownMs)||0);
+  updateTracerouteButtons();
+  window.installContactRadios?.();
   el('map-send-mark')?.refreshTargets?.();
   el('map-route-device')?.refreshTargets?.();
   el('map-sense-device')?.refreshTargets?.();
@@ -936,7 +966,8 @@ window.onRadioState = function (next) {
   if(document.activeElement!==el('message-split-interval'))el('message-split-interval').value=next.messageSplitIntervalSeconds??5;
   el('connect-all-available').disabled=!!next.connectingAvailable;
   el('connect-available-status').hidden=!next.connectingAvailable;
-  el('multi-send-enabled').checked=!!next.multiSendEnabled;el('new-multi-send').disabled=!next.multiSendEnabled;el('new-multi-send').hidden=!next.multiSendEnabled;
+  el('multi-send-enabled').checked=!!next.multiSendEnabled;el('new-multi-send').hidden=!next.multiSendEnabled;
+  multiSendReadyAt=performance.now()+Math.max(0,Number(next.multiSendCooldownMs)||0);updateMultiSendAvailability();
   if(document.activeElement!==el('channel-observation'))el('channel-observation').value=next.channelObservationSeconds??5;
   if(document.activeElement!==el('send-settling'))el('send-settling').value=next.settlingSeconds||3;
   for(const [id,value] of [['mc-direct-attempts',next.mcDirectAttempts],['mc-flood-attempts',next.mcFloodAttempts]])if(document.activeElement!==el(id))el(id).value=value||4;
@@ -973,6 +1004,7 @@ window.onRadioState = function (next) {
   el('hdr-radio-name').textContent = next.devices.length+' connected';
   el('nav-chat').classList.toggle('unread',next.myNodes.some(item=>item.unread));
   renderChat(); renderNodes(); renderMyNodes();
+  if(activeTab==='contacts')window.renderContacts?.();
   if(activeTab==='map'&&window.renderMap)renderMap();
   if(previousChatKey===state[network]?.key) for(const saved of scrollPositions) if(saved.keep)saved.e.scrollTop=saved.top;
   if(settingsPage==='channel-backup') renderBackupDevices();
@@ -1040,6 +1072,8 @@ function navigationState() {
 }
 function navigateBack() {
   if(!el('dm-context').hidden) { el('dm-context').hidden=true; return; }
+  if(el('contacts-dialog')?.open){window.closeContactDialog?.();return;}
+  if(activeTab==='contacts'&&window.contactDetailBack?.())return;
   const dialog=document.querySelector('dialog.settings-window[open]');
   if(dialog){closeSettingsWindow(dialog.id.replace('settings-window-',''));return;}
   const focused=document.activeElement;

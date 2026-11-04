@@ -114,6 +114,12 @@ public final class RadioActionsSmoke {
         mc.nodeCommand("dm","bbbbbbbbbbbb","test",0);token=mc.lastRequestId();accepted[0]=6;le(accepted,2,42);mc.receive(accepted,events);
         byte[] ack=new byte[9];ack[0]=(byte)0x82;le(ack,1,42);mc.receive(ack,events);
         check(deliveries.get(deliveries.size()-1).equals(token+":delivered"),"MC DM acknowledgment correlation");
-        System.out.println("Radio action regressions passed: acknowledgments, errors, traces, SNR, adverts, command isolation.");
+        int beforeOverlap=traces.size();
+        mt.nodeCommand("tr","!abcdef12","",0);long earlierTrace=mt.lastRequestId();
+        mt.nodeCommand("tr","!abcdef13","",0);long laterTrace=mt.lastRequestId();
+        mt.receive(packet(0xabcdef13L,laterTrace,70,new byte[0]),events);
+        mt.receive(packet(0xabcdef12L,earlierTrace,70,new byte[0]),events);
+        check(traces.size()==beforeOverlap+2&&traces.get(beforeOverlap).requestId==laterTrace&&traces.get(beforeOverlap+1).requestId==earlierTrace,"Outstanding MT traces retain request identity when replies arrive out of order");
+        System.out.println("Radio action regressions passed: acknowledgments, errors, traces, SNR, adverts, command isolation, overlapping MT trace replies.");
     }
 }

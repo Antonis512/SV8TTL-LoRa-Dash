@@ -57,14 +57,15 @@ final class HistoryBackup {
         try(JsonWriter out=new JsonWriter(destination)) {
             if(settings==null){ChatStore.KnownRadio node=store.getRadio(radio,id);if(node==null)throw new IllegalArgumentException("Radio no longer saved");writeNode(out,store,node);}
             else {
-                out.beginObject();out.name("format").value("overmesh-app-backup");out.name("version").value(4);
+                out.beginObject();out.name("format").value("overmesh-app-backup");out.name("version").value(5);
+                out.name("contacts");writeValue(out,ContactsStore.all(store));
                 out.name("settings");writeValue(out,settings);out.name("log");writeValue(out,store.logItems());out.name("map");writeValue(out,mapData.backup());out.name("radios").beginArray();
                 for(ChatStore.KnownRadio node:store.radios())if(!node.id.isEmpty())writeNode(out,store,node);
                 out.endArray();out.endObject();
             }
         }
     }
-    static final class Headers {final List<JSONObject> nodes=new ArrayList<>();JSONObject settings,map;JSONArray log;}
+    static final class Headers {final List<JSONObject> nodes=new ArrayList<>();JSONObject settings,map;JSONArray log,contacts;}
     static JSONObject readNode(JsonReader in,JSONObject header,NodeMerger merger) throws Exception {
         JSONObject actual=new JSONObject();boolean messages=false;
         in.beginObject();while(in.hasNext()) {
@@ -106,9 +107,11 @@ final class HistoryBackup {
                     else if(name.equals("settings"))result.settings=(JSONObject)readValue(in);
                     else if(name.equals("log"))result.log=(JSONArray)readValue(in);
                     else if(name.equals("map"))result.map=(JSONObject)readValue(in);
+                    else if(name.equals("contacts"))result.contacts=(JSONArray)readValue(in);
                     else in.skipValue();
                 }in.endObject();
-                if(!radios||!format.equals("overmesh-app-backup")||version<1||version>4||result.settings==null||(version>=3&&result.log==null)||(version>=4&&result.map==null))throw new IllegalArgumentException("Unsupported app backup");
+                if(!radios||!format.equals("overmesh-app-backup")||version<1||version>5||result.settings==null||(version>=3&&result.log==null)||(version>=4&&result.map==null)||(version>=5&&result.contacts==null))throw new IllegalArgumentException("Unsupported app backup");
+                if(result.contacts!=null)for(int i=0;i<result.contacts.length();i++)ContactsStore.validate(result.contacts.getJSONObject(i));
                 if(headers!=null&&index!=headers.nodes.size())throw new IllegalArgumentException("Backup changed while reading");
             }
             if(in.peek()!=JsonToken.END_DOCUMENT)throw new IllegalArgumentException("Unexpected data after backup");

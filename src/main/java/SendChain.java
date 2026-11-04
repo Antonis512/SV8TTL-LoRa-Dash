@@ -96,6 +96,18 @@ final class SendChain {
         for(int i=0;i<items().length();i++)if(!"complete".equals(items().optJSONObject(i).optString("state")))return false;
         return true;
     }
+    void validateLimits() {
+        java.util.Set<String> destinations=new java.util.HashSet<>();
+        for(int i=0;i<items().length();i++) {
+            JSONObject item=items().optJSONObject(i);
+            destinations.add(new JSONArray().put(item.optString("radio")).put(item.optString("nodeId"))
+                    .put(item.optString("peer")).put(item.optInt("channel")).toString());
+            if(item.optInt("parts",1)>MessageChunks.MAX_PARTS)
+                throw new IllegalArgumentException("This saved chain exceeds the 3-part message limit. Cancel it and shorten the message.");
+        }
+        if(destinations.size()>ChainDestinations.MAX_DESTINATIONS)
+            throw new IllegalArgumentException("This saved chain exceeds 5 destinations. Cancel it and choose fewer destinations.");
+    }
     void starting(JSONObject item) throws JSONException {
         long order=data.optLong("sendOrder",items().length())+1;
         data.put("sendOrder",order);item.put("sendOrder",order);

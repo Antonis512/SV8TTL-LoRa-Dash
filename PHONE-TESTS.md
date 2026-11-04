@@ -234,3 +234,27 @@ Sending options now has three buttons opening separate windows: Send to Multiple
 - Repeat with Greek/emoji text, scoped floods and different path widths. The feedback budget reserves 20 path bytes; longer paths may still exceed the companion log ceiling. Cancel and recreate older prepared chains instead of retrying their oversized saved parts.
 Update flow: Install an older APK signed by the same debug key, then open Config → Check for Updates. Confirm that it appears directly above About, shows the available version in the app's dialog theme, and downloads only after Update is pressed. Android must request unknown-app installation permission if needed and then show its own installer approval. Test Cancel, offline/checksum failure, already-current version, a mismatched signing key, and both gesture and three-button navigation. In-place installation and data preservation still need a physical-phone check.
 
+# 0.10.22 — sending limits and remembered nodes
+
+On physical MT and MC radios, verify an exactly three-part UTF-8 message sends, while a four-part draft sends nothing and stays in the composer. Include Greek text and compound emoji; the byte allowance depends on the selected radio and destination.
+
+Select five destinations across receivers and channel/DM types. Confirm a sixth destination or an oversized saved-set merge is rejected. Complete all chain items, then confirm Send to multiple is unavailable for five minutes, including after closing/reopening the app, while normal Chat remains usable. A failed/unconfirmed chain must not start the success cooldown. Channel completion indicates repeat/mesh confirmation rather than delivery to every node.
+
+Disconnect all radios and restart the app. In Nodes, choose each remembered receiver and inspect its saved nodes, including old/unknown hearing times. In Map, choose offline receivers and inspect retained positions. Saved-only nodes must not expose radio-send actions. Contacts UI should remain unchanged. Verify system bars, keyboard and display cutout on the Samsung A05s with both navigation modes.
+
+Automated verification: three-part/grapheme boundaries, five-destination selection and atomic set loading, cooldown clock/reboot logic, focused browser UI checks, Contacts regression checks, and Android instrumentation covering saved chain limits and per-receiver node persistence. A successful build or emulator run does not establish physical RF behavior. See [ping assessment](PING-ASSESSMENT.md) for the proposed, unimplemented Meshtastic ping.
+
+# 0.10.23 — Meshtastic traceroute allowance
+
+Send an MT traceroute from Nodes, then open a different node, its action popup, and Map → Radio path. All MT trace buttons should show the same remaining 30-second cooldown. A fast reply or a short configured response timeout must not unlock the next send early. After 30 seconds a new traceroute is allowed even when an earlier reply remains pending; verify each result names its original target. A failed BLE/USB write should release the failed submission's allowance. MeshCore path discovery and Ping should keep their prior behavior.
+
+Checked against the official Meshtastic Android request handler and cooldown buttons, including merged PRs #4699 and #7640. Automated checks cover the exact 30-second boundary, repeated taps, stale failures, shared Nodes/Map countdown, missing targets, unaffected MeshCore controls and out-of-order MT protocol replies. Physical radio validation is still required.
+
+
+### 0.10.24 geofence and map checks
+
+- On Samsung A05s / Android 15, receive enter/leave alerts while foregrounded and backgrounded; open the Android notification and verify Map → Geofence alerts. Receive a chat message and confirm the geofence notification remains separate.
+- Restart the app, delete the fence, and verify saved alerts remain; delete one alert and confirm the others remain. Full App Backup/restore must retain alerts without duplicates.
+- Put two distinct nodes at identical and nearby coordinates; tap the marker and choose each node by ID. Open Map from Last heard/Nodes and verify exact node plus receiver, including offline saved receivers.
+- Rename a node without changing position and confirm its map popup updates. Check historical alert name/location remain as recorded. A node without position must show an explicit notice.
+- Check alerts dialog and popup scrolling in portrait/landscape, with gesture and three-button navigation. Physical radio behavior remains to be tested.

@@ -113,6 +113,42 @@ public final class MainActivity extends Activity {
     private int scanToken;
     private ChatStore chatStore;
     private MapData mapData;
+    // Only immutable event values enter this queue. Session/WebView state stays on main.
+    private final List<Runnable> radioStoragePending=new ArrayList<>();
+    private boolean radioStorageScheduled;
+    private final ThreadLocal<List<Runnable>> radioCommitCallbacks=new ThreadLocal<>();
+    private final Runnable radioStorageFlusher=()->flushRadioStorage(null);
+    private void storeRadioUpdate(Runnable work) {
+        radioStoragePending.add(work);
+        if(radioStoragePending.size()>=128)flushRadioStorage(null);
+        else if(!radioStorageScheduled){radioStorageScheduled=true;main.postDelayed(radioStorageFlusher,150);}
+    }
+    private void flushRadioStorage(Runnable after) {
+        main.removeCallbacks(radioStorageFlusher);radioStorageScheduled=false;
+        List<Runnable> batch=new ArrayList<>(radioStoragePending);radioStoragePending.clear();
+        radioWorker.execute(()->{
+            try {
+                if(!batch.isEmpty()) {
+                    android.database.sqlite.SQLiteDatabase db=chatStore.getWritableDatabase();
+                    db.beginTransactionNonExclusive();
+                    List<Runnable> committed=new ArrayList<>();radioCommitCallbacks.set(committed);
+                    boolean success=false;
+                    try{for(Runnable work:batch)work.run();db.setTransactionSuccessful();success=true;}
+                    finally{try{db.endTransaction();}finally{radioCommitCallbacks.remove();}}
+                    if(success)for(Runnable callback:committed)main.post(callback);
+                }
+                if(after!=null)main.post(after);
+                else if(!batch.isEmpty())main.post(()->{if(!closing){publishRadioUpdate();requestRadioMapUpdate();}});
+            }catch(Exception error){main.post(()->{
+                if(closing)return;
+                debug("Radio storage failed: "+error.getClass().getSimpleName());
+                mapSnapshotInFlight=false;mapSnapshotAgain=false;
+                boolean loading=false;
+                for(RadioSession s:sessions.values())if(s.loading){loading=true;s.storageFailed=true;s.syncFailed("Could not save radio data. Reconnect to retry.");}
+                if(!loading)nodeActionResult("Could not save radio data: "+error.getMessage());
+            });}
+        });
+    }
     private SatelliteCredentials satelliteCredentials;
     private MapPacks mapPacks;
     private String pendingMapPackKind;
@@ -128,6 +164,8 @@ public final class MainActivity extends Activity {
     private final Runnable chainRunner=new Runnable(){public void run(){if(closing)return;tickChain();main.postDelayed(this,500);}};
     private final Runnable splitRunner=new Runnable(){public void run(){if(closing)return;for(RadioSession s:sessions.values())tickSplit(s);main.postDelayed(this,100);}};
     private final java.util.concurrent.ExecutorService historyWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.ExecutorService radioWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.ExecutorService mapSnapshotWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
     private final java.util.concurrent.ExecutorService mapImportWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
     private final java.util.concurrent.ExecutorService messageSearchWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
     private boolean connectingAvailable;
@@ -458,6 +496,19 @@ public final class MainActivity extends Activity {
         boolean typeVerified;
         long lastConnectionActivity, loadingStartedAt;
         int loadingMessages;
+        String loadingStage="Connecting";
+        int loadingNodes,loadingChannels;
+        boolean installingNodes,storageFailed;
+        final List<Runnable> loadingStorage=new ArrayList<>();
+        final Map<String,String> loadingContactNames=new LinkedHashMap<>();
+        final Map<String,Long> earlyHeardTimes=new LinkedHashMap<>();
+        final Map<String,String> earlyHeardSettings=new LinkedHashMap<>();
+        void storeUpdate(Runnable work) {
+            int attempt=generation;
+            Runnable admitted=()->{if(generation==attempt)work.run();};
+            if(loading&&!meshcore&&!installingNodes)loadingStorage.add(admitted);
+            else storeRadioUpdate(admitted);
+        }
         boolean connected, syncSucceeded;
         boolean loading;
         String pendingAudio;
@@ -466,7 +517,7 @@ public final class MainActivity extends Activity {
         String scanReturnState = "Disconnected";
         String ownId = "", ownName = "", bleAddress = "";
         boolean unread;
-        int generation;
+        volatile int generation;
         double ownLatitude = Double.NaN, ownLongitude = Double.NaN;
 
         RadioSession(String name, boolean meshcore) {
@@ -505,6 +556,8 @@ public final class MainActivity extends Activity {
         }
         void start() {
             syncSucceeded=false;
+            loadingStorage.clear();loadingContactNames.clear();installingNodes=storageFailed=false;
+            loadingStage="Connecting";loadingNodes=loadingChannels=0;
             generation++;
             close();
             protocol = meshcore ? new MeshCoreProtocol() : new MeshtasticProtocol();
@@ -520,6 +573,9 @@ public final class MainActivity extends Activity {
             main.postDelayed(new Runnable() {
                 @Override public void run() {
                     if(generation!=attempt||!loading)return;
+                    // Once transport is ready, MT's stage guard owns the deadline.
+                    // Storage installation is not a radio stall.
+                    if(connected&&!meshcore)return;
                     if(SystemClock.elapsedRealtime()-lastConnectionActivity<60000) {main.postDelayed(this,15000);return;}
                     markPendingUnconfirmed();generation++;close();loading=false;
                     updateStatus("Connection/loading timed out. Reconnect to try again.");
@@ -530,6 +586,9 @@ public final class MainActivity extends Activity {
         }
 
         void close() {
+            loadingStorage.clear();
+            loadingContactNames.clear();
+            earlyHeardTimes.clear();earlyHeardSettings.clear();
             if(this==mapSenseRadio)finishMapSense("Send unconfirmed","The radio disconnected before confirming the write.");
             if(closing)stopSplits(this,"App closed; unsent split parts cancelled");
             if (ble != null) { ble.close(); ble = null; }
@@ -574,7 +633,17 @@ public final class MainActivity extends Activity {
         void ready(boolean sendInitial) {
             if(ble!=null&&!bluetoothEnabled()){reconcileBleState();publish();return;}
             connected = true; updateStatus("Connected");
-            if (protocol != null) {byte[] initial=protocol.initialCommand();if(sendInitial)send(initial);}
+            if (protocol != null) {
+                byte[] initial=protocol.initialCommand();
+                if(sendInitial){
+                    if(meshcore)send(initial);
+                    else{
+                        send(new ProtoWire.Writer().bytes(7,new byte[0]).build());
+                        int attempt=generation;
+                        main.postDelayed(()->{if(generation==attempt&&connected)send(initial);},100);
+                    }
+                }
+            }
             int activeGeneration=generation;
             main.postDelayed(new Runnable() {
                 @Override public void run() {
@@ -628,6 +697,14 @@ public final class MainActivity extends Activity {
         }
 
         @Override public void status(String text) { updateStatus(text); }
+        @Override public void loadingProgress(String stage,int nodes,int channels) {
+            int attempt=generation;
+            main.post(()->{if(generation!=attempt||!loading||installingNodes)return;
+                loadingStage=stage;loadingNodes=nodes;loadingChannels=channels;
+                state=stage+" · "+nodes+" nodes, "+channels+" channels";
+                publishRadioUpdate();
+            });
+        }
         @Override public void radioSettings(String label) {
             int currentGeneration=generation;
             main.post(()->{if(generation!=currentGeneration||label.isEmpty())return;
@@ -642,16 +719,43 @@ public final class MainActivity extends Activity {
             int currentGeneration=generation;
             main.post(() -> {
                 if(generation!=currentGeneration) return;
-                loading=false;syncSucceeded=true;debug(key+" sync complete elapsedMs="+(SystemClock.elapsedRealtime()-loadingStartedAt)+" messages="+loadingMessages+" nodes="+knownNodes.size()+" channels="+channelNames.size());
-                if(pendingAudio!=null) playMessageSound(pendingAudio);
-                pendingAudio=null;
-                publish();
+                if(!loading||installingNodes)return;
+                installingNodes=true;loadingStage="Saving nodes";
+                List<Runnable> install=new ArrayList<>(loadingStorage);loadingStorage.clear();
+                if(!meshcore){
+                    String device=ownId;
+                    List<NodeEntry> nodes=new ArrayList<>(knownNodes.values());
+                    install.add(()->{
+                        if(generation!=currentGeneration)return;
+                        for(NodeEntry node:nodes)mapData.node("mt",device,node.id,node.name,node.role,node.latitude,node.longitude,false);
+                    });
+                }
+                Map<String,String> names=new LinkedHashMap<>(loadingContactNames);loadingContactNames.clear();
+                if(!names.isEmpty())install.add(()->{
+                    if(generation!=currentGeneration)return;
+                    SharedPreferences.Editor editor=getPreferences(0).edit();
+                    for(Map.Entry<String,String> name:names.entrySet())editor.putString(name.getKey(),name.getValue());
+                    editor.apply();
+                });
+                storeRadioUpdate(()->{for(Runnable work:install)work.run();});
+                publishRadioUpdate();
+                flushRadioStorage(()->{
+                    if(generation!=currentGeneration||!loading||storageFailed)return;
+                    installingNodes=false;loading=false;syncSucceeded=true;loadingStage="Ready";
+                    state="Connected · "+knownNodes.size()+" nodes, "+channelNames.size()+" channels";
+                    debug(key+" sync complete elapsedMs="+(SystemClock.elapsedRealtime()-loadingStartedAt)+" messages="+loadingMessages+" nodes="+knownNodes.size()+" channels="+channelNames.size());
+                    if(pendingAudio!=null)playMessageSound(pendingAudio);pendingAudio=null;
+                    publish();requestRadioMapUpdate();
+                });
             });
         }
         @Override public void syncFailed(String reason) {
             int currentGeneration=generation;
             main.post(()->{
                 if(generation!=currentGeneration)return;
+                storageFailed=true;installingNodes=false;loadingStorage.clear();
+                loadingContactNames.clear();
+                if(!meshcore){markPendingUnconfirmed();generation++;close();knownNodes.clear();channelNames.clear();}
                 loading=false;syncSucceeded=false;pendingAudio=null;updateStatus(reason);
                 if(pageReady)web.evaluateJavascript("window.onActionNotice('Radio loading error',"+JSONObject.quote(reason)+")",null);
                 publish();
@@ -677,30 +781,81 @@ public final class MainActivity extends Activity {
                 NodeEntry local = knownNodes.get(id);
                 if (local != null && !local.name.isEmpty()) ownName = local.name;
                 else if (!name.isEmpty() && (!name.equals("Meshtastic " + id) || ownName.isEmpty())) ownName = name;
-                chatStore.saveRadio(radio, id, ownName, bleAddress);
-                for(NodeEntry known:knownNodes.values())mapData.node(radio,id,known.id,known.name,known.role,known.latitude,known.longitude,false);
+                String savedName=ownName,savedAddress=bleAddress;
+                storeUpdate(()->chatStore.saveRadio(radio,id,savedName,savedAddress));
+                if(meshcore||!loading||installingNodes)for(NodeEntry known:knownNodes.values())storeUpdate(()->mapData.node(radio,id,known.id,known.name,known.role,known.latitude,known.longitude,false));
+                for(Map.Entry<String,Long> heard:earlyHeardTimes.entrySet()) {
+                    String peer=heard.getKey(),settings=earlyHeardSettings.getOrDefault(peer,"");long seconds=heard.getValue();
+                    storeUpdate(()->chatStore.heard(radio,id,peer,seconds,settings));
+                }
+                earlyHeardTimes.clear();earlyHeardSettings.clear();
                 requestedId="";requestedRadio="";
                 if (meshcore) selectedMc=this; else selectedMt=this;
-                for (Map.Entry<Integer,String> item : channelNames.entrySet())
-                    chatStore.saveChannel(radio,id,item.getKey(),item.getValue());
-                publish();
+                for (Map.Entry<Integer,String> item : channelNames.entrySet()) {
+                    int index=item.getKey();String title=item.getValue();
+                    storeUpdate(()->chatStore.saveChannel(radio,id,index,title));
+                }
+                publishRadioUpdate();
             });
         }
         @Override public void reaction(int channel,String sender,String peer,String text,long time,long packetId,long replyId) {
             int currentGeneration=generation;
             main.post(()->{
-                if(generation!=currentGeneration||ownId.isEmpty()||text.isEmpty()||chatStore.hasPacket("mt",ownId,packetId))return;
-                ChatEntry entry=new ChatEntry(sender,text,false,time);entry.packetId=packetId;entry.replyId=replyId;entry.reaction=true;
-                entry.id=chatStore.save("mt",ownId,peer.isEmpty()?channel:-1,sender,text,entry.time,time,false,"",peer);
-                chatStore.setReferences(entry.id,packetId,replyId);chatStore.setReaction(entry.id,true);
-                if(peer.isEmpty())chats.computeIfAbsent(channel,ignored->new ArrayList<>()).add(entry);
-                else directs.computeIfAbsent(peer,ignored->new ArrayList<>()).add(entry);
-                publish();
+                if(generation!=currentGeneration||ownId.isEmpty()||text.isEmpty())return;
+                saveMtIncoming(channel,sender,peer,text,time,-1,packetId,replyId,true);
+            });
+        }
+        // PhoneAPI packets may arrive while the node transaction is installing.
+        // Serialize their deduplication + persistence with that transaction, never wait on SQLite on main.
+        private void saveMtIncoming(int channel,String sender,String peer,String text,long receivedAt,int hops,long packetId,long replyId,boolean reaction) {
+            int attempt=generation;String device=ownId;boolean deduplicate=receivedAt>0||loading;
+            radioWorker.execute(()->{
+                if(generation!=attempt)return;
+                try {
+                    if(reaction?chatStore.hasPacket("mt",device,packetId):
+                            deduplicate&&chatStore.hasMessage("mt",device,peer.isEmpty()?channel:-1,peer,sender,text,receivedAt,false))return;
+                    ChatEntry entry=new ChatEntry(sender,text,false,receivedAt);
+                    entry.packetId=packetId;entry.replyId=replyId;entry.hops=hops;entry.reaction=reaction;entry.unread=!reaction;
+                    android.database.sqlite.SQLiteDatabase db=chatStore.getWritableDatabase();db.beginTransactionNonExclusive();
+                    try {
+                        if(reaction){
+                            entry.id=chatStore.save("mt",device,peer.isEmpty()?channel:-1,sender,text,entry.time,receivedAt,false,"",peer);
+                            chatStore.setReferences(entry.id,packetId,replyId);chatStore.setReaction(entry.id,true);
+                        }else{
+                            entry.id=chatStore.saveIncoming("mt",device,peer.isEmpty()?channel:-1,sender,text,entry.time,receivedAt,peer,hops,packetId,replyId,entry.paths);
+                            if(!peer.isEmpty())chatStore.heard("mt",device,peer,receivedAt,"");
+                        }
+                        db.setTransactionSuccessful();
+                    }finally{db.endTransaction();}
+                    main.post(()->{
+                        if(closing||generation!=attempt||!device.equals(ownId))return;
+                        if(peer.isEmpty())chats.computeIfAbsent(channel,ignored->new ArrayList<>()).add(entry);
+                        else directs.computeIfAbsent(peer,ignored->new ArrayList<>()).add(entry);
+                        if(!reaction){
+                            unread=true;showMessageNotification(this,sender,text);
+                            if(loading)pendingAudio=peer.isEmpty()?"mt":"dm";else playMessageSound(peer.isEmpty()?"mt":"dm");
+                        }
+                        publishRadioUpdate();
+                    });
+                }catch(Exception error){main.post(()->{
+                    if(closing||generation!=attempt)return;
+                    if(loading)syncFailed("Could not save Meshtastic message. Reconnect to retry.");
+                    else nodeActionResult("Could not save Meshtastic message: "+error.getMessage());
+                });}
             });
         }
         @Override public void lastHeard(String id,long seconds,boolean viaRadio) {
             int currentGeneration=generation;
-            main.post(()->{if(generation!=currentGeneration) return;chatStore.heard(meshcore?"mc":"mt",ownId,id,seconds,viaRadio?observedSettings(seconds):"");publishRadioUpdate();});
+            main.post(()->{if(generation!=currentGeneration)return;
+                if(ownId.isEmpty()){
+                    if(seconds>earlyHeardTimes.getOrDefault(id,0L)){
+                        earlyHeardTimes.put(id,seconds);earlyHeardSettings.put(id,viaRadio?observedSettings(seconds):"");
+                    }
+                    return;
+                }
+                String radio=meshcore?"mc":"mt",device=ownId,settings=viaRadio?observedSettings(seconds):"";
+                storeUpdate(()->chatStore.heard(radio,device,id,seconds,settings));publishRadioUpdate();
+            });
         }
         @Override public void signalSample(String target,long seconds,Float snr,Integer rssi,int hops,String stats,boolean requested,boolean mqtt) {
             int currentGeneration=generation;
@@ -709,8 +864,11 @@ public final class MainActivity extends Activity {
                     JSONObject sample=new JSONObject().put("time",seconds>0?seconds*1000:System.currentTimeMillis())
                         .put("phoneTime",seconds<=0).put("hops",hops).put("stats",stats).put("requested",requested).put("mqtt",mqtt);
                     if(snr!=null)sample.put("snr",snr);if(rssi!=null)sample.put("rssi",rssi);
-                    chatStore.saveSignal(ownId,target,sample.toString());
-                    if(pageReady)web.evaluateJavascript("window.onSignalSampleSaved("+JSONObject.quote(key)+","+JSONObject.quote(target)+")",null);
+                    String device=ownId,json=sample.toString();
+                    storeUpdate(()->chatStore.saveSignal(device,target,json));
+                    if(!loading)flushRadioStorage(()->{
+                        if(generation==currentGeneration&&pageReady&&!closing)web.evaluateJavascript("window.onSignalSampleSaved("+JSONObject.quote(key)+","+JSONObject.quote(target)+")",null);
+                    });
                 } catch(JSONException ignored){}
             });
         }
@@ -732,6 +890,7 @@ public final class MainActivity extends Activity {
             main.post(() -> {
                 if (generation != currentGeneration) return;
                 if (ownId.isEmpty()) return;
+                if(!meshcore){saveMtIncoming(channel,sender,"",text,receivedAt,hops,packetId,replyId,false);return;}
                 if ((receivedAt>0 || loading) && chatStore.hasMessage(meshcore ? "mc" : "mt",ownId,channel,"",sender,text,receivedAt,false)) return;
                 ChatEntry entry = new ChatEntry(sender, text, false, receivedAt);
                 entry.hops=hops;entry.packetId=packetId;entry.replyId=replyId;entry.unread=true;
@@ -754,6 +913,7 @@ public final class MainActivity extends Activity {
             main.post(() -> {
                 if (generation != currentGeneration) return;
                 if (ownId.isEmpty()) return;
+                if(!meshcore){saveMtIncoming(-1,id,id,text,receivedAt,hops,packetId,replyId,false);return;}
                 if ((receivedAt>0 || loading) && chatStore.hasMessage(meshcore ? "mc" : "mt",ownId,-1,id,id,text,receivedAt,false)) return;
                 ChatEntry entry = new ChatEntry(id, text, false, receivedAt);
                 entry.hops=hops;entry.packetId=packetId;entry.replyId=replyId;entry.unread=true;
@@ -784,18 +944,24 @@ public final class MainActivity extends Activity {
                 if(!ownId.isEmpty()){
                     boolean changedPosition=meshcore&&old!=null&&MapData.valid(latitude,longitude)
                             &&(latitude!=old.latitude||longitude!=old.longitude);
-                    mapData.node(meshcore?"mc":"mt",ownId,id,name,role,latitude,longitude,changedPosition);
-                    if(changedPosition)showMapGeofenceAlerts("mc",ownId,id,name,latitude,longitude);
+                    String radio=meshcore?"mc":"mt",device=ownId;
+                    if(meshcore||!loading||installingNodes)storeUpdate(()->{mapData.node(radio,device,id,name,role,latitude,longitude,changedPosition);
+                            if(changedPosition)showMapGeofenceAlerts("mc",device,id,name,latitude,longitude);
+                        });
                 }
                 if (id.equals(ownId) && !name.isEmpty()) {
                     ownName = name;
-                    chatStore.saveRadio(meshcore ? "mc" : "mt", id, name, bleAddress);
+                    String radio=meshcore?"mc":"mt",address=bleAddress;
+                    storeUpdate(()->chatStore.saveRadio(radio,id,name,address));
                 }
-                if(!ownId.isEmpty()&&!name.isEmpty())getPreferences(0).edit()
-                        .putString("contact_name:"+(meshcore?"mc":"mt")+":"+ownId+":"+id,name).apply();
-                if (selected == this && page == 2) renderNodes();
+                if(!ownId.isEmpty()&&!name.isEmpty()) {
+                    String setting="contact_name:"+(meshcore?"mc":"mt")+":"+ownId+":"+id;
+                    if(loading&&!meshcore&&!installingNodes)loadingContactNames.put(setting,name);
+                    else storeUpdate(()->getPreferences(0).edit().putString(setting,name).apply());
+                }
+                if (!loading && selected == this && page == 2) renderNodes();
                 publishRadioUpdate();
-                sendMapData();
+                if(meshcore||!loading||installingNodes)requestRadioMapUpdate();
             });
         }
         @Override public void position(String id, double latitude, double longitude) {
@@ -807,12 +973,14 @@ public final class MainActivity extends Activity {
                 if (old != null) knownNodes.put(id, new NodeEntry(id, old.name, old.role,
                         old.model, old.channel, old.hops, latitude, longitude));
                 if(!ownId.isEmpty()){
-                    String radio=meshcore?"mc":"mt";
-                    mapData.node(radio,ownId,id,old==null?"":old.name,old==null?"":old.role,latitude,longitude,true);
-                    showMapGeofenceAlerts(radio,ownId,id,old==null?id:old.name,latitude,longitude);
+                    String radio=meshcore?"mc":"mt",device=ownId;
+                    String name=old==null?"":old.name,role=old==null?"":old.role;
+                    storeUpdate(()->{mapData.node(radio,device,id,name,role,latitude,longitude,true);
+                        showMapGeofenceAlerts(radio,device,id,name.isEmpty()?id:name,latitude,longitude);
+                    });
                 }
                 publishRadioUpdate();
-                sendMapData();
+                if(meshcore||!loading||installingNodes)requestRadioMapUpdate();
             });
         }
         private void saveIncomingMarker(int channel,String sender,String text) {
@@ -886,7 +1054,10 @@ public final class MainActivity extends Activity {
             main.post(() -> {
                 if (generation != currentGeneration) return;
                 channelNames.put(index, name.isEmpty() ? "Channel " + index : name);
-                if (!ownId.isEmpty()) chatStore.saveChannel(meshcore ? "mc" : "mt", ownId, index, channelNames.get(index));
+                if (!ownId.isEmpty()) {
+                    String radio=meshcore?"mc":"mt",device=ownId,title=channelNames.get(index);
+                    storeUpdate(()->chatStore.saveChannel(radio,device,index,title));
+                }
                 if (selected == this) refreshChannels(index);
                 publishRadioUpdate();
             });
@@ -1187,6 +1358,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void exportContacts(String json) {main.post(()->contactActions.exportContacts(json));}
         @JavascriptInterface public void importContacts() {main.post(()->contactActions.importContacts());}
         @JavascriptInterface public void deleteGeofenceAlert(String id){main.post(()->{mapData.deleteAlert(id);sendMapData();});}
+        @JavascriptInterface public void mapActive(boolean active) {main.post(()->mapActive=active);}
         @JavascriptInterface public void loadMap() {main.post(()->sendMapData());}
         @JavascriptInterface public void loadSatelliteAccount(){main.post(()->sendSatelliteAccount());}
         @JavascriptInterface public void openCopernicusAccount(){main.post(()->openMapHelp("https://dataspace.copernicus.eu/"));}
@@ -1354,7 +1526,8 @@ public final class MainActivity extends Activity {
             main.post(() -> MainActivity.this.nodeAction(session(radio), id, action, text));
         }
         @JavascriptInterface public void forgetNode(String key,String id,String name) {
-            main.post(()->{
+            main.post(()->flushRadioStorage(()->{
+                if(closing)return;
                 RadioSession source=session(key);
                 if(source==null||id==null||id.isEmpty())return;
                 String radio=source.meshcore?"mc":"mt";
@@ -1387,7 +1560,7 @@ public final class MainActivity extends Activity {
                     }
                     publish();sendMapData();sendContacts();nodeActionResult("Node forgotten on this phone");
                 }catch(Exception error){nodeActionResult("Could not forget node: "+error.getMessage());}
-            });
+            }));
         }
         @JavascriptInterface public void setNodeName(String radio,String id,String name) {
             main.post(()->{
@@ -2191,11 +2364,33 @@ public final class MainActivity extends Activity {
             contactEvent("onContactNodes",new JSONArray(devices.values()));
         }catch(Exception e){contactEvent("onContactError","Could not load assigned nodes: "+e.getMessage());}
     }
+    private boolean mapActive,mapRefreshPending,mapSnapshotInFlight,mapSnapshotAgain;
+    private final Runnable mapRefresher=()->{mapRefreshPending=false;if(mapActive)sendMapData();};
+    private void requestRadioMapUpdate() {
+        if(!mapActive||mapRefreshPending||closing)return;
+        mapRefreshPending=true;main.postDelayed(mapRefresher,300);
+    }
     private void sendMapData(){
         if(!pageReady||closing||web==null)return;
-        try{JSONObject data=mapData.snapshot().put("displayStyle",getPreferences(0).getString("map_display_style","full")).put("packs",mapPacks.list()).put("selectedPackId",getPreferences(0).getString("active_map_pack_id",""));
-            web.evaluateJavascript("window.onMapData("+data+")",null);}
-        catch(Exception error){nodeActionResult("Could not load Map: "+error.getMessage());}
+        if(mapSnapshotInFlight){mapSnapshotAgain=true;return;}
+        mapSnapshotInFlight=true;
+        String style=getPreferences(0).getString("map_display_style","full"),pack=getPreferences(0).getString("active_map_pack_id","");
+        flushRadioStorage(()->{
+            if(closing)return;
+            mapSnapshotWorker.execute(()->{
+                String json=null,errorText=null;
+                try{json=mapData.snapshot().put("displayStyle",style).put("packs",mapPacks.list()).put("selectedPackId",pack).toString();}
+                catch(Exception error){errorText=error.getMessage();}
+                String result=json,failure=errorText;
+                main.post(()->{
+                    mapSnapshotInFlight=false;
+                    if(closing)return;
+                    if(result!=null&&pageReady&&web!=null)web.evaluateJavascript("window.onMapData("+result+")",null);
+                    else if(failure!=null)nodeActionResult("Could not load Map: "+failure);
+                    if(mapSnapshotAgain){mapSnapshotAgain=false;sendMapData();}
+                });
+            });
+        });
     }
     private void mapPackImportStatus(String message){mapPackImportStatus(message,false);}
     private void mapPackImportStatus(String message,boolean busy){
@@ -2267,8 +2462,12 @@ public final class MainActivity extends Activity {
     private void showMapGeofenceAlerts(String radio,String device,String id,String name,double latitude,double longitude){
         try{JSONArray alerts=mapData.geofenceChanges(radio,device,id,latitude,longitude);
             for(int i=0;i<alerts.length();i++){JSONObject alert=alerts.getJSONObject(i);String message=(name.isEmpty()?id:name)+" "+alert.getString("event")+" "+alert.getString("title");
-                if(pageReady&&visible)web.evaluateJavascript("window.onMapAlert("+JSONObject.quote(message)+")",null);
-                MessageNotifications.showGeofence(this,message);
+                Runnable notify=()->{if(closing)return;
+                    if(pageReady&&visible)web.evaluateJavascript("window.onMapAlert("+JSONObject.quote(message)+")",null);
+                    MessageNotifications.showGeofence(this,message);
+                };
+                List<Runnable> committed=radioCommitCallbacks.get();
+                if(committed!=null)committed.add(notify);else main.post(notify);
             }
         }catch(JSONException error){debug("Map geofence alert failed");}
     }
@@ -2457,12 +2656,9 @@ public final class MainActivity extends Activity {
     }
     private final Runnable radioPublisher=()->{radioPublishPending=false;publish();};
     private void publishRadioUpdate() {
-        boolean loading=false;
-        for(RadioSession session:sessions.values()) loading|=session.loading;
-        if(!loading) {publish();return;}
         if(radioPublishPending)return;
         radioPublishPending=true;
-        main.postDelayed(radioPublisher,100);
+        main.postDelayed(radioPublisher,200);
     }
     private void publish() {
         if(radioPublishPending){main.removeCallbacks(radioPublisher);radioPublishPending=false;}
@@ -2476,8 +2672,10 @@ public final class MainActivity extends Activity {
             chatLeft=resolveChatSession(chatLeft);chatRight=resolveChatSession(chatRight);
             if(!chatLeftChosen&&chatLeft.ownId.isEmpty())chatLeft=firstConnectedChatDevice(chatLeft);
             if(!chatRightChosen&&chatRight.ownId.isEmpty())chatRight=firstConnectedChatDevice(chatRight);
-            JSONObject data = new JSONObject().put("mt", sessionJson(selectedMt)).put("mc", sessionJson(selectedMc))
-                    .put("left",sessionJson(chatLeft)).put("right",sessionJson(chatRight));
+            Map<RadioSession,JSONObject> encoded=new java.util.IdentityHashMap<>();
+            for(RadioSession s:new RadioSession[]{selectedMt,selectedMc,chatLeft,chatRight})if(!encoded.containsKey(s))encoded.put(s,sessionJson(s));
+            JSONObject data = new JSONObject().put("mt",encoded.get(selectedMt)).put("mc",encoded.get(selectedMc))
+                    .put("left",encoded.get(chatLeft)).put("right",encoded.get(chatRight));
             data.put("mcDirectAttempts",getPreferences(0).getInt("mc_direct_attempts",4)).put("mcFloodAttempts",getPreferences(0).getInt("mc_flood_attempts",4));
             data.put("multiSendEnabled",getPreferences(0).getBoolean("multi_send_enabled",false)).put("multiSendCooldownMs",multiSendCooldownRemaining());
             data.put("mtTracerouteCooldownMs",mtTracerouteAllowance.remaining(SystemClock.elapsedRealtime()));
@@ -2597,7 +2795,8 @@ public final class MainActivity extends Activity {
                 .put("ownName",session.ownName).put("key",session.key)
                 .put("channelTextLimit",session.protocol==null?0:session.protocol.textLimit(false))
                 .put("directTextLimit",session.protocol==null?0:session.protocol.textLimit(true))
-                .put("unread",hasUnread(session)).put("loading",session.loading);
+                .put("unread",hasUnread(session)).put("loading",session.loading)
+                .put("loadingStage",session.loadingStage).put("loadingNodes",session.loadingNodes).put("loadingChannels",session.loadingChannels);
         if (Double.isFinite(session.ownLatitude) && Double.isFinite(session.ownLongitude))
             obj.put("ownLatitude", session.ownLatitude).put("ownLongitude", session.ownLongitude);
         JSONArray channelsJson = reportedChannels(session);
@@ -2607,11 +2806,12 @@ public final class MainActivity extends Activity {
                 channelsJson.put(new JSONObject().put("index",saved.index).put("name",saved.name));
         }
         JSONArray nodesJson = new JSONArray();
-        Map<String,String> heardSettings=chatStore.heardSettings(session.meshcore?"mc":"mt",session.ownId);
-        for (NodeEntry node : session.knownNodes.values())
+        Map<String,String> heardSettings=session.loading?java.util.Collections.emptyMap():chatStore.heardSettings(session.meshcore?"mc":"mt",session.ownId);
+        Map<String,Long> heardTimes=session.loading?java.util.Collections.emptyMap():chatStore.heardTimes(session.meshcore?"mc":"mt",session.ownId);
+        if(!session.loading)for (NodeEntry node : session.knownNodes.values())
             {
                 JSONObject item = new JSONObject().put("id", node.id).put("name", node.name)
-                        .put("heardSettings",heardSettings.get(node.id)).put("lastHeard",chatStore.lastHeard(session.meshcore?"mc":"mt",session.ownId,node.id)).put("role", node.role).put("model", node.model).put("hops", node.hops)
+                        .put("heardSettings",heardSettings.get(node.id)).put("lastHeard",heardTimes.getOrDefault(node.id,0L)).put("role", node.role).put("model", node.model).put("hops", node.hops)
                         .put("favorite", getPreferences(0).getBoolean((session.meshcore ? "mc:" : "mt:") + session.ownId + ":" + node.id, false));
                 if (Double.isFinite(node.latitude) && Double.isFinite(node.longitude))
                     item.put("latitude", node.latitude).put("longitude", node.longitude);
@@ -2619,12 +2819,12 @@ public final class MainActivity extends Activity {
             }
         // Browse saved discoveries without making them live radio contacts or send targets.
         String radio=session.meshcore?"mc":"mt";
-        try(Cursor c=chatStore.getReadableDatabase().rawQuery("SELECT id,name,role,lat,lon FROM map_nodes WHERE radio=? AND device=?",new String[]{radio,session.ownId})) {
+        if(!session.loading)try(Cursor c=chatStore.getReadableDatabase().rawQuery("SELECT id,name,role,lat,lon FROM map_nodes WHERE radio=? AND device=?",new String[]{radio,session.ownId})) {
             while(c.moveToNext()) {
                 String id=c.getString(0);if(session.knownNodes.containsKey(id))continue;
                 JSONObject item=new JSONObject().put("id",id).put("name",c.getString(1)).put("role",c.getString(2))
                         .put("model","").put("hops",-1).put("savedOnly",true).put("heardSettings",heardSettings.get(id))
-                        .put("lastHeard",chatStore.lastHeard(radio,session.ownId,id))
+                        .put("lastHeard",heardTimes.getOrDefault(id,0L))
                         .put("favorite",getPreferences(0).getBoolean(radio+":"+session.ownId+":"+id,false));
                 if(!c.isNull(3)&&!c.isNull(4))item.put("latitude",c.getDouble(3)).put("longitude",c.getDouble(4));
                 nodesJson.put(item);
@@ -4060,7 +4260,15 @@ public final class MainActivity extends Activity {
         unregisterReceiver(bluetoothStateReceiver);
         pageReady = false;
         if (web != null) { web.removeJavascriptInterface("AndroidBridge"); web.destroy(); web = null; }
-        historyWorker.execute(()->chatStore.close());historyWorker.shutdown();mapImportWorker.shutdown();messageSearchWorker.shutdown();
+        flushRadioStorage(null);
+        radioWorker.shutdown();mapSnapshotWorker.shutdown();historyWorker.shutdown();mapImportWorker.shutdown();messageSearchWorker.shutdown();
+        new Thread(()->{
+            try{
+                for(java.util.concurrent.ExecutorService worker:new java.util.concurrent.ExecutorService[]{radioWorker,mapSnapshotWorker,historyWorker,mapImportWorker,messageSearchWorker})
+                    worker.awaitTermination(Long.MAX_VALUE,java.util.concurrent.TimeUnit.NANOSECONDS);
+                chatStore.close();
+            }catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
+        },"LoRa storage close").start();
         updateWorker.shutdown();
         super.onDestroy();
     }

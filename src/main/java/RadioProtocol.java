@@ -8,6 +8,7 @@ interface RadioProtocol {
         void ownNode(String id, String name);
         void syncComplete();
         default void syncFailed(String reason) {status(reason);}
+        default void loadingProgress(String stage,int nodes,int channels) {}
         void status(String text);
         void message(int channel, String sender, String text, long receivedAt, int hops);
         void directMessage(String id, String text, long receivedAt, int hops);
@@ -56,6 +57,42 @@ interface RadioProtocol {
 
 final class MeshtasticProtocol implements RadioProtocol {
     private final SecureRandom random = new SecureRandom();
+    private final java.util.function.LongSupplier clock;
+    private long configNonce, configStarted, configProgressAt;
+    private boolean configuring;
+    // Firmware PhoneAPI request selectors, also used by the official Android client.
+    static final int CONFIG_ONLY=69420, NODES_ONLY=69421;
+    private int configStage;
+    private long nextStageAt;
+    private int configNodes, configChannels;
+    private final java.util.Set<Long> configNodeIds=new java.util.HashSet<>();
+    private final java.util.Set<Integer> configChannelIds=new java.util.HashSet<>();
+    MeshtasticProtocol() { this(()->System.nanoTime()/1000000); }
+    MeshtasticProtocol(java.util.function.LongSupplier clock) { this.clock=clock; }
+    @Override public void cancelAll() { configuring=false;configNonce=0;configStage=0; }
+    @Override public byte[] poll(Events events) {
+        long now=clock.getAsLong();
+        if(configuring&&configStage==2&&now>=nextStageAt) {
+            configStage=3;nextStageAt=now+100;
+            return new ProtoWire.Writer().bytes(7,new byte[0]).build();
+        }
+        if(configuring&&configStage==3&&now>=nextStageAt) {
+            configStage=4;configNonce=NODES_ONLY;configStarted=configProgressAt=now;
+            events.loadingProgress("Loading nodes",configNodes,configChannels);
+            return new ProtoWire.Writer().varint(3,NODES_ONLY).build();
+        }
+        long budget=configStage==1?30000:60000;
+        if(configuring&&(now-configProgressAt>=budget||now-configStarted>=budget*10)) {
+            configuring=false;configNonce=0;
+            events.syncFailed("Meshtastic configuration stalled ("+configNodes+" nodes, "+configChannels+" channels). Reconnect this radio.");
+        }
+        return null;
+    }
+    private void configProgress(Events events) {
+        if(!configuring)return;
+        configProgressAt=clock.getAsLong();
+        events.loadingProgress(configStage==1?"Loading configuration":"Loading nodes",configNodes,configChannels);
+    }
     private long myNode, lastId;
     private final java.util.Map<Long,Long> messageTargets=new java.util.LinkedHashMap<>();
     private final java.util.Map<Long,String> traceTargets=new java.util.HashMap<>();
@@ -78,7 +115,11 @@ final class MeshtasticProtocol implements RadioProtocol {
     }
 
     @Override public byte[] initialCommand() {
-        int nonce = random.nextInt(Integer.MAX_VALUE - 1) + 1;
+        int nonce = CONFIG_ONLY;
+        configNonce=nonce;configuring=true;configNodes=configChannels=0;
+        configNodeIds.clear();configChannelIds.clear();
+        configStage=1;myNode=0;
+        configStarted=configProgressAt=clock.getAsLong();
         return new ProtoWire.Writer().varint(3, nonce).build();
     }
 
@@ -161,16 +202,28 @@ final class MeshtasticProtocol implements RadioProtocol {
             ProtoWire.Reader root = new ProtoWire.Reader(packet);
             while (root.next()) {
                 if (root.field == 2) readPacket(root.bytes(), events);
-                else if (root.field == 3) readMyInfo(root.bytes(), events);
-                else if (root.field == 4) readNode(root.bytes(), events);
-                else if (root.field == 5) readConfig(root.bytes(), events);
-                else if (root.field == 10) readChannel(root.bytes(), events);
+                else if (root.field == 3) {readMyInfo(root.bytes(), events);if(configStage==1)configProgress(events);}
+                else if (root.field == 4) {if(readNode(root.bytes(), events)&&(configStage==1||configStage==4))configProgress(events);}
+                else if (root.field == 5) {readConfig(root.bytes(), events);if(configStage==1)configProgress(events);}
+                else if (root.field == 10) {readChannel(root.bytes(), events);if(configStage==1)configProgress(events);}
+                else if (root.field == 9||root.field==13||root.field==15||root.field==17) {
+                    root.bytes();if(configStage==1)configProgress(events);
+                }
                 else if (root.field == 11) {
                     ProtoWire.Reader queue=new ProtoWire.Reader(root.bytes()); long id=0; int result=0;
                     while(queue.next()) { if(queue.field==1) result=(int)queue.number(); else if(queue.field==4) id=queue.number(); else queue.skip(); }
                     if(messageTargets.containsKey(id)) events.delivery(id,result==0?"accepted":"failed: Radio queue rejected the message (code "+result+")");
                 }
-                else if (root.field == 7) { root.number(); events.status("Meshtastic configuration loaded"); events.syncComplete(); }
+                else if (root.field == 7) {
+                    long completed=root.number();
+                    if(configuring&&completed==configNonce&&configStage==1&&myNode!=0) {
+                        configStage=2;configNonce=0;nextStageAt=clock.getAsLong()+100;
+                        events.loadingProgress("Loading nodes",configNodes,configChannels);
+                    } else if(configuring&&completed==configNonce&&configStage==4) {
+                        configuring=false;configNonce=0;configStage=0;
+                        events.status("Meshtastic node list received; saving…");events.syncComplete();
+                    }
+                }
                 else root.skip();
             }
         } catch (IllegalArgumentException error) { events.status("Ignored malformed Meshtastic frame: " + error.getMessage()); }
@@ -201,7 +254,7 @@ final class MeshtasticProtocol implements RadioProtocol {
         }
     }
 
-    private void readNode(byte[] bytes, Events events) {
+    private boolean readNode(byte[] bytes, Events events) {
         ProtoWire.Reader r = new ProtoWire.Reader(bytes); long num = 0, lastHeard=0; String name = ""; String role = "";
         String model = "", shortName = ""; int channel = 0, hops = -1; Position position=new Position();
         while (r.next()) {
@@ -223,7 +276,9 @@ final class MeshtasticProtocol implements RadioProtocol {
             else if (r.field == 9) hops = (int)r.number();
             else r.skip();
         }
+        if(num==0)return false;
         String id = "!" + String.format("%08x", num);
+        if(configuring&&num!=0){configNodeIds.add(num);configNodes=configNodeIds.size();}
         name = reportedName(id, name, shortName);
         double lat=position.lat,lon=position.lon;
         events.node(id, name, role, model, channel, hops, lat, lon);
@@ -232,6 +287,7 @@ final class MeshtasticProtocol implements RadioProtocol {
         if (num == myNode && Double.isFinite(lat) && Double.isFinite(lon)) {
             events.ownPosition(lat, lon);
         }
+        return true;
     }
 
     private static final class Position {
@@ -588,7 +644,10 @@ final class MeshtasticProtocol implements RadioProtocol {
             } else if (r.field == 3) role = (int)r.number();
             else r.skip();
         }
-        if (role != 0) events.channel(index, name.isEmpty() ? "Default" : name);
+        if (role != 0) {
+            if(configuring){configChannelIds.add(index);configChannels=configChannelIds.size();}
+            events.channel(index, name.isEmpty() ? "Default" : name);
+        }
     }
 }
 

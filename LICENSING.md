@@ -1,5 +1,9 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 5 November 2026 — Meshtastic loading implementation
+
+The two-stage PhoneAPI loading, background storage, progress and rendering changes are locally authored. Official Meshtastic Android commit `0ddf09db3bed50c653fdcd58559ad728b2dc6e53`, firmware PhoneAPI and protobuf definitions were consulted for protocol selectors, completion/state handling and batching behavior. No official Android implementation was copied. See `MT-LOADING-2026-11-05.md` for source references and validation. Existing attribution, notices, application ID and signing configuration remain unchanged.
+
 ## 5 November 2026 — GitHub update 0.10.25
 
 The user subsequently authorized building the debug APK and updating GitHub with the current fixes, superseding the earlier packaging hold below. Preserve existing notices, application ID and signing configuration. Physical MC/MT Bluetooth testing and the specific geofence-node comparison remain pending; a next-session reminder is recorded in AGENTS.md and TODO.md. Production signing and replacement licensing remain undecided.

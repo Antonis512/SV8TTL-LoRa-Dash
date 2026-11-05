@@ -161,6 +161,7 @@ function switchTab(tab) {
   if(tab!=='map'&&activeTab==='map')window.cancelMarkPosition?.();
   activeTab=tab;
   AndroidBridge.contactsActive(tab==='contacts');
+  AndroidBridge.mapActive?.(tab==='map');
   for(const id of ['nodes-action-status','dm-chat-status']) el(id).textContent='';
   el('dm-context').hidden=true;
   closeSideZoom();
@@ -171,6 +172,24 @@ function switchTab(tab) {
   if (tab === 'contacts') {AndroidBridge.loadContacts();window.renderContacts?.();}
   document.querySelector('.nav-btn.active')?.scrollIntoView({block:'nearest',inline:'nearest'});
   if (tab === 'map') { AndroidBridge.loadMap(); if(window.mapShown)window.mapShown(); }
+  renderActiveRadioViews();
+}
+function renderActiveRadioViews(){
+  if(!state)return;
+  if(activeTab==='chat')renderChat();
+  if(activeTab==='nodes')renderNodes();
+  if(activeTab==='settings'){
+    if(settingsPage==='nodes')renderMyNodes();
+    if(settingsPage==='sounds')renderSoundConfig();
+    if(settingsPage==='channel-backup')renderBackupDevices();
+  }
+  if(activeTab==='contacts')window.renderContacts?.();
+  if(activeTab==='map'){
+    window.renderMap?.();
+    el('map-send-mark')?.refreshTargets?.();
+    el('map-route-device')?.refreshTargets?.();
+    el('map-sense-device')?.refreshTargets?.();
+  }
 }
 function showSettingsPage(page) {
   settingsPage=['home','nodes','sounds','backup','channel-backup','connections','about','sending','timeouts','presets'].includes(page)?page:'home';
@@ -187,6 +206,8 @@ function showSettingsPage(page) {
   el('settings-backup-page').hidden=settingsPage!=='backup';
   el('settings-channel-backup-page').hidden=settingsPage!=='channel-backup';
   if(settingsPage==='channel-backup') renderBackupDevices();
+  if(state&&settingsPage==='nodes')renderMyNodes();
+  if(state&&settingsPage==='sounds')renderSoundConfig();
   el('settings-content').scrollTop=0;
 }
 function messageTemplates(){return (state?.presetMessages||[]).map((item,index)=>typeof item==='string'?{title:`Message ${index+1}`,text:item}:item);}
@@ -625,7 +646,11 @@ function renderChat() {
   const sync=el('chat-sync');
   const loading=['left','right'].filter(id=>state[id].loading);
   sync.hidden=!loading.length;
-  el('chat-sync-text').textContent='Loading '+loading.map(id=>radioLabel(id)).join(' and ')+' messages…';
+  el('chat-sync-text').textContent=loading.map(id=>{
+    const radio=state[id];
+    return radioLabel(id)+': '+(radio.loadingStage||'Loading messages')+
+      (radio.radio==='mt'?' · '+(radio.loadingNodes||0)+' nodes, '+(radio.loadingChannels||0)+' channels':'');
+  }).join(' · ');
   el('chat-dm-pill').classList.toggle('active',dmMode);
   el('chat-dm-pill').classList.toggle('unread',state.myNodes.some(item=>item.dmUnread));
   el('chat-channels-pill').classList.toggle('active',!dmMode);
@@ -959,9 +984,6 @@ window.onRadioState = function (next) {
   mtTracerouteReadyAt=performance.now()+Math.max(0,Number(next.mtTracerouteCooldownMs)||0);
   updateTracerouteButtons();
   window.installContactRadios?.();
-  el('map-send-mark')?.refreshTargets?.();
-  el('map-route-device')?.refreshTargets?.();
-  el('map-sense-device')?.refreshTargets?.();
   el('message-split-enabled').checked=next.messageSplitEnabled!==false;
   if(document.activeElement!==el('message-split-interval'))el('message-split-interval').value=next.messageSplitIntervalSeconds??5;
   el('connect-all-available').disabled=!!next.connectingAvailable;
@@ -1000,14 +1022,10 @@ window.onRadioState = function (next) {
   el('message-notifications-status').textContent = !next.messageNotificationsAllowed
     ? 'Android notifications are blocked. Enable them in Android notification settings to receive background previews.'
     : next.backgroundMessageNotifications ? 'Background message notifications are on.' : 'Background message notifications are off.';
-  renderSoundConfig();
   el('hdr-radio-name').textContent = next.devices.length+' connected';
   el('nav-chat').classList.toggle('unread',next.myNodes.some(item=>item.unread));
-  renderChat(); renderNodes(); renderMyNodes();
-  if(activeTab==='contacts')window.renderContacts?.();
-  if(activeTab==='map'&&window.renderMap)renderMap();
+  renderActiveRadioViews();
   if(previousChatKey===state[network]?.key) for(const saved of scrollPositions) if(saved.keep)saved.e.scrollTop=saved.top;
-  if(settingsPage==='channel-backup') renderBackupDevices();
 };
 window.onScanProgress = function (id, value) {
   el(id + '-progress').value = value;

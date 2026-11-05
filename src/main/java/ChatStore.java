@@ -224,6 +224,13 @@ final class ChatStore extends SQLiteOpenHelper {
     long lastHeard(String radio,String nodeId,String peer) {
         try(Cursor c=getReadableDatabase().rawQuery("SELECT heard FROM node_heard WHERE radio=? AND node_id=? AND peer=?",new String[]{radio,nodeId,peer})) {return c.moveToFirst()?c.getLong(0):0;}
     }
+    java.util.Map<String,Long> heardTimes(String radio,String nodeId) {
+        java.util.Map<String,Long> result=new java.util.HashMap<>();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT peer,heard FROM node_heard WHERE radio=? AND node_id=?",new String[]{radio,nodeId})) {
+            while(c.moveToNext())result.put(c.getString(0),c.getLong(1));
+        }
+        return result;
+    }
     void heard(String radio,String nodeId,String peer,long seconds) {
         heard(radio,nodeId,peer,seconds,"");
     }

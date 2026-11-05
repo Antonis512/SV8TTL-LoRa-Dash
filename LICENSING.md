@@ -1,5 +1,13 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 5 November 2026 — GitHub update 0.10.25
+
+The user subsequently authorized building the debug APK and updating GitHub with the current fixes, superseding the earlier packaging hold below. Preserve existing notices, application ID and signing configuration. Physical MC/MT Bluetooth testing and the specific geofence-node comparison remain pending; a next-session reminder is recorded in AGENTS.md and TODO.md. Production signing and replacement licensing remain undecided.
+
+## 5 November 2026 — local Bluetooth, Chat selection, Contacts scrolling and map fixes
+
+The transport queue corrections, selection/scroll/map changes and regression fixtures are locally authored. Android's BluetoothGatt API documentation was consulted for MTU behavior; no third-party implementation or assets were copied. Existing notices, application ID and signing configuration remain unchanged. The user requested no APK build yet; these changes have not been packaged or published.
+
 ## 4 November 2026 — GitHub update 0.10.24
 
 The user authorized updating GitHub with the current source and debug update APK, including the previously local 0.10.21–0.10.24 changes. Existing application ID, signing configuration, notices and attribution are preserved. Production signing and replacement licensing remain undecided. Earlier local-preview notes below describe their status at the time of development.

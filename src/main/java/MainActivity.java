@@ -106,6 +106,7 @@ public final class MainActivity extends Activity {
     private final Map<String,RadioSession> sessions = new LinkedHashMap<>();
     private RadioSession selectedMt = mt, selectedMc = mc;
     private RadioSession chatLeft=mc, chatRight=mt;
+    private boolean chatLeftChosen,chatRightChosen;
     private final Map<String, BluetoothDevice> discovered = new LinkedHashMap<>();
     private BluetoothLeScanner scanner;
     private RadioSession scanningSession, awaitingUsbSession, selected = mt;
@@ -1592,7 +1593,7 @@ public final class MainActivity extends Activity {
                     }
                     if(target==null||!radio.equals(target.meshcore?"mc":"mt"))return;
                 }
-                if(side.equals("left"))chatLeft=target;else chatRight=target;
+                if(side.equals("left")){chatLeft=target;chatLeftChosen=true;}else{chatRight=target;chatRightChosen=true;}
                 publish();
             });
         }
@@ -2473,6 +2474,8 @@ public final class MainActivity extends Activity {
         try {
             selectedMc=restoreNodeDevice(selectedMc,"mc");selectedMt=restoreNodeDevice(selectedMt,"mt");
             chatLeft=resolveChatSession(chatLeft);chatRight=resolveChatSession(chatRight);
+            if(!chatLeftChosen&&chatLeft.ownId.isEmpty())chatLeft=firstConnectedChatDevice(chatLeft);
+            if(!chatRightChosen&&chatRight.ownId.isEmpty())chatRight=firstConnectedChatDevice(chatRight);
             JSONObject data = new JSONObject().put("mt", sessionJson(selectedMt)).put("mc", sessionJson(selectedMc))
                     .put("left",sessionJson(chatLeft)).put("right",sessionJson(chatRight));
             data.put("mcDirectAttempts",getPreferences(0).getInt("mc_direct_attempts",4)).put("mcFloodAttempts",getPreferences(0).getInt("mc_flood_attempts",4));
@@ -2556,6 +2559,12 @@ public final class MainActivity extends Activity {
     private RadioSession resolveChatSession(RadioSession current) {
         if(!current.ownId.isEmpty())for(RadioSession s:sessions.values())
             if(s.connected&&s.meshcore==current.meshcore&&s.ownId.equals(current.ownId))return s;
+        return current;
+    }
+
+    private RadioSession firstConnectedChatDevice(RadioSession current) {
+        for(RadioSession s:sessions.values())
+            if(s.connected&&!s.ownId.isEmpty()&&s.meshcore==current.meshcore)return s;
         return current;
     }
 

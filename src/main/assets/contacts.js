@@ -17,7 +17,7 @@ function contactSection(host,title){const box=node('section','contact-section');
 function contactCheck(host,label,checked,fn){const row=node('label','contact-check'),box=node('input');box.type='checkbox';box.checked=!!checked;box.onchange=()=>fn(box.checked);row.append(box,document.createTextNode(label));host.appendChild(row);return box;}
 function contactAvatar(c){if(c.photo?.startsWith('data:image/jpeg;base64,')){const img=node('img','contact-avatar');img.src=c.photo;img.alt='Profile photo of '+contactName(c);return img;}return node('span','contact-avatar',contactName(c).split(/\s+/).slice(0,2).map(s=>s[0]).join('').toUpperCase());}
 function contactNotice(text){el('contacts-status').textContent=text;}
-function contactDialog(title){contactPickerRefresh=null;const dialog=el('contacts-dialog'),body=el('contacts-dialog-content');clear(body);body.appendChild(node('h2','',title));if(!dialog.open)dialog.showModal();dialog.scrollTop=0;return body;}
+function contactDialog(title){contactPickerRefresh=null;const dialog=el('contacts-dialog'),body=el('contacts-dialog-content');dialog.dataset.view='';clear(body);body.appendChild(node('h2','',title));if(!dialog.open)dialog.showModal();dialog.scrollTop=0;return body;}
 function closeContactDialog(){if(contactEdit&&!confirm('Discard unsaved contact changes?'))return;contactEdit=null;el('contacts-dialog').close();}
 el('contacts-dialog').addEventListener('cancel',e=>{e.preventDefault();closeContactDialog();});
 function contactsSave(items,done=()=>{}){
@@ -68,7 +68,12 @@ function contactNodeRows(assignment){
 }
 function contactHeard(c){return Math.max(0,...(c.nodes||[]).flatMap(n=>contactNodeRows(n).map(r=>Number(r.entry.lastHeard)||0)));}
 function contactSummary(c){const radios=[...new Set((c.nodes||[]).map(n=>n.radio.toUpperCase()))];const last=contactHeard(c);return (c.callsigns||[]).map(x=>x.value).join(' · ')+(c.nodes?.length?' · '+c.nodes.length+' nodes ('+radios.join('/')+')':'')+(last?' · Node last heard '+new Date(last*1000).toLocaleString():'');}
-function renderContacts(){
+function contactKeepScroll(host,draw){
+  const top=host.scrollTop,left=host.scrollLeft;
+  try{return draw();}finally{host.scrollTop=top;host.scrollLeft=left;}
+}
+function renderContacts(){return contactKeepScroll(el('tab-contacts'),renderContactsContent);}
+function renderContactsContent(){
   if(!el('contacts-list'))return;installContactRadios();
   el('contacts-list-view').hidden=!!contactOpen;el('contact-detail').hidden=!contactOpen;
   if(contactOpen){renderContactDetail();return;}
@@ -84,7 +89,8 @@ function renderContacts(){
 }
 function openContact(id){contactOpen=id;contactExpandedNode='';renderContacts();}
 function contactDetailBack(){if(!contactOpen)return false;contactOpen='';renderContacts();return true;}
-function renderContactDetail(){
+function renderContactDetail(){return contactKeepScroll(el('tab-contacts'),renderContactDetailContent);}
+function renderContactDetailContent(){
   const c=contactById(contactOpen),host=el('contact-detail');clear(host);if(!c||c.deletedAt){contactOpen='';renderContacts();return;}
   const top=node('div','contact-toolbar');contactButton(top,'← Contacts',contactDetailBack);contactButton(top,c.favorite?'★ Favorite':'☆ Favorite',()=>contactsSave([{...c,favorite:!c.favorite}]));host.appendChild(top);
   const heading=node('div','contact-row');heading.append(contactAvatar(c),node('h2','',contactName(c)));host.appendChild(heading);
@@ -142,6 +148,12 @@ function newContact(){return {id:contactId(),kind:'contact',created:contactNow()
 function editContact(c=null){contactEdit={draft:c?{...newContact(),...contactClone(c)}:newContact(),token:contactId(),mergeIds:[]};renderContactEditor();}
 function contactInput(host,label,value,fn,type='text'){const wrap=node('label','contact-field',label),input=node(type==='textarea'?'textarea':'input','form-input');if(type!=='textarea')input.type=type;input.value=value||'';input.setAttribute('aria-label',label);input.oninput=()=>fn(input.value);wrap.appendChild(input);host.appendChild(wrap);return input;}
 function renderContactEditor(){
+  const dialog=el('contacts-dialog'),token=contactEdit?.token;
+  const sameEditor=dialog.open&&dialog.dataset.editorToken===token&&dialog.dataset.view==='editor';
+  if(sameEditor)contactKeepScroll(dialog,renderContactEditorContent);else renderContactEditorContent();
+  dialog.dataset.editorToken=token||'';dialog.dataset.view='editor';
+}
+function renderContactEditorContent(){
   if(!contactEdit)return;const c=contactEdit.draft,body=contactDialog(contactById(c.id)?'Edit Contact':'New Contact');
   const fields=node('div','contact-fields');body.appendChild(fields);
   for(const [key,label] of [['name','Name'],['surname','Surname'],['alias','Alias'],['displayName','Preferred display name'],['organization','Organization / club'],['role','Role']])contactInput(fields,label,c[key],v=>c[key]=v).maxLength=500;

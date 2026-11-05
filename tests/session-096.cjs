@@ -45,8 +45,8 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
  assert.match(await page.locator('#dm-context').innerText(),/Other radio hill \(08\)/);
  assert.doesNotMatch(await page.locator('#dm-context').innerText(),/Valley/);
  await page.evaluate(()=>{onNodeActionResult('Direct message sent to radio for Alice');});
- assert.equal(await page.locator('#nodes-action-status').innerText(),'');assert.equal(await page.locator('#advert-status').innerText(),'');assert.equal(await page.locator('#popup-action-status').count(),0);
- await page.evaluate(()=>{el('dm-context').hidden=true;fixture.mc.connected=true;fixture.devices.push({radio:'mc',key:'mc1',id:'mcown',name:'MC'});onRadioState(fixture);switchTab('settings');showSettingsPage('adverts');showAdvertActions();onAdvertResult('other','Advert accepted by radio',true);});
+ assert.equal(await page.locator('#nodes-action-status').innerText(),'');assert.equal(await page.locator('.advert-result').count(),0);assert.equal(await page.locator('#popup-action-status').count(),0);
+ await page.evaluate(()=>{el('dm-context').hidden=true;fixture.mc.connected=true;fixture.devices.push({radio:'mc',key:'mc1',id:'mcown',name:'MC'});onRadioState(fixture);switchTab('chat');showAdvertActions('mc1');onAdvertResult('other','Advert accepted by radio',true);});
  assert.equal(await page.locator('#advert-dismiss').innerText(),'Cancel');
  await page.evaluate(()=>onAdvertResult('mc1','MeshCore command error 2',false));assert.equal(await page.locator('#advert-dismiss').innerText(),'Cancel');
  await page.evaluate(()=>onAdvertResult('mc1','Advert accepted by radio',true));assert.equal(await page.locator('#advert-dismiss').innerText(),'OK');
@@ -54,15 +54,16 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
  await page.evaluate(()=>{
   const now=Date.now()/1000;fixture.mc.nodes=[{id:'01',name:'Recent',role:'User',lastHeard:now},{id:'02',name:'Old',role:'User',lastHeard:now-31*86400},{id:'03',name:'Unknown',role:'User',lastHeard:0}];fixture.mt.nodes=[];onRadioState(fixture);switchTab('nodes');
  });
- assert.equal(await page.locator('.node-heading').count(),1);
- await page.locator('#nodes-show-unknown').check();assert.equal(await page.locator('.node-heading').count(),2);
+ assert.equal(await page.locator('.node-heading').count(),3);
+ await page.locator('#nodes-show-unknown').uncheck();assert.equal(await page.locator('.node-heading').count(),2);
+ await page.locator('#nodes-show-unknown').check();assert.equal(await page.locator('.node-heading').count(),3);
  await page.evaluate(()=>{fixture.mc.nodes[1].lastHeard=Date.now()/1000;onRadioState(fixture);});assert.equal(await page.locator('.node-heading').count(),3);
  await page.evaluate(()=>{switchTab('settings');showSettingsPage('about');onAbout('0.9.6','MIT License\nCopyright (c) 2026 Filip');});
  assert.match(await page.locator('#settings-about-page').innerText(),/Beta edition · 0.9.6/);
  await page.screenshot({path:'build/about-096.png'});
  for(const viewport of [{width:390,height:780},{width:390,height:430},{width:780,height:390},{width:360,height:640}]) {
   await page.setViewportSize(viewport);await page.evaluate(()=>{switchTab('chat');selectChannel('mt',2);replyToMessage('mt',fixture.mt.chats[2][0],{channel:2});});
-  const box=await page.locator('#chat-input').boundingBox(),nav=await page.locator('#bottom-nav').boundingBox();assert.ok(box.y>=0&&box.y+box.height<=nav.y+1);
+  const box=await page.locator('#chat-input').boundingBox(),nav=await page.locator('#bottom-nav').boundingBox();assert.ok(box.y>=0&&box.y+box.height<=nav.y+1,JSON.stringify({viewport,box,nav}));
  }
  assert.deepEqual(errors,[]);console.log('0.9.6 startup, history, replies, status placement, collision, advert, node age and About checks passed');
  }finally{await browser.close();}

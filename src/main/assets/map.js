@@ -121,9 +121,12 @@ function mapFilterRows(){
     return true;
   });
   // The same radio node may be known through several receiving devices; show its newest position once in All.
-  const byNode=new Map();for(const n of matching){const key=n.radio+':'+n.id,old=byNode.get(key);if(!old||n.positionAt>old.positionAt||(!old.lat&&n.lat))byNode.set(key,n);}
+  const byNode=new Map();for(const n of matching){const key=n.radio+':'+n.id,old=byNode.get(key);
+    if(!old||(mapHasPosition(n)&&!mapHasPosition(old))||(mapHasPosition(n)===mapHasPosition(old)&&n.positionAt>old.positionAt))byNode.set(key,n);
+  }
   return [...byNode.values()];
 }
+function mapHasPosition(n){return Number.isFinite(n.lat)&&Number.isFinite(n.lon)&&Math.abs(n.lat)<=90&&Math.abs(n.lon)<=180&&!(n.lat===0&&n.lon===0);}
 function renderMapFilters(){
   const device=el('map-device'),old=device.value;device.replaceChildren();const all=mapText('option','All devices');all.value='all';device.appendChild(all);
   const devices=new Map();
@@ -141,14 +144,14 @@ function clearMapFilters(){for(const id of ['map-network','map-device','map-role
 function renderMap(){
   if(!mapView)return;renderMapFilters();
   for(const m of mapMarkers)m.remove();mapMarkers=[];
-  const rows=mapFilterRows(),placed=rows.filter(n=>Number.isFinite(n.lat)&&Number.isFinite(n.lon));
+  const rows=mapFilterRows(),placed=rows.filter(mapHasPosition);
   for(const n of placed){
     const dot=mapText('span','',`map-node-dot ${n.radio}${n.positionAt&&Date.now()-n.positionAt>86400000?' old':''}`);
     const popup=mapNodePopup(n,placed);
     const marker=new maplibregl.Marker({element:dot}).setLngLat([n.lon,n.lat]).setPopup(new maplibregl.Popup({offset:15}).setDOMContent(popup)).addTo(mapView);mapMarkers.push(marker);
     if(mapSelected&&sameMapNode(n,mapSelected))marker.togglePopup();
   }
-  const missing=rows.filter(n=>!Number.isFinite(n.lat)||!Number.isFinite(n.lon));el('map-counts').textContent=placed.length+' positioned · '+missing.length+' without position';
+  const missing=rows.filter(n=>!mapHasPosition(n));el('map-counts').textContent=placed.length+' positioned · '+missing.length+' without position';
   const list=el('map-no-position-list');list.replaceChildren();for(const n of missing)list.appendChild(mapText('div',n.radio.toUpperCase()+' · '+(n.name||n.id)+' · '+n.id));
   if(mapFocus&&!mapFocusWaiting){
     const requested=mapFocus;mapFocus=null;
@@ -163,7 +166,7 @@ function renderMap(){
   }
   drawMapItems();
 }
-function mapFitVisible(){if(!mapView)return;const rows=mapFilterRows().filter(n=>Number.isFinite(n.lat)&&Number.isFinite(n.lon));if(!rows.length){mapNotice('No positioned nodes match these filters.');return;}const bounds=new maplibregl.LngLatBounds();for(const n of rows)bounds.extend([n.lon,n.lat]);mapView.fitBounds(bounds,{padding:45,maxZoom:15});}
+function mapFitVisible(){if(!mapView)return;const rows=mapFilterRows().filter(mapHasPosition);if(!rows.length){mapNotice('No positioned nodes match these filters.');return;}const bounds=new maplibregl.LngLatBounds();for(const n of rows)bounds.extend([n.lon,n.lat]);mapView.fitBounds(bounds,{padding:45,maxZoom:15});}
 window.openMapNode=(radio,id,device='')=>{mapSelected=null;mapFocus={radio,id,device};mapFocusWaiting=true;mapAlertPin?.remove();mapAlertPin=null;switchTab('map');AndroidBridge.loadMap();};
 window.onMapAlert=message=>mapNotice('Geofence: '+message);
 function showMapTrail(n){

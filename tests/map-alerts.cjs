@@ -36,6 +36,20 @@ page.on('dialog',d=>d.accept());
 await page.getByRole('button',{name:'Delete alert',exact:true}).click();
 assert.deepEqual(await page.evaluate(()=>calls.at(-1)),['deleteGeofenceAlert','alert']);
 assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+await page.evaluate(()=>{
+ fixture.nodes=[
+  {radio:'mt',device:'a',id:'equator',lat:0,lon:23,positionAt:2},
+  {radio:'mt',device:'b',id:'equator',positionAt:9},
+  {radio:'mt',device:'a',id:'newest',lat:38,lon:23,positionAt:1},
+  {radio:'mt',device:'b',id:'newest',lat:39,lon:24,positionAt:3},
+  {radio:'mc',device:'a',id:'invalid',lat:99,lon:23,positionAt:4}
+ ];onMapData(fixture);clearMapFilters();
+});
+assert.equal(await page.evaluate(()=>mapFilterRows().find(n=>n.id==='equator').device),'a');
+assert.equal(await page.evaluate(()=>mapFilterRows().find(n=>n.id==='newest').device),'b');
+assert.equal(await page.locator('#map-counts').innerText(),'2 positioned · 1 without position');
+await page.selectOption('#map-device','mt:b');await page.evaluate(()=>renderMap());
+assert.equal(await page.locator('#map-counts').innerText(),'1 positioned · 1 without position');
 console.log('Geofence history, historical location, overlapping chooser and exact receiver/node navigation passed');
 }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

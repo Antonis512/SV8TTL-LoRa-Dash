@@ -84,7 +84,7 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
   await page.setViewportSize({width:390,height:780});
   await page.screenshot({path:'build/multi-device-098.png'});
   await page.evaluate(()=>{switchTab('settings');showSettingsPage('home');});
-  assert.deepEqual((await page.locator('.settings-shortcuts strong').allTextContents()).slice(-2),['Export debug log','About']);
+  assert.deepEqual((await page.locator('.settings-shortcuts strong').allTextContents()).slice(-3),['Export debug log','Check for Updates','About']);
   await page.evaluate(()=>showSettingsPage('nodes'));
   const available=page.getByRole('button',{name:'Connect All Available',exact:true});
   assert.equal(await available.evaluate(e=>getComputedStyle(e).backgroundColor),await page.getByRole('button',{name:'View messages',exact:true}).first().evaluate(e=>getComputedStyle(e).backgroundColor));

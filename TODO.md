@@ -1,5 +1,16 @@
 # To Do
 
+## Next session reminder — 0.10.25, requested 5 November 2026
+
+The user's radios were unavailable. Remind them next time these checks are still pending:
+
+- [ ] Test both MC and MT over Bluetooth: known-device connect, fresh discovery, reconnect, initial nodes/channels loading, automatic Chat selection and simultaneous MC/MT connections.
+- [ ] Check Contacts add/remove fields and node expansion for scroll jumps.
+- [ ] Check gesture/three-button navigation and keyboard/landscape insets on the phone.
+- [ ] Supply the geofence node name/ID or alert details and compare its map position with the official app. The specific reported node is not yet identified.
+
+Build and GitHub publication were authorized later on 5 November; neither establishes physical-radio correctness. See [fix notes](FIXES-2026-11-05.md).
+
 - [ ] Use options from ATAK apps
 - [ ] Add a search bar in the Chat column.
 

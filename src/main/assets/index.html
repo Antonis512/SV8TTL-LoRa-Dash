@@ -117,6 +117,7 @@
     <button type="button" onclick="clearMapFilters()">Clear filters</button>
   </div>
   <button type="button" id="map-alerts-button" onclick="openGeofenceHistory()">Geofence alerts</button>
+  <label class="config-switch"><input id="map-show-precision" type="checkbox" checked onchange="try{localStorage.setItem('map-show-precision',this.checked)}catch(e){}renderMap()"> Show shared-position uncertainty circles</label>
   <div id="map-status" role="status" aria-live="polite"></div>
   <div id="map-source"></div>
   <div class="map-canvas-wrap"><div id="offline-map" aria-label="Map"></div>
@@ -246,7 +247,9 @@
       <label class="config-switch"><input id="background-message-notifications" type="checkbox" onchange="AndroidBridge.setBackgroundMessageNotifications(this.checked)"> Show message previews when the app is in the background</label>
       <p class="help">Off by default. Android permission is required. Message previews never appear over the app. Background message sounds also follow this switch.</p>
       <p id="message-notifications-status" class="help" role="status"></p>
-      <button type="button" onclick="AndroidBridge.openMessageNotificationSettings()">Android notification settings</button>
+      <div class="actions">
+        <button type="button" onclick="AndroidBridge.openMessageNotificationSettings()">Android notification settings</button>
+      </div>
       <p class="help">The ongoing radio connection notification is managed separately by Android.</p>
     </fieldset>
     <fieldset class="sound-frame message-sound-frame"><legend>Message Notification sounds</legend>

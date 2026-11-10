@@ -19,9 +19,9 @@
 #map-source{font-size:12px;color:var(--muted);margin:4px 0}
 #map-no-position-list{padding:8px;max-height:160px;overflow:auto}
 .map-tool-nav{padding:8px 0;flex-wrap:wrap}.map-tool-nav button{flex:1 1 100px;min-height:42px;white-space:normal;text-align:center}
-#tab-map .map-top button,#tab-map .map-filters button,#tab-map .map-tool-nav button,#tab-map .map-empty-pack button,#tab-map #map-tool-panel button,#tab-map .map-item-actions button,.map-dialog button{min-height:36px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--accent);font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+#tab-map #map-alerts-button,#tab-map .map-top button,#tab-map .map-filters button,#tab-map .map-tool-nav button,#tab-map .map-empty-pack button,#tab-map #map-tool-panel button,#tab-map .map-item-actions button,.map-dialog button{min-height:36px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--accent);font:inherit;font-size:12px;font-weight:600;cursor:pointer}
 #tab-map .map-tool-nav button{min-height:42px}
-#tab-map .map-top button:active,#tab-map .map-filters button:active,#tab-map .map-tool-nav button:active,#tab-map .map-empty-pack button:active,#tab-map #map-tool-panel button:active,#tab-map .map-item-actions button:active,.map-dialog button:active{background:var(--accent-dim);border-color:var(--accent)}
+#tab-map #map-alerts-button:active,#tab-map .map-top button:active,#tab-map .map-filters button:active,#tab-map .map-tool-nav button:active,#tab-map .map-empty-pack button:active,#tab-map #map-tool-panel button:active,#tab-map .map-item-actions button:active,.map-dialog button:active{background:var(--accent-dim);border-color:var(--accent)}
 #tab-map .map-tool-nav button.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
 #tab-map .map-empty-pack button{background:var(--accent-dim);border-color:var(--accent)}
 #tab-map button:disabled,.map-dialog button:disabled{opacity:.45;cursor:default}
@@ -47,6 +47,8 @@
 #satellite-account-status{font-size:12px;color:var(--muted)}
 .map-node-dot{display:block;border:2px solid #fff;border-radius:50%;width:15px;height:15px;background:#20b870;box-shadow:0 0 0 2px #101820}
 .map-node-dot.mc{background:#e7a634}.map-node-dot.old{opacity:.45}
+.map-node-dot.map-node-stack{display:flex;align-items:center;justify-content:center;width:28px;height:28px;color:#fff;font-size:13px;font-weight:700}
+.map-node-dot.undated{border-style:dashed}
 .maplibregl-popup-content{background:#1c2631;color:#f1f5f8;border:1px solid #44515e;border-radius:7px}.maplibregl-popup-close-button{color:#fff}
 .maplibregl-ctrl-group{background:var(--bg3);border:1px solid var(--border);border-radius:6px;overflow:hidden}
 .maplibregl-ctrl-group button{width:36px;height:36px;background:var(--bg3);border-color:var(--border)}

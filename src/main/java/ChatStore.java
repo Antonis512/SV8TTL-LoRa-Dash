@@ -36,7 +36,7 @@ final class ChatStore extends SQLiteOpenHelper {
         final String name;
         SavedChannel(int index, String name) { this.index=index; this.name=name; }
     }
-    ChatStore(Context context) { super(context, "chat-history.db", null, 18); setWriteAheadLoggingEnabled(true); }
+    ChatStore(Context context) { super(context, "chat-history.db", null, 19); setWriteAheadLoggingEnabled(true); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, radio TEXT NOT NULL, " +
                 "node_id TEXT NOT NULL DEFAULT '', channel INTEGER NOT NULL, sender TEXT NOT NULL, " +
@@ -49,6 +49,7 @@ final class ChatStore extends SQLiteOpenHelper {
         createSignalHistory(db);
         createLogTable(db);
         createMapTables(db);
+        addMapPositionMetadata(db);
         ContactsStore.create(db);
         createGeofenceAlerts(db);
     }
@@ -95,6 +96,16 @@ final class ChatStore extends SQLiteOpenHelper {
         if (oldVersion < 11) createHistoryIndex(db);
         if (oldVersion < 12) db.execSQL("CREATE TABLE IF NOT EXISTS pending_backup_settings(id INTEGER PRIMARY KEY,body TEXT NOT NULL)");
         if(oldVersion<16)addHeardSettings(db);
+        if(oldVersion<19)addMapPositionMetadata(db);
+    }
+    private void addMapPositionMetadata(SQLiteDatabase db) {
+        for(String table:new String[]{"map_nodes","map_positions"}) {
+            java.util.Set<String> existing=new java.util.HashSet<>();
+            try(Cursor c=db.rawQuery("PRAGMA table_info("+table+")",null)){while(c.moveToNext())existing.add(c.getString(1));}
+            for(String column:new String[]{"position_time","gps_time","position_received","precision_bits","position_source"})
+                if(!existing.contains(column))db.execSQL("ALTER TABLE "+table+" ADD COLUMN "+column+
+                        (column.equals("position_source")?" TEXT NOT NULL DEFAULT 'legacy'":" INTEGER NOT NULL DEFAULT 0"));
+        }
     }
     private void addHeardSettings(SQLiteDatabase db) {
         db.execSQL("ALTER TABLE node_heard ADD COLUMN settings TEXT NOT NULL DEFAULT ''");

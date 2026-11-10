@@ -45,7 +45,7 @@ public final class HistoryInstrumentation extends Instrumentation {
             SQLiteDatabase db=store.getWritableDatabase();db.beginTransaction();
             try{store.save("mc","radio-a",0,"test","Must roll back","",5,false,"","");}finally{db.endTransaction();}
             check(store.load("mc","radio-a").size()==252,"Failed transaction rolls back");
-            db.execSQL("DROP TABLE contact_items");db.execSQL("DROP TABLE map_alerts");db.setVersion(16);store.close();store=new ChatStore(context);check(store.load("mc","radio-a").size()==252&&store.getReadableDatabase().getVersion()==18,"v16 migration preserves history and creates contacts");
+            db.execSQL("DROP TABLE contact_items");db.execSQL("DROP TABLE map_alerts");db.setVersion(16);store.close();store=new ChatStore(context);check(store.load("mc","radio-a").size()==252&&store.getReadableDatabase().getVersion()==19,"v16 migration preserves history and creates contacts");
             store.saveSignal("mt-a","peer-a","{\"snr\":0}");store.saveSignal("mt-b","peer-a","{\"rssi\":-102}");
             store.close();store=new ChatStore(context);
             check(store.signals("mt-a","peer-a").length()==1&&store.signals("mt-a","peer-a").getJSONObject(0).getDouble("snr")==0,"Signal history survives reopen and retains zero");
@@ -147,7 +147,31 @@ public final class HistoryInstrumentation extends Instrumentation {
             JSONObject savedAlert=alertsMap.alerts().getJSONObject(0);
             check(savedAlert.getString("node").equals("peer")&&savedAlert.getString("name").equals("Hilltop"),"Alert preserves node identity and name");
             alertsMap.deleteAlert(savedAlert.getString("id"));check(alertsMap.alerts().length()==1,"Explicit deletion removes only requested alert");
-            report.putString("stream","History, contacts, backup, chain limits/restart and offline node persistence tests passed\n");finish(Activity.RESULT_OK,report);
+            MapData positionMap=new MapData(store);
+            long positionTime=System.currentTimeMillis()-120000;
+            NodePosition precise=new NodePosition(38,23.74,positionTime,positionTime,positionTime+1000,32,"mt_live");
+            positionMap.node("mt","precision-rx","!291b406e","Klif Aegina","Client",precise,true);
+            NodePosition coarse=new NodePosition(37.9846656,23.724032,positionTime+30000,positionTime+30000,positionTime+31000,13,"mt_live");
+            NodePosition retained=positionMap.node("mt","precision-rx","!291b406e","Klif Aegina","Client",coarse,true);
+            check(retained.latitude==38&&retained.longitude==23.74&&retained.precisionBits==32,"Database preserves known precision for the same reported cell");
+            NodePosition stale=new NodePosition(39,24,positionTime-1000,positionTime-1000,positionTime+32000,13,"mt_live");
+            check(positionMap.node("mt","precision-rx","!291b406e","Klif Aegina","Client",stale,true).latitude==38,"Stale reports do not replace a newer stored position");
+            JSONObject positionBackup=positionMap.backup(),positionNode=null;
+            for(int i=0;i<positionBackup.getJSONArray("nodes").length();i++){
+                JSONObject n=positionBackup.getJSONArray("nodes").getJSONObject(i);
+                if(n.getString("device").equals("precision-rx")){positionNode=n;break;}
+            }
+            check(positionNode!=null&&positionNode.getInt("precisionBits")==32&&positionNode.getLong("fixTime")==positionTime&&positionNode.getString("positionSource").equals("mt_preserved"),"Map backup retains independent fix time, precision and source");
+            positionNode.put("device","restored-precision-rx");
+            positionMap.mergeBackup(new JSONObject().put("nodes",new JSONArray().put(positionNode)).put("positions",new JSONArray()).put("heard",new JSONArray()).put("items",new JSONArray()));
+            store.close();store=new ChatStore(context);positionMap=new MapData(store);
+            boolean restoredPrecision=false;
+            for(int i=0;i<positionMap.nodes().length();i++){
+                JSONObject n=positionMap.nodes().getJSONObject(i);
+                if(n.getString("device").equals("restored-precision-rx"))restoredPrecision=n.getInt("precisionBits")==32&&n.getLong("fixTime")==positionTime;
+            }
+            check(restoredPrecision,"Position metadata survives backup restore and database reopen");
+            report.putString("stream","History, contacts, backup, chain limits/restart and offline node/position metadata persistence tests passed\n");finish(Activity.RESULT_OK,report);
         }catch(Throwable error){report.putString("stream",android.util.Log.getStackTraceString(error));finish(Activity.RESULT_CANCELED,report);}
         finally{if(store!=null)store.close();}
     }

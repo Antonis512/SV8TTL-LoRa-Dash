@@ -1,5 +1,9 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 10 November 2026 — map precision, provenance and overlapping nodes
+
+Position decoding/storage policy, schema migration, geographic uncertainty circles and selectable marker stacks are locally authored using the protocol facts and references recorded in `MAP-COMPARISON-2026-11-10.md`. Meshtastic Android and firmware were consulted for sharing precision, same-cell coordinate preservation and timestamp meanings; official MeshCore protocol/library sources were consulted for advertised coordinates. No official application implementation or assets were copied into the product. Existing notices, application ID, signing configuration and bundled map attribution are retained. See `MAP-FIXES-2026-11-10.md` for validation and limitations. No APK was built or published for these changes.
+
 ## 5 November 2026 — Meshtastic loading implementation
 
 The two-stage PhoneAPI loading, background storage, progress and rendering changes are locally authored. Official Meshtastic Android commit `0ddf09db3bed50c653fdcd58559ad728b2dc6e53`, firmware PhoneAPI and protobuf definitions were consulted for protocol selectors, completion/state handling and batching behavior. No official Android implementation was copied. See `MT-LOADING-2026-11-05.md` for source references and validation. Existing attribution, notices, application ID and signing configuration remain unchanged.

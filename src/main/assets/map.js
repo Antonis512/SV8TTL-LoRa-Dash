@@ -120,11 +120,34 @@ function mapFilterRows(){
     if(from||to)return mapData.heard.some(h=>h.radio===n.radio&&h.device===n.device&&h.node===n.id&&(!from||h.time>=from)&&(!to||h.time<=to));
     return true;
   });
-  // The same radio node may be known through several receiving devices; show its newest position once in All.
   const byNode=new Map();for(const n of matching){const key=n.radio+':'+n.id,old=byNode.get(key);
-    if(!old||(mapHasPosition(n)&&!mapHasPosition(old))||(mapHasPosition(n)===mapHasPosition(old)&&n.positionAt>old.positionAt))byNode.set(key,n);
+    byNode.set(key,old?mapPreferredObservation(old,n):n);
   }
   return [...byNode.values()];
+}
+const mapPositionTime=n=>Number(n.fixTime)||Number(n.positionTime)||0;
+function mapPrecisionRadius(n){
+  const bits=Number(n.precisionBits);
+  return n.radio==='mt'&&bits>=10&&bits<=19?23905787.925008/2**bits:0;
+}
+function mapSameCoarseCell(precise,coarse){
+  const bits=Number(coarse.precisionBits),better=Number(precise.precisionBits)||32;
+  if(coarse.radio!=='mt'||!mapHasPosition(precise)||!mapHasPosition(coarse)||
+    !(Number(precise.precisionBits)>0||String(precise.positionSource||'').startsWith('mt'))||!(bits>0&&bits<32&&better>bits))return false;
+  const width=2**(32-bits),center=x=>Math.floor(Math.round(x*1e7)/width)*width+width/2;
+  return center(precise.lat)===Math.round(coarse.lat*1e7)&&center(precise.lon)===Math.round(coarse.lon*1e7);
+}
+function mapPreferredObservation(a,b){
+  if(mapHasPosition(a)!==mapHasPosition(b))return mapHasPosition(b)?b:a;
+  if(mapSameCoarseCell(a,b))return a;
+  if(mapSameCoarseCell(b,a))return b;
+  const at=mapPositionTime(a),bt=mapPositionTime(b);
+  if(at!==bt)return bt>at?b:a;
+  const active=n=>(state?.devices||[]).some(d=>d.radio===n.radio&&(d.id===n.device||d.ownId===n.device)&&d.connected!==false);
+  if(active(a)!==active(b))return active(b)?b:a;
+  const received=n=>Number(n.receivedAt)||Number(n.positionAt)||0;
+  if(received(a)!==received(b))return received(b)>received(a)?b:a;
+  return String(b.device).localeCompare(String(a.device))<0?b:a;
 }
 function mapHasPosition(n){return Number.isFinite(n.lat)&&Number.isFinite(n.lon)&&Math.abs(n.lat)<=90&&Math.abs(n.lon)<=180&&!(n.lat===0&&n.lon===0);}
 function renderMapFilters(){
@@ -141,22 +164,65 @@ function renderMapFilters(){
   if([...rf.options].some(o=>o.value===oldRf))rf.value=oldRf;
 }
 function clearMapFilters(){for(const id of ['map-network','map-device','map-role','map-rf'])el(id).value='all';el('map-from').value='';el('map-to').value='';renderMap();}
+function mapDistanceMeters(a,b){
+  const rad=Math.PI/180,lat=(b.lat-a.lat)*rad,lon=(b.lon-a.lon)*rad;
+  const h=Math.sin(lat/2)**2+Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(lon/2)**2;
+  return 12742000*Math.asin(Math.sqrt(Math.max(0,Math.min(1,h))));
+}
+function mapPositionGroups(rows){
+  // Five-metre geographic stacks stay stable as the user zooms. Different networks remain separate.
+  const groups=[],bands=new Map();
+  for(const n of [...rows].sort((a,b)=>(a.radio+':'+a.id).localeCompare(b.radio+':'+b.id))){
+    const band=Math.floor(n.lat*111320/5);let group;
+    for(let delta=-1;delta<=1&&!group;delta++)for(const candidate of bands.get(n.radio+':'+(band+delta))||[])
+      if(mapDistanceMeters(n,candidate[0])<5){group=candidate;break;}
+    if(group)group.push(n);else {group=[n];groups.push(group);const key=n.radio+':'+band;if(!bands.has(key))bands.set(key,[]);bands.get(key).push(group);}
+  }
+  return groups;
+}
+function mapPrecisionFeatures(rows){
+  const unique=new Map();for(const n of rows)if(mapPrecisionRadius(n)>0)unique.set(n.lat+':'+n.lon+':'+n.precisionBits,n);
+  return [...unique.values()].map(n=>{
+    const angular=mapPrecisionRadius(n)/6371000,lat=n.lat*Math.PI/180,lon=n.lon*Math.PI/180,ring=[];
+    for(let step=0;step<=64;step++){
+      const bearing=step/64*2*Math.PI,y=Math.asin(Math.max(-1,Math.min(1,Math.sin(lat)*Math.cos(angular)+Math.cos(lat)*Math.sin(angular)*Math.cos(bearing))));
+      let x=(lon+Math.atan2(Math.sin(bearing)*Math.sin(angular)*Math.cos(lat),Math.cos(angular)-Math.sin(lat)*Math.sin(y)))*180/Math.PI;
+      // Keep the ring continuous across the international date line.
+      while(x-n.lon>180)x-=360;while(x-n.lon< -180)x+=360;
+      ring.push([x,y*180/Math.PI]);
+    }
+    ring[ring.length-1]=ring[0].slice();
+    return {type:'Feature',properties:{id:n.radio+':'+n.id},geometry:{type:'Polygon',coordinates:[ring]}};
+  });
+}
+function drawMapPrecision(rows){
+  if(!mapView?.isStyleLoaded())return;
+  const data={type:'FeatureCollection',features:el('map-show-precision')?.checked===false?[]:mapPrecisionFeatures(rows)};
+  const source=mapView.getSource('map-position-precision');
+  if(source)source.setData(data);else mapView.addSource('map-position-precision',{type:'geojson',data});
+  if(!mapView.getLayer('map-position-precision-fill'))mapView.addLayer({id:'map-position-precision-fill',type:'fill',source:'map-position-precision',paint:{'fill-color':'#36c5f0','fill-opacity':0.12}});
+  if(!mapView.getLayer('map-position-precision-line'))mapView.addLayer({id:'map-position-precision-line',type:'line',source:'map-position-precision',paint:{'line-color':'#36c5f0','line-width':1.5}});
+}
 function renderMap(){
   if(!mapView)return;renderMapFilters();
   for(const m of mapMarkers)m.remove();mapMarkers=[];
   const rows=mapFilterRows(),placed=rows.filter(mapHasPosition);
-  for(const n of placed){
-    const dot=mapText('span','',`map-node-dot ${n.radio}${n.positionAt&&Date.now()-n.positionAt>86400000?' old':''}`);
-    const popup=mapNodePopup(n,placed);
+  const groups=mapPositionGroups(placed);
+  for(const members of groups){
+    const n=members.find(item=>mapSelected&&sameMapNode(item,mapSelected))||members.find(item=>item.id===item.device)||members[0];
+    const dot=mapText('span',members.length>1?String(members.length):'',`map-node-dot ${n.radio}${members.length>1?' map-node-stack':''}${!mapPositionTime(n)?' undated':Date.now()-mapPositionTime(n)>86400000?' old':''}`);
+    dot.setAttribute('aria-label',members.length>1?members.length+' nodes at this location':n.name||n.id);
+    const popup=mapNodePopup(n,placed,members);
     const marker=new maplibregl.Marker({element:dot}).setLngLat([n.lon,n.lat]).setPopup(new maplibregl.Popup({offset:15}).setDOMContent(popup)).addTo(mapView);mapMarkers.push(marker);
-    if(mapSelected&&sameMapNode(n,mapSelected))marker.togglePopup();
+    if(mapSelected&&members.some(item=>sameMapNode(item,mapSelected)))marker.togglePopup();
   }
+  drawMapPrecision(placed);
   const missing=rows.filter(n=>!mapHasPosition(n));el('map-counts').textContent=placed.length+' positioned · '+missing.length+' without position';
   const list=el('map-no-position-list');list.replaceChildren();for(const n of missing)list.appendChild(mapText('div',n.radio.toUpperCase()+' · '+(n.name||n.id)+' · '+n.id));
   if(mapFocus&&!mapFocusWaiting){
     const requested=mapFocus;mapFocus=null;
     const index=placed.findIndex(n=>sameMapNode(n,requested));
-    if(index>=0){const n=placed[index];mapSelected=n;mapMarkers[index].getPopup().addTo(mapView);mapView.flyTo({center:[n.lon,n.lat],zoom:Math.max(mapView.getZoom(),13)});mapNotice('Selected '+(n.name||n.id)+' · '+n.id);}
+    if(index>=0){const n=placed[index];mapSelected=n;const markerIndex=groups.findIndex(group=>group.some(item=>sameMapNode(item,n)));mapMarkers[markerIndex].setLngLat([n.lon,n.lat]).setPopup(new maplibregl.Popup({offset:15}).setDOMContent(mapNodePopup(n,placed,groups[markerIndex])));mapMarkers[markerIndex].getPopup().addTo(mapView);mapView.flyTo({center:[n.lon,n.lat],zoom:Math.max(mapView.getZoom(),13)});mapNotice('Selected '+(n.name||n.id)+' · '+n.id);}
     else {mapSelected=null;mapNotice('No saved position for '+requested.id+' on this receiving device.',true);}
   }
   for(const item of mapData.items.filter(i=>i.kind==='mark'&&i.enabled)){
@@ -445,19 +511,31 @@ function mapTool(name){
   }
 }
 mapTool('passive');
+try{el('map-show-precision').checked=localStorage.getItem('map-show-precision')!=='false';}catch(unavailable){}
 
 function sameMapNode(a,b){return a.radio===b.radio&&a.id===b.id&&(!b.device||a.device===b.device);}
-function mapNodePopup(n,placed){
+function mapNodePopup(n,placed,members=[]){
   const popup=document.createElement('div');
   popup.appendChild(mapText('strong',n.name||n.id));
   popup.appendChild(mapText('div',n.radio.toUpperCase()+' · '+n.id));
   popup.appendChild(mapText('div','Receiver: '+n.device));
   popup.appendChild(mapText('div',displayRole(n.radio,n.role)+' · '+heardDescription(n.radio,n.receivingRf)));
   popup.appendChild(mapText('div','Last heard: '+mapDate(n.lastHeard)));
-  popup.appendChild(mapText('div','Position reported: '+mapDate(n.positionAt)));
+  popup.appendChild(mapText('div','Coordinates: '+n.lat.toFixed(7)+', '+n.lon.toFixed(7)));
+  const time=mapPositionTime(n),received=Number(n.receivedAt)||Number(n.positionAt)||0;
+  if(!time)popup.appendChild(mapText('div','Position time: unknown (saved coordinates)'));
+  if(n.positionTime)popup.appendChild(mapText('div',(n.radio==='mc'?'Advertised: ':'Position report: ')+mapDate(n.positionTime)));
+  if(n.fixTime)popup.appendChild(mapText('div','GPS fix: '+mapDate(n.fixTime)));
+  if(received)popup.appendChild(mapText('div','Received by this phone: '+mapDate(received)));
+  popup.appendChild(mapText('div','Position source: '+({mt_live:'live position packet',mt_snapshot:'radio node list',mt_preserved:'previously known precise position',mc_advert:'received advertisement',mc_snapshot:'radio contact list',mc_self:'connected radio configuration',legacy:'saved coordinates'}[n.positionSource]||'saved coordinates')));
+  const radius=mapPrecisionRadius(n);
+  popup.appendChild(mapText('div',radius?'Shared position precision: ± '+(radius>=1000?(radius/1000).toFixed(2)+' km':Math.round(radius)+' m'):
+    n.radio==='mc'?'Advertised location (may be manually configured)':n.precisionBits===32?'Full shared precision':n.precisionBits>0?'Reported sharing precision: '+n.precisionBits+' bits':'Position precision not reported'));
+  if(n.positionSource==='mt_preserved')popup.appendChild(mapText('div','Previously known precise position retained within the newly reported approximate area.'));
+  if(!time)popup.appendChild(mapText('div','The age of these coordinates is unknown.'));
   mapButton(popup,'Show saved positions',()=>showMapTrail(n));
   const point=mapView.project([n.lon,n.lat]);
-  const nearby=placed.filter(other=>{const p=mapView.project([other.lon,other.lat]);return Math.hypot(p.x-point.x,p.y-point.y)<32;});
+  const nearby=members.length>1?members:placed.filter(other=>{const p=mapView.project([other.lon,other.lat]);return Math.hypot(p.x-point.x,p.y-point.y)<32;});
   if(nearby.length>1){
     popup.appendChild(mapText('div',nearby.length+' nodes at or near this point:'));
     for(const other of nearby)mapButton(popup,(other.name||other.id)+' · '+other.id,()=>openMapNode(other.radio,other.id,other.device));

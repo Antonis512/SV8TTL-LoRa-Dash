@@ -14,27 +14,53 @@ final class MapData {
     private final ChatStore store;
     MapData(ChatStore store){this.store=store;}
     private SQLiteDatabase db(){return store.getWritableDatabase();}
-    static boolean valid(double lat,double lon){return Double.isFinite(lat)&&Double.isFinite(lon)&&lat>=-90&&lat<=90&&lon>=-180&&lon<=180&&!(lat==0&&lon==0);}
+    static boolean valid(double lat,double lon){return NodePosition.valid(lat,lon);}
     void node(String radio,String device,String id,String name,String role,double lat,double lon,boolean fresh) {
-        if(device.isEmpty()||id.isEmpty()||(!radio.equals("mt")&&!radio.equals("mc")))return;
+        node(radio,device,id,name,role,new NodePosition(lat,lon,0,0,fresh?System.currentTimeMillis():0,0,"legacy"),fresh);
+    }
+    private static void putPosition(ContentValues values,NodePosition position) {
+        values.put("lat",position.latitude);values.put("lon",position.longitude);
+        values.put("position_time",position.reportTime);values.put("gps_time",position.fixTime);
+        values.put("position_received",position.receivedTime);values.put("precision_bits",position.precisionBits);
+        values.put("position_source",position.source);
+    }
+    private static JSONObject positionJson(JSONObject item,NodePosition p) throws JSONException {
+        return item.put("positionTime",p.reportTime).put("fixTime",p.fixTime).put("receivedAt",p.receivedTime)
+                .put("precisionBits",p.precisionBits).put("positionSource",p.source);
+    }
+    private static NodePosition backupPosition(JSONObject item) {
+        return new NodePosition(item.optDouble("lat",Double.NaN),item.optDouble("lon",Double.NaN),
+                item.optLong("positionTime"),item.optLong("fixTime"),item.optLong("receivedAt",item.optLong("positionAt")),
+                item.optInt("precisionBits"),item.optString("positionSource","legacy"));
+    }
+    NodePosition node(String radio,String device,String id,String name,String role,NodePosition incoming,boolean fresh) {
+        if(device.isEmpty()||id.isEmpty()||(!radio.equals("mt")&&!radio.equals("mc")))return incoming;
         SQLiteDatabase db=db();long now=System.currentTimeMillis();
+        NodePosition old=null;
+        try(Cursor c=db.rawQuery("SELECT lat,lon,position_time,gps_time,position_received,precision_bits,position_source,position_at FROM map_nodes WHERE radio=? AND device=? AND id=?",new String[]{radio,device,id})) {
+            if(c.moveToFirst())old=new NodePosition(c.isNull(0)?Double.NaN:c.getDouble(0),c.isNull(1)?Double.NaN:c.getDouble(1),
+                    c.getLong(2),c.getLong(3),c.getLong(4)>0?c.getLong(4):c.getLong(7),c.getInt(5),c.getString(6));
+        }
+        NodePosition chosen=NodePosition.choose(old,incoming);
         ContentValues row=new ContentValues();row.put("radio",radio);row.put("device",device);row.put("id",id);
         row.put("name",name==null?"":name);row.put("role",role==null?"":role);
-        if(valid(lat,lon)){row.put("lat",lat);row.put("lon",lon);if(fresh)row.put("position_at",now);}
         db.insertWithOnConflict("map_nodes",null,row,SQLiteDatabase.CONFLICT_IGNORE);
         ContentValues update=new ContentValues();if(name!=null&&!name.isEmpty())update.put("name",name);if(role!=null&&!role.isEmpty())update.put("role",role);
-        if(valid(lat,lon)){update.put("lat",lat);update.put("lon",lon);if(fresh)update.put("position_at",now);}
+        if(chosen!=null&&chosen.valid()){
+            putPosition(update,chosen);update.put("position_at",chosen.receivedTime);
+        }
         if(update.size()>0)db.update("map_nodes",update,"radio=? AND device=? AND id=?",new String[]{radio,device,id});
-        if(fresh&&valid(lat,lon)){
+        if(fresh&&chosen!=null&&chosen.valid()&&chosen!=old&&!chosen.source.equals("mt_preserved")){
             double previousLat=Double.NaN,previousLon=Double.NaN;long previousAt=0;
             try(Cursor c=db.rawQuery("SELECT lat,lon,reported_at FROM map_positions WHERE radio=? AND device=? AND node=? ORDER BY reported_at DESC,id DESC LIMIT 1",new String[]{radio,device,id})){
                 if(c.moveToFirst()){previousLat=c.getDouble(0);previousLon=c.getDouble(1);previousAt=c.getLong(2);}
             }
-            // Repeated identical positions are useful as fresh reports, but not as trail points every second.
-            if(lat!=previousLat||lon!=previousLon||now-previousAt>=300000){
-                ContentValues point=new ContentValues();point.put("radio",radio);point.put("device",device);point.put("node",id);point.put("lat",lat);point.put("lon",lon);point.put("reported_at",now);db.insert("map_positions",null,point);
+            if(chosen.latitude!=previousLat||chosen.longitude!=previousLon||now-previousAt>=300000){
+                ContentValues point=new ContentValues();point.put("radio",radio);point.put("device",device);point.put("node",id);
+                putPosition(point,chosen);point.put("reported_at",chosen.receivedTime>0?chosen.receivedTime:now);db.insert("map_positions",null,point);
             }
         }
+        return chosen;
     }
     void heard(String radio,String device,String id,long seconds){
         if(device.isEmpty()||id.isEmpty()||seconds<=0)return;
@@ -46,10 +72,11 @@ final class MapData {
     }
     JSONArray nodes() throws JSONException {
         JSONArray out=new JSONArray();
-        try(Cursor c=db().rawQuery("SELECT n.radio,n.device,n.id,n.name,n.role,n.lat,n.lon,n.position_at,COALESCE((SELECT MAX(h.heard_at) FROM map_heard h WHERE h.radio=n.radio AND h.device=n.device AND h.node=n.id),0) , r.settings FROM map_nodes n LEFT JOIN node_heard r ON r.radio=n.radio AND r.node_id=n.device AND r.peer=n.id ORDER BY n.name,n.id",null)){
+        try(Cursor c=db().rawQuery("SELECT n.radio,n.device,n.id,n.name,n.role,n.lat,n.lon,n.position_at,COALESCE((SELECT MAX(h.heard_at) FROM map_heard h WHERE h.radio=n.radio AND h.device=n.device AND h.node=n.id),0) , r.settings,n.position_time,n.gps_time,n.position_received,n.precision_bits,n.position_source FROM map_nodes n LEFT JOIN node_heard r ON r.radio=n.radio AND r.node_id=n.device AND r.peer=n.id ORDER BY n.name,n.id",null)){
             while(c.moveToNext()){
                 JSONObject item=new JSONObject().put("radio",c.getString(0)).put("device",c.getString(1)).put("id",c.getString(2)).put("name",c.getString(3)).put("role",c.getString(4)).put("positionAt",c.getLong(7)).put("lastHeard",c.getLong(8)).put("receivingRf",c.getString(9));
-                if(!c.isNull(5)&&!c.isNull(6))item.put("lat",c.getDouble(5)).put("lon",c.getDouble(6));out.put(item);
+                if(!c.isNull(5)&&!c.isNull(6))item.put("lat",c.getDouble(5)).put("lon",c.getDouble(6));
+                positionJson(item,new NodePosition(c.isNull(5)?Double.NaN:c.getDouble(5),c.isNull(6)?Double.NaN:c.getDouble(6),c.getLong(10),c.getLong(11),c.getLong(12)>0?c.getLong(12):c.getLong(7),c.getInt(13),c.getString(14)));out.put(item);
             }
         }return out;
     }
@@ -58,8 +85,9 @@ final class MapData {
         JSONArray out=new JSONArray();List<String> args=new ArrayList<>();String where="1=1";
         if(!radio.isEmpty()){where+=" AND radio=?";args.add(radio);}if(!device.isEmpty()){where+=" AND device=?";args.add(device);}if(!node.isEmpty()){where+=" AND node=?";args.add(node);}
         if(from>0){where+=" AND reported_at>=?";args.add(Long.toString(from));}if(to>0){where+=" AND reported_at<=?";args.add(Long.toString(to));}
-        try(Cursor c=db().query("map_positions",new String[]{"radio","device","node","lat","lon","reported_at"},where,args.toArray(new String[0]),null,null,"reported_at ASC,id ASC",limit)){
-            while(c.moveToNext())out.put(new JSONObject().put("radio",c.getString(0)).put("device",c.getString(1)).put("node",c.getString(2)).put("lat",c.getDouble(3)).put("lon",c.getDouble(4)).put("time",c.getLong(5)));
+        try(Cursor c=db().query("map_positions",new String[]{"radio","device","node","lat","lon","reported_at","position_time","gps_time","position_received","precision_bits","position_source"},where,args.toArray(new String[0]),null,null,"reported_at ASC,id ASC",limit)){
+            while(c.moveToNext())out.put(positionJson(new JSONObject().put("radio",c.getString(0)).put("device",c.getString(1)).put("node",c.getString(2)).put("lat",c.getDouble(3)).put("lon",c.getDouble(4)).put("time",c.getLong(5)),
+                    new NodePosition(c.getDouble(3),c.getDouble(4),c.getLong(6),c.getLong(7),c.getLong(8)>0?c.getLong(8):c.getLong(5),c.getInt(9),c.getString(10))));
         }return out;
     }
     JSONArray heardEvents() throws JSONException {return heardEvents(true);}
@@ -143,10 +171,10 @@ final class MapData {
         if(ns==null||ps==null||hs==null||items==null)throw new JSONException("Invalid Map backup");
         JSONArray alerts=data.optJSONArray("alerts");if(alerts!=null)for(int i=0;i<alerts.length();i++)saveAlert(alerts.getJSONObject(i));
         for(int i=0;i<ns.length();i++){JSONObject n=ns.getJSONObject(i);String radio=n.getString("radio"),device=n.getString("device"),id=n.getString("id");if(!validIdentity(radio,device,id))continue;
-            ContentValues v=new ContentValues();v.put("radio",radio);v.put("device",device);v.put("id",id);v.put("name",n.optString("name",id));v.put("role",n.optString("role",""));if(n.has("lat")&&n.has("lon")&&valid(n.optDouble("lat"),n.optDouble("lon"))){v.put("lat",n.getDouble("lat"));v.put("lon",n.getDouble("lon"));}v.put("position_at",n.optLong("positionAt",0));db.insertWithOnConflict("map_nodes",null,v,SQLiteDatabase.CONFLICT_IGNORE);
+            ContentValues v=new ContentValues();v.put("radio",radio);v.put("device",device);v.put("id",id);v.put("name",n.optString("name",id));v.put("role",n.optString("role",""));if(n.has("lat")&&n.has("lon")&&valid(n.optDouble("lat"),n.optDouble("lon"))){v.put("lat",n.getDouble("lat"));v.put("lon",n.getDouble("lon"));}v.put("position_at",n.optLong("positionAt",0));NodePosition imported=backupPosition(n);if(imported.valid())putPosition(v,imported);db.insertWithOnConflict("map_nodes",null,v,SQLiteDatabase.CONFLICT_IGNORE);
         }
         for(int i=0;i<ps.length();i++){JSONObject p=ps.getJSONObject(i);String radio=p.getString("radio"),device=p.getString("device"),node=p.getString("node");double lat=p.getDouble("lat"),lon=p.getDouble("lon");long time=p.getLong("time");if(!validIdentity(radio,device,node)||!valid(lat,lon)||time<=0)continue;
-            ContentValues v=new ContentValues();v.put("radio",radio);v.put("device",device);v.put("node",node);v.put("lat",lat);v.put("lon",lon);v.put("reported_at",time);db.insertWithOnConflict("map_positions",null,v,SQLiteDatabase.CONFLICT_IGNORE);
+            ContentValues v=new ContentValues();v.put("radio",radio);v.put("device",device);v.put("node",node);v.put("lat",lat);v.put("lon",lon);v.put("reported_at",time);NodePosition imported=backupPosition(p);if(imported.valid())putPosition(v,imported);db.insertWithOnConflict("map_positions",null,v,SQLiteDatabase.CONFLICT_IGNORE);
         }
         for(int i=0;i<hs.length();i++){JSONObject h=hs.getJSONObject(i);String radio=h.getString("radio"),device=h.getString("device"),node=h.getString("node");long time=h.getLong("time");if(!validIdentity(radio,device,node)||time<=0)continue;
             ContentValues v=new ContentValues();v.put("radio",radio);v.put("device",device);v.put("node",node);v.put("heard_at",time);db.insertWithOnConflict("map_heard",null,v,SQLiteDatabase.CONFLICT_IGNORE);

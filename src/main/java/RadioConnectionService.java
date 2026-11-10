@@ -36,6 +36,7 @@ public final class RadioConnectionService extends Service {
         Notification notification=notification(this,text,intent==null?0:intent.getIntExtra("unread",0));
         if(Build.VERSION.SDK_INT>=29) startForeground(NOTIFICATION_ID,notification,ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
         else startForeground(NOTIFICATION_ID,notification);
+        getSystemService(NotificationManager.class).cancel(201);
         return START_NOT_STICKY;
     }
     @Override public void onTaskRemoved(Intent rootIntent) {

@@ -14,6 +14,7 @@ interface RadioProtocol {
         void directMessage(String id, String text, long receivedAt, int hops);
         void node(String id, String name, String role, String model, int channel, int hops, double latitude, double longitude);
         void position(String id, double latitude, double longitude);
+        default void positionInfo(String id,NodePosition position) {}
         void ownPosition(double latitude, double longitude);
         void actionResult(String text);
         void channel(int index, String name);
@@ -276,11 +277,12 @@ final class MeshtasticProtocol implements RadioProtocol {
             else if (r.field == 9) hops = (int)r.number();
             else r.skip();
         }
-        if(num==0)return false;
+        if(num==0||num==0xffffffffL)return false;
         String id = "!" + String.format("%08x", num);
         if(configuring&&num!=0){configNodeIds.add(num);configNodes=configNodeIds.size();}
         name = reportedName(id, name, shortName);
         double lat=position.lat,lon=position.lon;
+        events.positionInfo(id,position.report("mt_snapshot"));
         events.node(id, name, role, model, channel, hops, lat, lon);
         events.lastHeard(id,lastHeard,false);
         if (num == myNode && !name.isEmpty()) events.ownNode(id, name);
@@ -292,6 +294,9 @@ final class MeshtasticProtocol implements RadioProtocol {
 
     private static final class Position {
         double lat=Double.NaN,lon=Double.NaN;
+        long time,fix;
+        int precision;
+        NodePosition report(String source){return new NodePosition(lat,lon,time,fix,System.currentTimeMillis(),precision,source);}
     }
     private Position readPosition(byte[] bytes) {
         Position position=new Position();
@@ -299,9 +304,12 @@ final class MeshtasticProtocol implements RadioProtocol {
         while (r.next()) {
             if (r.field == 1) position.lat = (int)r.number() / 1e7;
             else if (r.field == 2) position.lon = (int)r.number() / 1e7;
+            else if(r.field==4)position.time=(r.number()&0xffffffffL)*1000;
+            else if(r.field==7)position.fix=(r.number()&0xffffffffL)*1000;
+            else if(r.field==23)position.precision=(int)r.number();
             else r.skip();
         }
-        if (position.lat==0 && position.lon==0)position.lat=position.lon=Double.NaN;
+        if(!NodePosition.valid(position.lat,position.lon))position.lat=position.lon=Double.NaN;
         return position;
     }
 
@@ -549,7 +557,10 @@ final class MeshtasticProtocol implements RadioProtocol {
         }
         else if (port == 3 && body != null) {
             Position position=readPosition(body);
-            if (Double.isFinite(position.lat) && Double.isFinite(position.lon)) events.position(sender,position.lat,position.lon);
+            if (from!=0&&from!=0xffffffffL&&NodePosition.valid(position.lat,position.lon)) {
+                events.positionInfo(sender,position.report("mt_live"));
+                events.position(sender,position.lat,position.lon);
+            }
         } else if (port == 8 && body != null) {
             ProtoWire.Reader waypoint=new ProtoWire.Reader(body);long id=0,expires=0;int lat=0,lon=0;String name="",description="";
             while(waypoint.next()){
@@ -908,7 +919,11 @@ final class MeshCoreProtocol implements RadioProtocol {
                 if(freq>=300000&&freq<=2500000&&bw>=7800&&bw<=500000&&sf>=5&&sf<=12&&cr>=5&&cr<=8)
                     events.radioSettings(String.format(java.util.Locale.ROOT,"%.3f MHz · BW %s kHz · SF%d · CR4/%d",freq/1000.0,bw/1000.0,sf,cr));
             }
-            if (packet.length >= 44) events.ownPosition(littleInt(packet, 36) / 1e6, littleInt(packet, 40) / 1e6);
+            if (packet.length >= 44) {
+                double lat=littleInt(packet,36)/1e6,lon=littleInt(packet,40)/1e6;
+                if(!ownKey.isEmpty())events.positionInfo(ownKey,new NodePosition(lat,lon,0,0,System.currentTimeMillis(),0,"mc_self"));
+                events.ownPosition(lat,lon);
+            }
         }
         else if (type == 13) {
             if(packet.length>1) firmwareVersion=packet[1]&255;
@@ -944,6 +959,8 @@ final class MeshCoreProtocol implements RadioProtocol {
                 lon = littleInt(packet, 140) / 1e6;
                 if (lat == 0 && lon == 0) { lat = Double.NaN; lon = Double.NaN; }
             }
+            long advertTime=packet.length>=136?(littleInt(packet,132)&0xffffffffL)*1000:0;
+            events.positionInfo(id.toString(),new NodePosition(lat,lon,advertTime,0,System.currentTimeMillis(),0,type==0x8a?"mc_advert":"mc_snapshot"));
             events.node(id.toString(), new String(packet, 100, end - 100, StandardCharsets.UTF_8),
                     contactType(packet[33] & 255), "", 0, hops, lat, lon);
             if(type==0x8a && Double.isFinite(lat) && Double.isFinite(lon)) events.position(id.toString(),lat,lon);

@@ -283,6 +283,8 @@ Map starts without a basemap. Node positions can still appear on its blank backg
 
 Choose **All**, **MC** or **MT** in the network filter. Narrow the view by receiving device, node role and **Heard from/to** dates. Position age and last heard time are different: hearing a node does not prove it has moved or sent a new position. Tap a node for details and its recorded position trail. **Map** in a Node action opens the same screen and focuses that node.
 
+For MT nodes sharing approximate locations, **Show shared-position uncertainty circles** displays the radius indicated by the sender's sharing precision. Several nodes can legitimately share the same approximate centre. Nearby overlapping nodes have a numbered marker; open it to select an individual node. This display control does not change what your radio broadcasts. Popups show the receiving device, coordinates, source, report/advertisement time, GPS fix time when supplied, and phone receipt time separately. A dashed marker border means the position's age is unknown. Selecting one receiving device shows its own saved observation; All devices compares the available position metadata. Previously lost precision cannot be recovered without another suitable radio report or backup.
+
 The six Map tools have short steps in the app:
 
 - **Passive activity:** Connect a radio and let it listen. Filter the saved hearing and position history later; this tool sends nothing.
@@ -290,19 +292,27 @@ The six Map tools have short steps in the app:
 - **Radio path:** Choose a node and request a trace. Hops describe radio routing, not the node's movement. The map draws only hops with known positions.
 - **Marks:** Tap the map, enter coordinates, or fetch a phone position. The phone asks for foreground location permission when needed. Use × to clear a field, then name and save the mark. Optionally send it on a reported channel or directly to a selected contact as a Meshtastic waypoint or a MeshCore marker message containing the coordinates and name. Received MT waypoints and MC marker messages appear as pins under **Saved map items**. An MC marker stays visible in Chat, for example `m:37.975500,23.734800|Meet at the gate|poi`. Use **Delete** beside a saved mark to remove the local pin. A GeoJSON file can also be shared without internet using a nearby file transfer method.
 - **Overlays:** Draw a line or area and save it. Export or import the GeoJSON file to share it between phones.
-- **Geofences:** Draw an area and save it. If the first position reported for a node is inside the area, the phone shows “appeared in”. Later reports trigger an alert only when the node enters or leaves. Importing a shared geofence leaves alerts off until you review and enable it.
+- **Geofences:** Draw an area and save it. If the first eligible position reported for a node is inside the area, the phone shows “appeared in”. Later reports trigger an alert only when the node enters or leaves. Approximate MT positions and retained older precise coordinates do not trigger exact-location alerts. Importing a shared geofence leaves alerts off until you review and enable it.
 
 ## 8. Notifications and background use
 
 Open **Config → Notifications** to select shared or separate MC, MT and DM sounds, configure repeats, and enable an unexpected-disconnection sound.
 
+On Android 13 and newer, the app asks for notification permission on its first launch after installation. Allow it to show the running-app notification and notification icons. Declining does not prevent radio connections, and the app will not repeatedly prompt at startup. You can enable notifications later in Android's app settings. This permission does not automatically enable background message previews.
+
 Background message previews are off by default. Enable **Show message previews when the app is in the background** and grant Android notification permission when requested. Background message sounds also follow this switch. Foreground message sounds have their own setting.
 
 Active connections use an Android foreground service with a separate running notification. Android permission and system settings affect notification visibility. Removing the app from Recents stops its radio sessions. The service does not automatically restore connections after app closure or process death. Keep the app in the foreground for initial radio checks.
 
+The app-running status also stays in the notification shade when you press Home with no radio connected. An active radio connection uses the foreground-service notification instead. Closing the app removes its running status. Android permission, channel settings and the phone's treatment of silent notifications still control status-bar visibility.
+
 ## 9. Back up and restore
 
 ### Full backup
+
+Keep the app open until **Backup exported and verified** appears. Full export prepares and checks the ZIP, saves it to the location you chose, then reopens that saved file to verify its contents. It needs temporary free phone storage in addition to space at the destination; offline maps can make the backup large. Sound selections are saved but the sound files themselves are not embedded.
+
+Import checks archive integrity, including offline-map entries and included satellite ZIP packs, before merging history. **Missing ZIP end** or **incomplete or damaged** means the archive cannot be trusted for restoration; choose another complete backup or export again from the original installation. The original cause cannot be determined if the failing file has been deleted.
 
 1. Open **Config → App backup → Export full backup**.
 2. Choose a location using Android's file picker and keep the ZIP file somewhere you can retrieve it. It may be large if you installed map packs.

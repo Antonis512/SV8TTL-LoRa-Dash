@@ -188,12 +188,14 @@ public final class MainActivity extends Activity {
     private int page = 0;
     private boolean resumed,radioServiceRunning,closing,disconnectDialogVisible;
     private String notificationText="";
+    private boolean notificationPermissionPending,initialNotificationPermissionChecked;
     private final ArrayDeque<String> connectionWarnings=new ArrayDeque<>();
     private final Map<String,Runnable> pendingBleActions=new LinkedHashMap<>();
     private final Map<String,Runnable> pendingKnownConnections=new LinkedHashMap<>();
     private boolean knownConnectionTickPending;
     private boolean blePermissionPending,bleEnablePending,bleNeedsScan;
-    private static final int BLE_PERMISSIONS=41, MARK_LOCATION_PERMISSION=42, ENABLE_BLUETOOTH=409;
+    private static final int MESSAGE_NOTIFICATION_PERMISSION=40, BLE_PERMISSIONS=41, MARK_LOCATION_PERMISSION=42,
+            INITIAL_NOTIFICATION_PERMISSION=43, ENABLE_BLUETOOTH=409;
     private BluetoothAdapter bluetoothAdapter() {
         BluetoothManager manager=(BluetoothManager)getSystemService(BLUETOOTH_SERVICE);
         return manager==null?null:manager.getAdapter();
@@ -236,7 +238,7 @@ public final class MainActivity extends Activity {
         publish();
     }
     private void continueBleRequests() {
-        if(closing||pendingBleActions.isEmpty()||blePermissionPending||bleEnablePending)return;
+        if(closing||pendingBleActions.isEmpty()||blePermissionPending||bleEnablePending||notificationPermissionPending)return;
         if(bluetoothAdapter()==null){rejectBleRequests("Bluetooth is not available on this phone");return;}
         List<String> missing=new ArrayList<>();
         String[] needed=Build.VERSION.SDK_INT>=31?new String[]{Manifest.permission.BLUETOOTH_CONNECT,Manifest.permission.BLUETOOTH_SCAN}:
@@ -294,11 +296,25 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onResume() {
         super.onResume();debug("Lifecycle resume");if(closing)return;resumed=true;reconcileBleState();notificationText="";updateRunningNotification();displayConnectionWarning();publish();
+        requestInitialNotificationPermission();
         if(awaitingInstallPermission){awaitingInstallPermission=false;if(Build.VERSION.SDK_INT<26||getPackageManager().canRequestPackageInstalls())installDownloadedUpdate();else updateStatus("error","Allow installs from this app in Android settings, then check for updates again.");}
+    }
+    private void requestInitialNotificationPermission() {
+        if(Build.VERSION.SDK_INT<33||closing||!resumed||initialNotificationPermissionChecked||
+                notificationPermissionPending||blePermissionPending||bleEnablePending||markPermissionPending)return;
+        // Permission belongs to this installation, not to an imported app backup.
+        File prompted=new File(getNoBackupFilesDir(),"notification-permission-requested");
+        initialNotificationPermissionChecked=true;
+        try {if(!prompted.createNewFile())return;}
+        catch(IOException error){debug("Could not remember notification permission prompt");}
+        if(checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED)return;
+        MessageNotifications.createChannel(this);
+        notificationPermissionPending=true;
+        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},INITIAL_NOTIFICATION_PERMISSION);
     }
     @Override protected void onPause() {
         debug("Lifecycle pause");resumed=false;
-        if(chatStore==null||chatStore.unreadCount()==0)getSystemService(android.app.NotificationManager.class).cancel(201);notificationText="";
+        notificationText="";updateRunningNotification();
         super.onPause();
     }
     private void updateRunningNotification() {
@@ -307,20 +323,28 @@ public final class MainActivity extends Activity {
         String text=count>0?count+" radio connection"+(count==1?"":"s")+" active · tap to return":"App open · no radios connected · tap to return";
         int unread=chatStore==null?0:chatStore.unreadCount();
         if(unread>0)text=unread+" unread · "+text;
+        if(historyTransferRunning)text="Backup transfer in progress · keep the app open until completion";
         if(text.equals(notificationText))return;
         try {
             if(count>0) {
-                getSystemService(android.app.NotificationManager.class).cancel(201);
                 Intent intent=new Intent(this,RadioConnectionService.class).putExtra("text",text).putExtra("unread",unread);
                 if(radioServiceRunning)startService(intent);
-                else {if(!resumed)return;startForegroundService(intent);radioServiceRunning=true;}
+                else if(resumed){startForegroundService(intent);radioServiceRunning=true;}
+                else notifyRunningStatus(text,unread);
             } else {
                 if(radioServiceRunning){stopService(new Intent(this,RadioConnectionService.class));radioServiceRunning=false;}
-                if((resumed||unread>0)&&(Build.VERSION.SDK_INT<33||checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED))
-                    getSystemService(android.app.NotificationManager.class).notify(201,RadioConnectionService.notification(this,text,unread));
+                notifyRunningStatus(text,unread);
             }
             notificationText=text;
-        } catch(IllegalStateException|SecurityException unavailable) {notificationText="";}
+        } catch(IllegalStateException|SecurityException unavailable) {
+            notificationText="";radioServiceRunning=false;
+            debug("Radio running notification unavailable: "+unavailable.getClass().getSimpleName());
+            try{notifyRunningStatus(text,unread);}catch(SecurityException denied){}
+        }
+    }
+    private void notifyRunningStatus(String text,int unread) {
+        if(Build.VERSION.SDK_INT<33||checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED)
+            getSystemService(android.app.NotificationManager.class).notify(201,RadioConnectionService.notification(this,text,unread));
     }
     private WebView web;
     private boolean pageReady;
@@ -503,11 +527,29 @@ public final class MainActivity extends Activity {
         final Map<String,String> loadingContactNames=new LinkedHashMap<>();
         final Map<String,Long> earlyHeardTimes=new LinkedHashMap<>();
         final Map<String,String> earlyHeardSettings=new LinkedHashMap<>();
+        final Map<String,NodePosition> nodePositions=new LinkedHashMap<>();
+        final java.util.Set<String> ignoredPositionReports=new java.util.HashSet<>();
         void storeUpdate(Runnable work) {
             int attempt=generation;
             Runnable admitted=()->{if(generation==attempt)work.run();};
             if(loading&&!meshcore&&!installingNodes)loadingStorage.add(admitted);
             else storeRadioUpdate(admitted);
+        }
+        private NodePosition persistPosition(String radio,String device,String id,String name,String role,NodePosition incoming,boolean fresh,int attempt) {
+            NodePosition saved=mapData.node(radio,device,id,name,role,incoming,fresh);
+            if(saved!=null&&saved.valid()&&saved!=incoming) {
+                Runnable reconcile=()->{
+                    if(closing||generation!=attempt||nodePositions.get(id)!=incoming)return;
+                    nodePositions.put(id,saved);
+                    NodeEntry old=knownNodes.get(id);
+                    if(old!=null)knownNodes.put(id,new NodeEntry(id,old.name,old.role,old.model,old.channel,old.hops,saved.latitude,saved.longitude));
+                    if(id.equals(ownId)){ownLatitude=saved.latitude;ownLongitude=saved.longitude;}
+                    publishRadioUpdate();
+                };
+                List<Runnable> committed=radioCommitCallbacks.get();
+                if(committed!=null)committed.add(reconcile);else main.post(reconcile);
+            }
+            return saved;
         }
         boolean connected, syncSucceeded;
         boolean loading;
@@ -564,6 +606,7 @@ public final class MainActivity extends Activity {
             configureAttempts(this);
             markPendingUnconfirmed();
             knownNodes.clear(); pendingSends.clear(); connected = false;
+            nodePositions.clear();ignoredPositionReports.clear();
             ownLatitude = Double.NaN; ownLongitude = Double.NaN;
             channelNames.clear();
             if(!ownId.isEmpty()) loadSessionHistory(this);
@@ -725,9 +768,11 @@ public final class MainActivity extends Activity {
                 if(!meshcore){
                     String device=ownId;
                     List<NodeEntry> nodes=new ArrayList<>(knownNodes.values());
+                    Map<String,NodePosition> positions=new LinkedHashMap<>(nodePositions);
                     install.add(()->{
                         if(generation!=currentGeneration)return;
-                        for(NodeEntry node:nodes)mapData.node("mt",device,node.id,node.name,node.role,node.latitude,node.longitude,false);
+                        for(NodeEntry node:nodes)persistPosition("mt",device,node.id,node.name,node.role,
+                                positions.getOrDefault(node.id,NodePosition.unknown(node.latitude,node.longitude)),false,currentGeneration);
                     });
                 }
                 Map<String,String> names=new LinkedHashMap<>(loadingContactNames);loadingContactNames.clear();
@@ -783,7 +828,10 @@ public final class MainActivity extends Activity {
                 else if (!name.isEmpty() && (!name.equals("Meshtastic " + id) || ownName.isEmpty())) ownName = name;
                 String savedName=ownName,savedAddress=bleAddress;
                 storeUpdate(()->chatStore.saveRadio(radio,id,savedName,savedAddress));
-                if(meshcore||!loading||installingNodes)for(NodeEntry known:knownNodes.values())storeUpdate(()->mapData.node(radio,id,known.id,known.name,known.role,known.latitude,known.longitude,false));
+                if(meshcore||!loading||installingNodes)for(NodeEntry known:knownNodes.values()){
+                    NodePosition position=nodePositions.getOrDefault(known.id,NodePosition.unknown(known.latitude,known.longitude));
+                    storeUpdate(()->persistPosition(radio,id,known.id,known.name,known.role,position,false,currentGeneration));
+                }
                 for(Map.Entry<String,Long> heard:earlyHeardTimes.entrySet()) {
                     String peer=heard.getKey(),settings=earlyHeardSettings.getOrDefault(peer,"");long seconds=heard.getValue();
                     storeUpdate(()->chatStore.heard(radio,id,peer,seconds,settings));
@@ -928,25 +976,36 @@ public final class MainActivity extends Activity {
                 publishRadioUpdate();
             });
         }
+        @Override public void positionInfo(String id,NodePosition incoming) {
+            int attempt=generation;
+            main.post(()->{
+                if(generation!=attempt)return;
+                NodePosition old=nodePositions.get(id),chosen=NodePosition.choose(old,incoming);
+                if(chosen==old)ignoredPositionReports.add(id);else ignoredPositionReports.remove(id);
+                if(chosen!=null&&chosen.valid())nodePositions.put(id,chosen);
+            });
+        }
         @Override public void node(String id, String name, String role, String model, int channel, int hops, double latitude, double longitude) {
             int currentGeneration = generation;
             main.post(() -> {
                 if (generation != currentGeneration) return;
                 NodeEntry old = knownNodes.get(id);
+                NodePosition position=nodePositions.getOrDefault(id,NodePosition.unknown(latitude,longitude));
+                double lat=position.valid()?position.latitude:old==null?Double.NaN:old.latitude;
+                double lon=position.valid()?position.longitude:old==null?Double.NaN:old.longitude;
                 knownNodes.put(id, new NodeEntry(id,
                         name.isEmpty() && old != null ? old.name : name,
                         role.isEmpty() && old != null ? old.role : role,
                         model.isEmpty() && old != null ? old.model : model,
                         channel,
                         hops < 0 && old != null ? old.hops : hops,
-                        !Double.isFinite(latitude) && old != null ? old.latitude : latitude,
-                        !Double.isFinite(longitude) && old != null ? old.longitude : longitude));
+                        lat,lon));
                 if(!ownId.isEmpty()){
-                    boolean changedPosition=meshcore&&old!=null&&MapData.valid(latitude,longitude)
-                            &&(latitude!=old.latitude||longitude!=old.longitude);
+                    boolean changedPosition=meshcore&&old!=null&&position.valid()
+                            &&(lat!=old.latitude||lon!=old.longitude)&&!ignoredPositionReports.contains(id);
                     String radio=meshcore?"mc":"mt",device=ownId;
-                    if(meshcore||!loading||installingNodes)storeUpdate(()->{mapData.node(radio,device,id,name,role,latitude,longitude,changedPosition);
-                            if(changedPosition)showMapGeofenceAlerts("mc",device,id,name,latitude,longitude);
+                    if(meshcore||!loading||installingNodes)storeUpdate(()->{NodePosition saved=persistPosition(radio,device,id,name,role,position,changedPosition,currentGeneration);
+                            if(changedPosition&&saved==position&&saved.valid())showMapGeofenceAlerts("mc",device,id,name,saved.latitude,saved.longitude);
                         });
                 }
                 if (id.equals(ownId) && !name.isEmpty()) {
@@ -968,15 +1027,19 @@ public final class MainActivity extends Activity {
             int currentGeneration = generation;
             main.post(() -> {
                 if (generation != currentGeneration) return;
-                if(id.equals(ownId)&&MapData.valid(latitude,longitude)){ownLatitude=latitude;ownLongitude=longitude;}
+                if(ignoredPositionReports.contains(id))return;
+                NodePosition position=nodePositions.getOrDefault(id,NodePosition.unknown(latitude,longitude));
+                if(!position.valid())return;
+                if(id.equals(ownId)){ownLatitude=position.latitude;ownLongitude=position.longitude;}
                 NodeEntry old = knownNodes.get(id);
                 if (old != null) knownNodes.put(id, new NodeEntry(id, old.name, old.role,
-                        old.model, old.channel, old.hops, latitude, longitude));
+                        old.model, old.channel, old.hops, position.latitude, position.longitude));
                 if(!ownId.isEmpty()){
                     String radio=meshcore?"mc":"mt",device=ownId;
                     String name=old==null?"":old.name,role=old==null?"":old.role;
-                    storeUpdate(()->{mapData.node(radio,device,id,name,role,latitude,longitude,true);
-                        showMapGeofenceAlerts(radio,device,id,name.isEmpty()?id:name,latitude,longitude);
+                    storeUpdate(()->{NodePosition saved=persistPosition(radio,device,id,name,role,position,true,currentGeneration);
+                        if(saved==position&&saved.valid()&&!saved.source.equals("mt_preserved")&&!(saved.precisionBits>0&&saved.precisionBits<32))
+                            showMapGeofenceAlerts(radio,device,id,name.isEmpty()?id:name,saved.latitude,saved.longitude);
                     });
                 }
                 publishRadioUpdate();
@@ -1025,7 +1088,16 @@ public final class MainActivity extends Activity {
             main.post(() -> {
                 if (generation != currentGeneration) return;
                 if (!MapData.valid(latitude,longitude)) return;
-                ownLatitude = latitude; ownLongitude = longitude; publishRadioUpdate();
+                NodePosition position=nodePositions.get(ownId);
+                ownLatitude=position!=null&&position.valid()?position.latitude:latitude;
+                ownLongitude=position!=null&&position.valid()?position.longitude:longitude;
+                if(!ownId.isEmpty()){
+                    String radio=meshcore?"mc":"mt",device=ownId,title=ownName;
+                    NodeEntry own=knownNodes.get(ownId);String role=own==null?(meshcore?"Companion":""):own.role;
+                    NodePosition saved=position!=null&&position.valid()?position:NodePosition.unknown(ownLatitude,ownLongitude);
+                    storeUpdate(()->persistPosition(radio,device,device,title,role,saved,false,currentGeneration));
+                }
+                publishRadioUpdate();if(meshcore||!loading||installingNodes)requestRadioMapUpdate();
             });
         }
         @Override public void actionResult(String text) {
@@ -1682,8 +1754,10 @@ public final class MainActivity extends Activity {
                 if(!enabled)MessageNotifications.cancel(MainActivity.this);
                 else {
                     MessageNotifications.createChannel(MainActivity.this);
-                    if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
-                        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},40);
+                    if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED&&!notificationPermissionPending){
+                        notificationPermissionPending=true;
+                        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},MESSAGE_NOTIFICATION_PERMISSION);
+                    }
                 }
                 publish();
             });
@@ -2162,14 +2236,18 @@ public final class MainActivity extends Activity {
         JSONObject settings=new JSONObject();
         try{for(Map.Entry<String,?> e:getPreferences(0).getAll().entrySet())settings.put(e.getKey(),e.getValue());if(full&&!settings.has("preset_messages"))settings.put("preset_messages",new JSONArray().put(new JSONObject().put("title","Status Update").put("text","Status:\nLocation:\nNext update:")).toString());}catch(JSONException error){nodeActionResult(error.getMessage());return;}
         historyTransferRunning=true;
-        nodeActionResult(exporting?"Exporting history…":"Validating and importing history…");
+        nodeActionResult(exporting?(full?"Preparing and checking full backup… Keep the app open.":"Exporting history…"):
+                full?"Checking backup archive before importing…":"Validating and importing history…");
+        notificationText="";updateRunningNotification();
         historyWorker.execute(()->{
             try {
                 if(exporting) {
-                    OutputStream stream=getContentResolver().openOutputStream(uri,"wt");if(stream==null)throw new IOException("Cannot open destination");
-                    if(full)exportFullArchive(stream,settings);
-                    else HistoryBackup.export(new java.io.OutputStreamWriter(stream,StandardCharsets.UTF_8),chatStore,radio,id,null);
-                    main.post(()->{if(!closing)nodeActionResult("Backup exported. Sound selections are included; sound files are not embedded.");});
+                    if(full)exportVerifiedFullBackup(uri,settings);
+                    else try(OutputStream stream=getContentResolver().openOutputStream(uri,"wt")) {
+                        if(stream==null)throw new IOException("Cannot open destination");
+                        HistoryBackup.export(new java.io.OutputStreamWriter(stream,StandardCharsets.UTF_8),chatStore,radio,id,null);
+                    }
+                    main.post(()->{if(!closing)nodeActionResult(full?"Backup exported and verified. Sound selections are included; sound files are not embedded.":"Backup exported. Sound selections are included; sound files are not embedded.");});
                 }else {
                     // Copy once to private staging so both streaming passes see the same bytes.
                     java.io.File staged=java.io.File.createTempFile("history-import-",".json",getCacheDir());
@@ -2179,10 +2257,11 @@ public final class MainActivity extends Activity {
                             while((count=input.read(buffer))!=-1)out.write(buffer,0,count);
                         }
                         java.util.zip.ZipFile archive=null;java.util.zip.ZipEntry historyEntry=null;
-                        try(java.io.FileInputStream sniff=new java.io.FileInputStream(staged)){byte[] magic=new byte[4];if(sniff.read(magic)==4&&magic[0]=='P'&&magic[1]=='K'&&full){archive=new java.util.zip.ZipFile(staged);historyEntry=archive.getEntry("history.json");if(historyEntry==null)throw new IOException("Full backup has no history.json");}}
+                        try(java.io.FileInputStream sniff=new java.io.FileInputStream(staged)){byte[] magic=new byte[4];if(sniff.read(magic)==4&&magic[0]=='P'&&magic[1]=='K'&&full){BackupArchive.validate(staged);archive=new java.util.zip.ZipFile(staged);historyEntry=archive.getEntry("history.json");}}
                         final java.util.zip.ZipFile backupArchive=archive;final java.util.zip.ZipEntry backupHistory=historyEntry;
                         HistoryBackup.ReaderSource source=()->new java.io.InputStreamReader(backupArchive==null?new java.io.FileInputStream(staged):backupArchive.getInputStream(backupHistory),StandardCharsets.UTF_8);
                         try{
+                        if(backupArchive!=null)readBackupPacks(backupArchive);
                         HistoryBackup.Headers headers=HistoryBackup.read(source,full,null,null);
                         int[] added={0,0,0};android.database.sqlite.SQLiteDatabase db=chatStore.getWritableDatabase();db.beginTransaction();
                         try {
@@ -2208,14 +2287,31 @@ public final class MainActivity extends Activity {
                     }finally{if(!staged.delete())debug("Import staging cleanup pending");}
                 }
             }catch(Exception error){main.post(()->{if(!closing)new AlertDialog.Builder(this).setTitle("File transfer failed").setMessage(error.getMessage()).setPositiveButton("OK",null).show();});}
-            finally{main.post(()->historyTransferRunning=false);}
+            finally{main.post(()->{historyTransferRunning=false;notificationText="";if(!closing)updateRunningNotification();});}
         });
+    }
+    private void exportVerifiedFullBackup(Uri uri,JSONObject settings)throws Exception {
+        File prepared=File.createTempFile("full-backup-",".zip",getCacheDir());
+        try {
+            try(OutputStream output=new java.io.BufferedOutputStream(new java.io.FileOutputStream(prepared))){exportFullArchive(output,settings);}
+            BackupArchive.validate(prepared);
+            main.post(()->{if(!closing)nodeActionResult("Saving and verifying the completed backup… Keep the app open.");});
+            try(OutputStream output=getContentResolver().openOutputStream(uri,"wt")){
+                if(output==null)throw new IOException("Cannot open backup destination");
+                BackupArchive.copy(prepared,output);
+            }
+            // Check the actual document after close, not just bytes accepted by its writer.
+            try(InputStream saved=getContentResolver().openInputStream(uri)){
+                if(saved==null)throw new IOException("Backup written, but the saved document cannot be reopened for verification. Do not use it for migration until verified.");
+                BackupArchive.verifyCopy(prepared,saved);
+            }
+        }finally{if(!prepared.delete())debug("Full backup staging cleanup pending");}
     }
     private void exportFullArchive(OutputStream destination,JSONObject settings) throws Exception {
         try(java.util.zip.ZipOutputStream zip=new java.util.zip.ZipOutputStream(destination)){
             zip.setLevel(java.util.zip.Deflater.NO_COMPRESSION);
             zip.putNextEntry(new java.util.zip.ZipEntry("history.json"));
-            OutputStream nonClosing=new java.io.FilterOutputStream(zip){@Override public void close()throws IOException{flush();}};
+            OutputStream nonClosing=BackupArchive.entryStream(zip);
             HistoryBackup.export(new java.io.OutputStreamWriter(nonClosing,StandardCharsets.UTF_8),chatStore,null,null,settings,mapData);
             zip.closeEntry();
             JSONArray packs=mapPacks.list();zip.putNextEntry(new java.util.zip.ZipEntry("packs.json"));zip.write(packs.toString().getBytes(StandardCharsets.UTF_8));zip.closeEntry();
@@ -2226,8 +2322,8 @@ public final class MainActivity extends Activity {
             }
         }
     }
-    private void importMapPacksFromArchive(java.util.zip.ZipFile zip) throws Exception {
-        java.util.zip.ZipEntry index=zip.getEntry("packs.json");if(index==null)return;if(index.getSize()>1000000)throw new IOException("Invalid map pack list");
+    private JSONArray readBackupPacks(java.util.zip.ZipFile zip) throws Exception {
+        java.util.zip.ZipEntry index=zip.getEntry("packs.json");if(index==null)return new JSONArray();if(index.getSize()>1000000)throw new IOException("Invalid map pack list");
         byte[] data;try(InputStream input=zip.getInputStream(index);java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream()){
             byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(output.size()+n>1000000)throw new IOException("Map pack list too large");output.write(buffer,0,n);}data=output.toByteArray();
         }
@@ -2236,6 +2332,14 @@ public final class MainActivity extends Activity {
             JSONObject p=packs.getJSONObject(i);String id=p.getString("id");if(!id.matches("[0-9a-f-]{36}"))throw new IOException("Invalid map pack ID");
             String extension=p.optString("schema").equals("copernicus")?"satpack":"pmtiles";
             java.util.zip.ZipEntry entry=zip.getEntry("packs/"+id+"."+extension);if(entry==null)throw new IOException("Map pack file missing");
+        }
+        return packs;
+    }
+    private void importMapPacksFromArchive(java.util.zip.ZipFile zip) throws Exception {
+        JSONArray packs=readBackupPacks(zip);
+        for(int i=0;i<packs.length();i++){
+            JSONObject p=packs.getJSONObject(i);String id=p.getString("id"),extension=p.optString("schema").equals("copernicus")?"satpack":"pmtiles";
+            java.util.zip.ZipEntry entry=zip.getEntry("packs/"+id+"."+extension);
             if(!mapPacks.hasBackupOrigin(id))try(InputStream input=zip.getInputStream(entry)){mapPacks.addBackup(input,p);}
         }
     }
@@ -4034,10 +4138,11 @@ public final class MainActivity extends Activity {
             }
             return;
         }
-        if(requestCode==40){
-            if(grants.length==0 || grants[0]!=PackageManager.PERMISSION_GRANTED)
+        if(requestCode==MESSAGE_NOTIFICATION_PERMISSION||requestCode==INITIAL_NOTIFICATION_PERMISSION){
+            notificationPermissionPending=false;
+            if(requestCode==MESSAGE_NOTIFICATION_PERMISSION&&(grants.length==0 || grants[0]!=PackageManager.PERMISSION_GRANTED))
                 getPreferences(0).edit().putBoolean("background_message_notifications",false).apply();
-            notificationText="";publish();return;
+            notificationText="";publish();continueBleRequests();return;
         }
         if(requestCode==BLE_PERMISSIONS) {
             blePermissionPending=false;

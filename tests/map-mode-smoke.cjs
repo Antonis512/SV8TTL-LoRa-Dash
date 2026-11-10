@@ -26,10 +26,11 @@ const server = http.createServer((request,response) => {
     await page.route('https://tile.openstreetmap.org/**',route=>{onlineRequests++;return route.fulfill({status:200,contentType:'image/png',body:png});});
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
     await page.evaluate(() => { switchTab('map'); onMapData({nodes:[
-      {radio:'mt',device:'!11111111',id:'!22222222',name:'A',role:'Client',lat:37.98,lon:23.72,receivingRf:'Long Fast'},
+      {radio:'mt',device:'!11111111',id:'!22222222',name:'A',role:'Client',lat:37.98,lon:23.72,receivingRf:'Long Fast',precisionBits:13,positionTime:1700000000000},
       {radio:'mc',device:'abcdef',id:'123456',name:'B',role:'User',lat:38,lon:24,receivingRf:'869.618 MHz'}
     ],positions:[],heard:[],items:[],packs:[]}); });
     await page.waitForFunction(() => !!mapView?.getSource('openstreetmap'));
+    await page.waitForFunction(() => !!mapView?.getLayer('map-position-precision-fill'));
     assert.equal(await page.locator('#map-role optgroup').count(),2);
     assert.equal(await page.locator('#map-role option[value="mc:User"]').innerText(),'MC · Companion');
     await page.locator('#map-role').selectOption('mc:User');
@@ -41,7 +42,7 @@ const server = http.createServer((request,response) => {
     assert.equal(await page.locator('#map-source-switch').innerText(),'Online ⇄');
     assert.equal(await page.locator('#map-offline-dialog').evaluate(dialog=>dialog.open),false);
     assert.equal(await page.locator('#map-empty-pack').isVisible(),false);
-    await page.locator('#map-rf').selectOption('Long Fast');
+    await page.locator('#map-rf').selectOption('Preset: Long Fast');
     assert.match(await page.locator('#map-counts').innerText(),/^1 positioned/);
     await page.locator('#map-rf').selectOption('all');
     await page.waitForTimeout(1000);

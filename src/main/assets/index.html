@@ -28,7 +28,7 @@
   </div>
   <div id="chat-device-bar">
     <div class="device-header-controls"><select id="header-mc-channel" class="header-channel" aria-label="Left channel" onchange="selectChannel('left',Number(this.value))"></select><button id="toggle-mc-users" class="cpill users-toggle" type="button" onclick="toggleUsersList('mc')">Users ▾</button></div>
-    <div class="chat-multi-controls"><button id="new-multi-send" class="cpill" type="button" onclick="AndroidBridge.newMultiSend()" hidden>Send to multiple</button></div>
+    <div class="chat-multi-controls"><button id="new-multi-send" class="cpill" type="button" onclick="state?.multiSendEnabled ? AndroidBridge.newMultiSend() : openSettingsWindow('multi')">Send to multiple</button></div>
     <div class="device-header-controls right"><button id="toggle-mt-users" class="cpill users-toggle" type="button" onclick="toggleUsersList('mt')">Users ▾</button><select id="header-mt-channel" class="header-channel" aria-label="Right channel" onchange="selectChannel('right',Number(this.value))"></select></div>
   </div>
   <div id="chat-sync" role="status" aria-live="polite" hidden><span class="chat-sync-spinner"></span><span id="chat-sync-text">Loading messages…</span></div>

@@ -29,6 +29,7 @@ interface RadioProtocol {
         default void lastHeard(String id,long seconds) {}
         default void lastHeard(String id,long seconds,boolean viaRadio) {lastHeard(id,seconds);}
         default void radioSettings(String label) {}
+        default void ownRadioUsage(String label) {}
         default void channelMessage(int channel,String sender,String text,long receivedAt,int hops,long packetId,long replyId) { message(channel,sender,text,receivedAt,hops); }
         default void advertResult(String text,boolean success) { actionResult(text); }
         default void heardRepeat(long requestId) {}
@@ -95,6 +96,37 @@ final class MeshtasticProtocol implements RadioProtocol {
         events.loadingProgress(configStage==1?"Loading configuration":"Loading nodes",configNodes,configChannels);
     }
     private long myNode, lastId;
+    private boolean receivedLocalStats;
+    private Float channelUtilization, airUtilTx;
+
+    private void readUsage(byte[] bytes, boolean localStats, Events events) {
+        if (!localStats && receivedLocalStats) return;
+        // LocalStats uses proto3 scalar defaults. DeviceMetrics fields are optional.
+        Float channel = localStats ? Float.valueOf(0) : channelUtilization;
+        Float air = localStats ? Float.valueOf(0) : airUtilTx;
+        int channelField = localStats ? 2 : 3;
+        boolean hasUptime = false;
+        ProtoWire.Reader reader = new ProtoWire.Reader(bytes);
+        while (reader.next()) {
+            if (reader.wire == 5 && (reader.field == channelField || reader.field == channelField + 1)) {
+                float value = Float.intBitsToFloat((int)reader.number());
+                Float percent = Float.isFinite(value) && value >= 0 && value <= 100 ? value : null;
+                if (reader.field == channelField) channel = percent;
+                else air = percent;
+            } else if(localStats && reader.field==1 && reader.wire==0) {
+                hasUptime=reader.number()!=0;
+            } else reader.skip();
+        }
+        if(localStats && !hasUptime)return;
+        receivedLocalStats = localStats;
+        channelUtilization = channel;
+        airUtilTx = air;
+        events.ownRadioUsage("AirUtil TX: " + percentage(air) + " · ChUtil: " + percentage(channel));
+    }
+
+    private static String percentage(Float value) {
+        return value == null ? "Not reported" : String.format(java.util.Locale.ROOT, "%.2f%%", value);
+    }
     private final java.util.Map<Long,Long> messageTargets=new java.util.LinkedHashMap<>();
     private final java.util.Map<Long,String> traceTargets=new java.util.HashMap<>();
     private final java.util.Map<Long,String> signalTargets=new java.util.HashMap<>();
@@ -120,6 +152,7 @@ final class MeshtasticProtocol implements RadioProtocol {
         configNonce=nonce;configuring=true;configNodes=configChannels=0;
         configNodeIds.clear();configChannelIds.clear();
         configStage=1;myNode=0;
+        receivedLocalStats=false;channelUtilization=null;airUtilTx=null;
         configStarted=configProgressAt=clock.getAsLong();
         return new ProtoWire.Writer().varint(3, nonce).build();
     }
@@ -256,6 +289,7 @@ final class MeshtasticProtocol implements RadioProtocol {
     }
 
     private boolean readNode(byte[] bytes, Events events) {
+        byte[] metrics = null;
         ProtoWire.Reader r = new ProtoWire.Reader(bytes); long num = 0, lastHeard=0; String name = ""; String role = "";
         String model = "", shortName = ""; int channel = 0, hops = -1; Position position=new Position();
         while (r.next()) {
@@ -273,6 +307,7 @@ final class MeshtasticProtocol implements RadioProtocol {
             } else if (r.field == 3) {
                 position=readPosition(r.bytes());
             } else if (r.field == 5) lastHeard=r.number()&0xffffffffL;
+            else if (r.field == 6) metrics = r.bytes();
             else if (r.field == 7) channel = (int)r.number();
             else if (r.field == 9) hops = (int)r.number();
             else r.skip();
@@ -286,6 +321,7 @@ final class MeshtasticProtocol implements RadioProtocol {
         events.node(id, name, role, model, channel, hops, lat, lon);
         events.lastHeard(id,lastHeard,false);
         if (num == myNode && !name.isEmpty()) events.ownNode(id, name);
+        if (num == myNode && metrics != null) readUsage(metrics, false, events);
         if (num == myNode && Double.isFinite(lat) && Double.isFinite(lon)) {
             events.ownPosition(lat, lon);
         }
@@ -532,9 +568,11 @@ final class MeshtasticProtocol implements RadioProtocol {
             ProtoWire.Reader telemetry=new ProtoWire.Reader(body);byte[] stats=null;
             while(telemetry.next()) {
                 if(telemetry.field==6)stats=telemetry.bytes();
+                else if(telemetry.field==2 && myNode!=0 && from==myNode && !mqtt)readUsage(telemetry.bytes(),false,events);
                 else telemetry.skip();
             }
             if(stats!=null) {
+                if(myNode!=0 && from==myNode && !mqtt)readUsage(stats,true,events);
                 statsText=SignalQuality.statistics(stats);
                 requested=sender.equals(signalTargets.get(requestId));
             }
@@ -737,6 +775,17 @@ final class MeshCoreProtocol implements RadioProtocol {
         }
         return null;
     }
+    byte[] pollRadioUsage() {
+        long now=clock.getAsLong();
+        if (firmwareVersion >= 8 && channelsLoaded && !syncStalled && !initializing && !syncRequested && !syncInFlight
+                && operation.isEmpty() && dmSends.isEmpty() && discoveryId==0
+                && pending == null && now >= nextUsageAt) {
+            nextUsageAt = now + 60000;
+            return new byte[]{56, 1}; // GET_STATS, radio subtype (local companion link)
+        }
+        return null;
+    }
+    private long nextUsageAt;
     private int channelTextLimit;
     @Override public int textLimit(boolean direct) { return direct ? 138 : channelTextLimit; }
     private boolean syncRequested;
@@ -924,6 +973,11 @@ final class MeshCoreProtocol implements RadioProtocol {
                 if(!ownKey.isEmpty())events.positionInfo(ownKey,new NodePosition(lat,lon,0,0,System.currentTimeMillis(),0,"mc_self"));
                 events.ownPosition(lat,lon);
             }
+        }
+        else if (type == 24 && packet.length >= 14 && packet[1] == 1) {
+            long tx = Integer.toUnsignedLong(littleInt(packet, 6));
+            long rx = Integer.toUnsignedLong(littleInt(packet, 10));
+            events.ownRadioUsage("TX airtime: " + tx + " s · RX airtime: " + rx + " s");
         }
         else if (type == 13) {
             if(packet.length>1) firmwareVersion=packet[1]&255;

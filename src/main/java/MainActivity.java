@@ -395,6 +395,7 @@ public final class MainActivity extends Activity {
         final Map<String,Long> readThrough=new java.util.HashMap<>();
         final Map<String, NodeEntry> knownNodes = new TreeMap<>();
         String rfLabel="";
+        String ownRadioUsage="";
         int settingsGeneration=-1;
         long settingsSince;
         String observedSettings(long seconds) {
@@ -641,6 +642,7 @@ public final class MainActivity extends Activity {
         }
 
         void close() {
+            ownRadioUsage="";
             loadingStorage.clear();
             loadingContactNames.clear();
             earlyHeardTimes.clear();earlyHeardSettings.clear();
@@ -705,6 +707,10 @@ public final class MainActivity extends Activity {
                     if(generation!=activeGeneration||!connected||protocol==null) return;
                     byte[] next=protocol.poll(RadioSession.this);
                     if(next!=null) sendTracked(next);
+                    else if(protocol instanceof MeshCoreProtocol){
+                        byte[] stats=((MeshCoreProtocol)protocol).pollRadioUsage();
+                        if(stats!=null)send(stats);
+                    }
                     main.postDelayed(this,250);
                 }
             },250);
@@ -752,6 +758,14 @@ public final class MainActivity extends Activity {
         }
 
         @Override public void status(String text) { updateStatus(text); }
+        @Override public void ownRadioUsage(String label) {
+            int attempt=generation;
+            main.post(()->{
+                if(attempt!=generation || ownRadioUsage.equals(label))return;
+                ownRadioUsage=label;
+                publishRadioUpdate();
+            });
+        }
         @Override public void loadingProgress(String stage,int nodes,int channels) {
             int attempt=generation;
             main.post(()->{if(generation!=attempt||!loading||installingNodes)return;
@@ -2815,16 +2829,19 @@ public final class MainActivity extends Activity {
             for (ChatStore.KnownRadio item : chatStore.radios()) {
                 boolean queued=pendingKnownConnections.containsKey(item.radio+":"+item.id);
                 boolean connected=false,connecting=queued||pendingBleActions.containsKey("known:"+item.radio+":"+item.id);
+                String usage="";
                 String connectionStatus=connecting?"Waiting for Bluetooth permission or activation…":"",detectedRadio="";
                 for(RadioSession s:sessions.values()) if(s.matches(item.radio,item.id)) {
                     connected|=s.connected;connecting|=s.loading;
                     connectionStatus=s.state;
+                    if(s.connected && item.id.equals(s.ownId))usage=s.ownRadioUsage;
                     if(s.typeVerified&&(s.connected||s.loading))detectedRadio=s.meshcore?"mc":"mt";
                 }
                 if(queued)connectionStatus="Queued; waiting for the previous connection…";
                 myNodes.put(new JSONObject().put("radio",item.radio).put("id",item.id)
                         .put("name",item.name).put("address",item.address)
                         .put("lastSeen",item.lastSeen)
+                        .put("radioUsage",usage)
                         .put("connected",connected).put("connecting",connecting).put("connectionStatus",connectionStatus).put("detectedRadio",detectedRadio)
                         .put("unread",chatStore.hasUnread(item.radio,item.id,false))
                         .put("dmUnread",chatStore.hasUnread(item.radio,item.id,true))

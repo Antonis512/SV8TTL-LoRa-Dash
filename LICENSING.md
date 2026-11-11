@@ -1,5 +1,9 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 11 November 2026 — 0.10.29
+
+The connected-radio statistics and Chat changes are independently authored. The implementation follows the field definitions and behavior in the [Meshtastic Android widget](https://github.com/meshtastic/Meshtastic-Android/blob/main/feature/widget/src/main/kotlin/org/meshtastic/feature/widget/LocalStatsWidgetState.kt) and [MeshCore companion firmware](https://github.com/meshcore-dev/MeshCore/blob/main/examples/companion_radio/MyMesh.cpp).
+
 ## 11 November 2026 — 0.10.28 publication
 
 The user authorized building and publishing the synchronized cloud changes and local Bluetooth activation, geofence sound and unread-message navigation fixes. These local changes are independently authored. Existing attribution and dependency notices are retained. This build uses the original local debug signing configuration and application ID. Production signing and replacement licensing remain undecided. Physical radio and phone validation remain pending.

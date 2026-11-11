@@ -19,7 +19,7 @@ setInterval(updateTracerouteButtons,500);
 function updateMultiSendAvailability() {
   if(!state)return;
   const seconds=Math.max(0,Math.ceil((multiSendReadyAt-performance.now())/1000)),button=el('new-multi-send');
-  button.disabled=!state.multiSendEnabled||seconds>0;
+  button.disabled=state.multiSendEnabled && seconds>0;
   button.textContent=seconds?`Send to multiple · ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`:'Send to multiple';
 }
 setInterval(updateMultiSendAvailability,1000);
@@ -840,6 +840,10 @@ function renderMyNodes() {
     heading.appendChild(node('strong','',item.name || item.id));
     if(item.connected) heading.appendChild(node('strong','connected-label','Connected'));
     card.appendChild(heading);
+    if(item.connected) {
+      const missing=item.radio==='mc'?'TX airtime · RX airtime':'AirUtil TX · ChUtil';
+      card.appendChild(node('div','node-facts',item.radioUsage || missing+' · Not reported'));
+    }
     if(item.unread) card.appendChild(node('span','unread-badge',item.dmUnread?'Unread direct messages':'Unread messages'));
     card.appendChild(node('div','node-facts',(item.detectedRadio||item.radio).toUpperCase() + (item.id ? ' · ' + (item.radio==='mc'?'Public key: ':'Node ID: ') + item.id : '') +
       (item.connected ? ' · Connected' : '') + (item.lastSeen ? ' · Last connected ' + new Date(item.lastSeen).toLocaleString(undefined,{hourCycle:'h23'}) : ' · From an older app version')));
@@ -1036,7 +1040,7 @@ window.onRadioState = function (next) {
   if(document.activeElement!==el('message-split-interval'))el('message-split-interval').value=next.messageSplitIntervalSeconds??5;
   el('connect-all-available').disabled=!!next.connectingAvailable;
   el('connect-available-status').hidden=!next.connectingAvailable;
-  el('multi-send-enabled').checked=!!next.multiSendEnabled;el('new-multi-send').hidden=!next.multiSendEnabled;
+  el('multi-send-enabled').checked=!!next.multiSendEnabled;
   multiSendReadyAt=performance.now()+Math.max(0,Number(next.multiSendCooldownMs)||0);updateMultiSendAvailability();
   if(document.activeElement!==el('channel-observation'))el('channel-observation').value=next.channelObservationSeconds??5;
   if(document.activeElement!==el('send-settling'))el('send-settling').value=next.settlingSeconds||3;

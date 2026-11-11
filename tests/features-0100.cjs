@@ -10,7 +10,11 @@ const assert=require('node:assert/strict');const {pathToFileURL}=require('node:u
   f.mc.chats[2]=Array.from({length:100},(_,i)=>({id:i+101,sender:'Alice',text:'Message '+(i+101),time:'12:00',receivedAt:i+101}));
   f.mc.historyUnread={'c:2':true};onRadioState(f);switchTab('settings');showSettingsPage('sending');
  });
- assert.equal(await page.locator('#multi-send-enabled').isChecked(),false);assert.equal(await page.locator('#new-multi-send').isDisabled(),true);
+ assert.equal(await page.locator('#multi-send-enabled').isChecked(),false);
+ await page.evaluate(()=>switchTab('chat'));
+ await page.locator('#new-multi-send').click();
+ assert.equal(await page.locator('#settings-window-multi').isVisible(),true);
+ await page.evaluate(()=>{closeSettingsWindow('multi');switchTab('settings');showSettingsPage('sending');});
  assert.equal(await page.locator('#channel-observation').inputValue(),'5');
  assert.equal(await page.locator('#message-split-interval').inputValue(),'5');
  await page.evaluate(()=>openSettingsWindow('multi'));
@@ -55,7 +59,7 @@ const assert=require('node:assert/strict');const {pathToFileURL}=require('node:u
   onRadioState(f);onHistoryPage('mc1','',2,100);
  });
  assert.equal(await page.locator('#chat-messages .android-msg').count(),200);assert.ok(await page.locator('#chat-messages').evaluate(e=>e.scrollTop)>0,'Prepending preserves reading position');
- await page.locator('#chat-input').fill('α'.repeat(100));assert.equal(await page.locator('#chat-send').isDisabled(),false);assert.match(await page.locator('#chat-input-budget').innerText(),/2 split messages/);
+ await page.locator('#chat-input').fill('α'.repeat(100));assert.equal(await page.locator('#chat-send').isDisabled(),false);assert.match(await page.locator('#chat-input-budget').innerText(),/2 \/ 3 split messages/);
  await page.evaluate(()=>{f.messageSplitEnabled=false;onRadioState(f);});
  assert.equal(await page.locator('#chat-send').isDisabled(),true);
  assert.match(await page.locator('#chat-input-budget').innerText(),/Message Split disabled/);
@@ -64,7 +68,7 @@ const assert=require('node:assert/strict');const {pathToFileURL}=require('node:u
  assert.equal(await page.locator('#chat-send').isDisabled(),false);
  await page.evaluate(()=>{f.mt.channelTextLimit=200;f.mt.directTextLimit=200;f.mt.nodes=[{id:'!abcdef12',name:'Alice',role:'Client'}];onRadioState(f);selectChannel('mt',2);});
  await page.locator('#chat-input').fill('x'.repeat(210));
- assert.match(await page.locator('#chat-input-budget').innerText(),/210 \/ 200 bytes · 2 split messages/);
+ assert.match(await page.locator('#chat-input-budget').innerText(),/210 \/ 200 bytes · 2 \/ 3 split messages/);
  assert.equal(await page.locator('#chat-send').isDisabled(),false);
  await page.evaluate(()=>sendMsg());
  assert.equal(await page.evaluate(()=>!!pendingCompose),true);
@@ -79,7 +83,7 @@ const assert=require('node:assert/strict');const {pathToFileURL}=require('node:u
  assert.equal(await page.locator('#chat-input').inputValue(),'');
  await page.evaluate(()=>selectDmPeer('mt','!abcdef12'));
  await page.locator('#dm-input').fill('👨‍👩‍👧‍👦'.repeat(17));
- assert.match(await page.locator('#dm-input-budget').innerText(),/425 \/ 200 bytes · 3 split messages/);
+ assert.match(await page.locator('#dm-input-budget').innerText(),/425 \/ 200 bytes · 3 \/ 3 split messages/);
  assert.equal(await page.locator('#dm-reply').isDisabled(),false);
  await page.evaluate(()=>{replyDm();onComposeReleased('mt1','!abcdef12','👨‍👩‍👧‍👦'.repeat(17));});
  assert.equal(await page.evaluate(()=>pendingCompose),null);

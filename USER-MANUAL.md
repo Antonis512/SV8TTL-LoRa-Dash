@@ -1,7 +1,7 @@
 # SV8TTL LoRa Dash
 
-**Beta · User manual · First draft**  
-For version **0.10.16 (43)** · 30 October 2026
+**Beta · User manual**  
+For version **0.10.29 (56)** · 11 November 2026
 
 Language: **English** · [Ελληνικά](USER-MANUAL-el.md)
 
@@ -9,7 +9,7 @@ SV8TTL LoRa Dash is a standalone Android app for connecting to MeshCore and Mesh
 
 This is an independent Android adaptation based on OverMesh Lite, incorporating original OverMesh assets. It is not an official OverMesh release. Credits and notices are available in **Config → About** and [LICENSE](LICENSE).
 
-This draft describes the current implementation. Physical radio behavior and Android layouts still require the checks in [PHONE-TESTS.md](PHONE-TESTS.md). Screenshots and a walkthrough verified on a phone remain to be added.
+The pictures show the app interface at phone size with fictional names, IDs, messages and readings. Physical radio and phone checks are tracked in [PHONE-TESTS.md](PHONE-TESTS.md).
 
 ## Contents
 
@@ -67,7 +67,8 @@ Multiple radios can remain connected. Use the individual disconnect controls or 
 | **Chat** | Channel messages and direct messages, with independent left and right radio selections. |
 | **Nodes** | Contacts reported by the selected radio, filters, details and available actions. |
 | **Map** | Offline maps, saved MC/MT positions, history, trails, marks, overlays and geofences. |
-| **Log** | Under construction |
+| **Contacts** | Save contact profiles and link their nodes. |
+| **Log** | Write notes and organize them with categories and templates. |
 | **Config** | Radio connections, saved radios, presets, sending settings, notifications, backups, updates and About. |
 
 **MC** means MeshCore. **MT** means Meshtastic. **DM** means direct message.
@@ -77,6 +78,10 @@ Multiple radios can remain connected. Use the individual disconnect controls or 
 The following sections follow the order of the buttons on the main **Config** screen. Inside a section, **← Config** returns to that screen. A round **i** button shows or hides the explanation beside it. **×** and **Close** dismiss a settings window; use any explicit Save button before leaving an editor.
 
 #### 1. My Nodes
+
+Read the statistics below each connected device name. **Device 1 (MeshCore)** shows cumulative TX and RX airtime in seconds on supported companions. **Device 2 (Meshtastic)** shows **AirUtil TX**, the percentage of the last hour it spent transmitting, and **ChUtil**, the percentage of time it sensed a busy channel. “Not reported” means a reading is unavailable. This screen does not calculate remaining duty-cycle allowance.
+
+<img src="docs/manual/my-nodes.png" width="360" alt="My Nodes showing readings for Device 1 and Device 2">
 
 Opens your saved radios and their locally stored messages. From top to bottom, its controls are:
 
@@ -163,6 +168,8 @@ Displays the installed version, **Beta** designation, **By SV8TTL**, the indepen
 
 ## 3. Use Chat
 
+<img src="docs/manual/chat.png" width="360" alt="Chat with User 1 and User 2 and the Send to multiple button between the Users buttons">
+
 ### Choose between connected radios
 
 At the top of Chat, the left and right device dropdowns sit beside their **MC / MT** buttons. Each dropdown lists connected radios and saved offline radios. Either side can show either family; the two slots are views, not a two-radio connection limit.
@@ -244,11 +251,15 @@ If a part fails or remains unconfirmed, sending pauses for **Retry / Cancel**. R
 
 ### Send to multiple destinations
 
-1. Enable **Config → Sending options → Send to Multiple → Enable Send to multiple**.
-2. Return to **Chat** and tap **Send to multiple** between the Users controls.
+1. In **Chat**, tap **Send to multiple** between the two **Users** buttons. If enabled, it opens the destination picker.
+2. On first use, select **Enable Send to multiple**, close the settings window, then tap **Send to multiple** again.
 3. Select a radio and choose channel or DM destinations. Use search for contacts as needed.
 4. Tap **Save Destinations** for your choices, then repeat for other radios.
 5. Enter the text, review the destinations and tap **Send Chain**.
+
+Choose up to five destinations. A split message can contain up to three parts. When all items succeed, the button shows a five-minute countdown. Ordinary Chat messages remain available.
+
+<img src="docs/manual/multi-send.png" width="360" alt="Send to Multiple settings with the enable switch">
 
 Each destination uses its selected source radio. Required radios must be connected. Named **Destination sets**, managed under Send to Multiple settings, let you reuse groups and are included in App Backup.
 
@@ -257,6 +268,8 @@ Sequential sending waits for results; concurrent mode is also available. The def
 Use the chain monitor to pause, continue and review individual outcomes. **Cancel remaining** stops pending items without recalling active transmissions. **Cancel Chain** clears the saved chain while retaining Chat history. An interrupted saved multi-send chain reopens paused after restart; inspect its results before continuing.
 
 ## 7. Explore Nodes and signal information
+
+<img src="docs/manual/nodes.png" width="360" alt="Node 1 and Node 2 reported by the two example devices">
 
 Choose a radio in **Nodes**, then search by name, ID or role. Filters include network, role, infrastructure/users, messageability and local favorites. A Last Heard visibility filter can hide older contacts; unknown timestamps remain unknown.
 

@@ -2,7 +2,7 @@
 
 Standalone Android app for MeshCore and Meshtastic radios over Bluetooth or USB serial. No Windows computer or TCP radio connection is required. An independent adaptation based on [OverMesh Lite](https://github.com/Slofi/overmesh), not an official OverMesh release.
 
-User manuals: [English](USER-MANUAL.md) · [Ελληνικά](USER-MANUAL-el.md). Covers setup, Chat, presets, Map, sending options, backups and troubleshooting. Phone walkthroughs and screenshots are pending.
+User manuals: [English](USER-MANUAL.md) · [Ελληνικά](USER-MANUAL-el.md). Covers setup, Chat, presets, Map, sending options, backups and troubleshooting. The illustrated guides use fictional devices, users and nodes.
 
 Current version **0.10.29 (56)** shows Meshtastic AirUtil TX and ChUtil percentages and MeshCore TX and RX airtime counters in Config → My Nodes. Chat shows Send to multiple between the Users buttons. Tapping it opens the enable setting or the destination picker. Physical-radio validation remains pending.
 

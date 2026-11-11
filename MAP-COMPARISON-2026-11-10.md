@@ -32,6 +32,6 @@ Separately inspected the **official MeshCore public map**, not the companion app
 4. Show precision/uncertainty and the selected receiver in the popup. Add a visible overlap count and chooser; optional visual spreading must keep a clear anchor to the reported coordinate. Do not fabricate separate locations to make markers look distinct.
 5. Keep MC advertised-position provenance separate from MT position-fix precision and timestamps.
 
-Affected case: Hermesh 0 `!9ea1a414`, KeepChilli `!ea8ee2b8`, Klif Aegina `!291b406e`. These are Meshtastic IDs. Shared reduced-precision coordinates or selection of an older receiver record can explain the symptoms, but the particular cause remains unconfirmed without the app's stored observations and the compared website's reports. No node was assigned guessed coordinates.
+Affected case: Hermesh 0 `!9ea1a414`, Keep Chili `!ea8ee2b8`, Klif Aegina `!291b406e`. These are Meshtastic IDs. Shared reduced-precision coordinates or selection of an older receiver record can explain the symptoms, but the particular cause remains unconfirmed without the app's stored observations and the compared website's reports. No node was assigned guessed coordinates.
 
 The environment draft now includes `app.meshcore.nz` in addition to the previously requested destinations. This is a saved proposal, not applied access. Review/save it in environment settings to permit direct companion-app inspection; publish the environment when the reusable configuration is ready.

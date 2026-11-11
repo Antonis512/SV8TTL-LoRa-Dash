@@ -258,6 +258,10 @@
       <label>Sound setup <select id="sound-mode" class="form-input" onchange="AndroidBridge.setSoundMode(this.value)"><option value="separate">Different sounds for MC, MT and DM</option><option value="shared">Same sound for all messages</option></select></label>
       <div id="sound-choices"></div>
     </div></fieldset>
+    <fieldset class="sound-frame"><legend>Geofence alerts</legend>
+      <label class="config-switch"><input id="geofence-audio" type="checkbox" onchange="AndroidBridge.setGeofenceAudioEnabled(this.checked)"> Play a sound for geofence alerts</label>
+      <div id="geofence-sound-choice"></div>
+    </fieldset>
     <fieldset class="sound-frame disconnect-sound-frame"><legend>Unexpected Disconnection of Device</legend>
       <label class="config-switch"><input id="disconnect-audio" type="checkbox" onchange="AndroidBridge.setDisconnectAudioEnabled(this.checked)"> Play a sound when a device disconnects unexpectedly</label>
       <div id="disconnect-sound-choice"></div>

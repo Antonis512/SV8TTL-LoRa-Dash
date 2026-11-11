@@ -212,9 +212,22 @@ public final class MainActivity extends Activity {
             if(unexpected&&!closing)showDisconnectWarning(s.ownName.isEmpty()?s.name:s.ownName);
         }
     }
+    private boolean waitingForBluetoothOn;
+    private final Runnable bluetoothActivationTimeout=()->{
+        if(waitingForBluetoothOn)finishBluetoothActivation();
+    };
+    private void finishBluetoothActivation(){
+        waitingForBluetoothOn=false;
+        bleEnablePending=false;
+        main.removeCallbacks(bluetoothActivationTimeout);
+        if(pendingBleActions.isEmpty()||closing)return;
+        if(bluetoothEnabled())continueBleRequests();
+        else rejectBleRequests("Bluetooth remains off. No BLE radios were connected.");
+    }
     private final BroadcastReceiver bluetoothStateReceiver=new BroadcastReceiver() {
         @Override public void onReceive(Context context,Intent intent) {
             int state=intent.getIntExtra(BluetoothAdapter.EXTRA_STATE,BluetoothAdapter.ERROR);
+            if(state==BluetoothAdapter.STATE_ON&&waitingForBluetoothOn)finishBluetoothActivation();
             if(state==BluetoothAdapter.STATE_OFF||state==BluetoothAdapter.STATE_TURNING_OFF) {
                 reconcileBleState();
                 if(scanningSession!=null)stopScanning(scanningSession,"Bluetooth is off");
@@ -247,7 +260,6 @@ public final class MainActivity extends Activity {
         if(!missing.isEmpty()) {blePermissionPending=true;requestPermissions(missing.toArray(new String[0]),BLE_PERMISSIONS);return;}
         if(!bluetoothEnabled()) {
             reconcileBleState();publish();bleEnablePending=true;
-            if(pageReady)web.evaluateJavascript("window.onActionNotice('Bluetooth is off','Allow Android to turn Bluetooth on to continue connecting the selected radios.')",null);
             try {startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE),ENABLE_BLUETOOTH);}
             catch(ActivityNotFoundException|SecurityException error){rejectBleRequests("Cannot request Bluetooth activation. Turn it on in Android settings, then connect again.");}
             return;
@@ -264,7 +276,7 @@ public final class MainActivity extends Activity {
     private void showDisconnectWarning(String name) {
         if(closing)return;
         debug("Unexpected device disconnection");
-        playDisconnectSound();connectionWarnings.add(name);displayConnectionWarning();
+        playAlertSound("disconnect");connectionWarnings.add(name);displayConnectionWarning();
     }
     private void displayConnectionWarning() {
         if(!resumed||closing||disconnectDialogVisible||connectionWarnings.isEmpty())return;
@@ -1733,11 +1745,11 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void markRead(String radio) {
             main.post(() -> { RadioSession s=session(radio); if(s!=null){s.unread=false;publish();} });
         }
-        @JavascriptInterface public void markDirectRead(String radio,String peer) {
-            main.post(() -> MainActivity.this.markDirectRead(radio,peer));
+        @JavascriptInterface public void markDirectRead(String radio,String peer,long through) {
+            main.post(() -> MainActivity.this.markDirectRead(radio,peer,through));
         }
-        @JavascriptInterface public void markChannelRead(String radio,int channel) {
-            main.post(() -> MainActivity.this.markChannelRead(radio,channel));
+        @JavascriptInterface public void markChannelRead(String radio,int channel,long through) {
+            main.post(() -> MainActivity.this.markChannelRead(radio,channel,through));
         }
         @JavascriptInterface public void clearDirect(String radio,String peer) {
             main.post(() -> MainActivity.this.clearDirect(radio,peer));
@@ -1776,6 +1788,9 @@ public final class MainActivity extends Activity {
                 getPreferences(0).edit().putBoolean("message_audio",enabled).apply();
                 publish();
             });
+        }
+        @JavascriptInterface public void setGeofenceAudioEnabled(boolean enabled) {
+            main.post(()->{getPreferences(0).edit().putBoolean("geofence_audio",enabled).apply();publish();});
         }
         @JavascriptInterface public void setDisconnectAudioEnabled(boolean enabled) {
             main.post(()->{getPreferences(0).edit().putBoolean("disconnect_audio",enabled).apply();debug("Disconnect audio enabled="+enabled);publish();});
@@ -1893,7 +1908,7 @@ public final class MainActivity extends Activity {
     }
 
     private boolean validSoundKind(String kind) {
-        return "mc".equals(kind)||"mt".equals(kind)||"dm".equals(kind)||"shared".equals(kind)||"disconnect".equals(kind);
+        return "mc".equals(kind)||"mt".equals(kind)||"dm".equals(kind)||"shared".equals(kind)||"disconnect".equals(kind)||"geofence".equals(kind);
     }
     private void pickSound(String kind) {
         if(!validSoundKind(kind)) return;
@@ -1923,11 +1938,11 @@ public final class MainActivity extends Activity {
             main.postDelayed(() -> {if(!closing && (visible || backgroundMessagesAllowed()))playTone(uri);},delay);
         }
     }
-    private void playDisconnectSound() {
-        if(!getPreferences(0).getBoolean("disconnect_audio",true))return;
-        String saved=getPreferences(0).getString("sound_uri_disconnect","");
+    private void playAlertSound(String kind) {
+        if(!getPreferences(0).getBoolean(kind+"_audio",kind.equals("disconnect")))return;
+        String saved=getPreferences(0).getString("sound_uri_"+kind,"");
         Uri uri=saved.isEmpty()?RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION):Uri.parse(saved);
-        int count=getPreferences(0).getInt("sound_repeats_disconnect",1);
+        int count=getPreferences(0).getInt("sound_repeats_"+kind,1);
         for(int i=0;i<count;i++)main.postDelayed(()->{if(!closing)playTone(uri);},i*1100);
     }
     private void playTone(Uri uri) {
@@ -2069,22 +2084,22 @@ public final class MainActivity extends Activity {
         for(List<ChatEntry> history:s.chats.values())history.sort(order);
         for(List<ChatEntry> history:s.directs.values())history.sort(order);
     }
-    private void markDirectRead(String radio,String peer) {
+    private void markDirectRead(String radio,String peer,long through) {
         RadioSession s=session(radio);
         if(s==null || s.ownId.isEmpty() || peer==null) return;
-        chatStore.markDirectRead(s.meshcore?"mc":"mt",s.ownId,peer);
-        s.readThrough.put("d:"+peer,chatStore.maxMessageId());
+        chatStore.markDirectRead(s.meshcore?"mc":"mt",s.ownId,peer,through);
+        s.readThrough.put("d:"+peer,Math.max(through,s.readThrough.getOrDefault("d:"+peer,0L)));
         List<ChatEntry> history=s.directs.get(peer);
-        if(history!=null) for(ChatEntry entry:history) entry.unread=false;
+        if(history!=null) for(ChatEntry entry:history) if(entry.id<=through)entry.unread=false;
         publish();
     }
-    private void markChannelRead(String radio,int channel) {
+    private void markChannelRead(String radio,int channel,long through) {
         RadioSession s=session(radio);
         if(s==null || s.ownId.isEmpty()) return;
-        chatStore.markChannelRead(s.meshcore?"mc":"mt",s.ownId,channel);
-        s.readThrough.put("c:"+channel,chatStore.maxMessageId());
+        chatStore.markChannelRead(s.meshcore?"mc":"mt",s.ownId,channel,through);
+        s.readThrough.put("c:"+channel,Math.max(through,s.readThrough.getOrDefault("c:"+channel,0L)));
         List<ChatEntry> history=s.chats.get(channel);
-        if(history!=null) for(ChatEntry entry:history) entry.unread=false;
+        if(history!=null) for(ChatEntry entry:history) if(entry.id<=through)entry.unread=false;
         publish();
     }
     private void clearDirect(String radio,String peer) {
@@ -2167,9 +2182,10 @@ public final class MainActivity extends Activity {
         super.onActivityResult(requestCode,resultCode,data);
         if(contactActions!=null&&contactActions.result(requestCode,resultCode,data))return;
         if(requestCode==ENABLE_BLUETOOTH) {
-            bleEnablePending=false;
-            if(resultCode==RESULT_OK&&bluetoothEnabled())continueBleRequests();
-            else rejectBleRequests("Bluetooth remains off. No BLE radios were connected.");
+            if(resultCode==RESULT_OK&&!bluetoothEnabled()){
+                waitingForBluetoothOn=true;
+                main.postDelayed(bluetoothActivationTimeout,15000);
+            }else finishBluetoothActivation();
             return;
         }
         if(requestCode==PICK_SOUND) {
@@ -2568,6 +2584,7 @@ public final class MainActivity extends Activity {
             for(int i=0;i<alerts.length();i++){JSONObject alert=alerts.getJSONObject(i);String message=(name.isEmpty()?id:name)+" "+alert.getString("event")+" "+alert.getString("title");
                 Runnable notify=()->{if(closing)return;
                     if(pageReady&&visible)web.evaluateJavascript("window.onMapAlert("+JSONObject.quote(message)+")",null);
+                    if(visible||MessageNotifications.allowed(this))playAlertSound("geofence");
                     MessageNotifications.showGeofence(this,message);
                 };
                 List<Runnable> committed=radioCommitCallbacks.get();
@@ -2820,10 +2837,10 @@ public final class MainActivity extends Activity {
             data.put("backgroundMessageNotifications",getPreferences(0).getBoolean("background_message_notifications",false))
                     .put("messageNotificationsAllowed",MessageNotifications.allowed(this));
             JSONObject sound=new JSONObject().put("mode",getPreferences(0).getString("sound_mode","separate"));
-            for(String kind:new String[]{"mc","mt","dm","shared","disconnect"})
+            for(String kind:new String[]{"mc","mt","dm","shared","disconnect","geofence"})
                 sound.put(kind,new JSONObject().put("selected",!getPreferences(0).getString("sound_uri_"+kind,"").isEmpty())
                     .put("repeats",getPreferences(0).getInt("sound_repeats_"+kind,1)));
-            data.put("sound",sound).put("disconnectAudioEnabled",getPreferences(0).getBoolean("disconnect_audio",true)).put("chatFontStep",getPreferences(0).getInt("chat_font_step",0))
+            data.put("sound",sound).put("geofenceAudioEnabled",getPreferences(0).getBoolean("geofence_audio",false)).put("disconnectAudioEnabled",getPreferences(0).getBoolean("disconnect_audio",true)).put("chatFontStep",getPreferences(0).getInt("chat_font_step",0))
                     .put("composerFontStep",getPreferences(0).getInt("composer_font_step",0))
                     .put("sideMcFontStep",getPreferences(0).getInt("side_mc_font_step",0))
                     .put("sideMtFontStep",getPreferences(0).getInt("side_mt_font_step",0));

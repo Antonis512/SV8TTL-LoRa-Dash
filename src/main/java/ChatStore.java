@@ -413,10 +413,15 @@ final class ChatStore extends SQLiteOpenHelper {
             for(Message message:page){visitor.accept(message);after=message.id;}
         }
     }
-    java.util.Map<String,Boolean> unreadConversations(String radio,String nodeId) {
-        java.util.Map<String,Boolean> result=new java.util.HashMap<>();
-        try(Cursor c=getReadableDatabase().rawQuery("SELECT peer,channel FROM messages WHERE radio=? AND node_id=? AND unread=1 GROUP BY peer,channel",new String[]{radio,nodeId})) {
-            while(c.moveToNext())result.put(c.getString(0).isEmpty()?"c:"+c.getInt(1):"d:"+c.getString(0),true);
+    java.util.Map<String,Long> unreadConversations(String radio,String nodeId) {
+        java.util.Map<String,Long> result=new java.util.HashMap<>();
+        // Match the history ordering, including equal timestamps and backdated radio packets.
+        String sql="SELECT m.peer,m.channel,(SELECT u.id FROM messages u WHERE u.radio=m.radio AND u.node_id=m.node_id "+
+                "AND u.peer=m.peer AND (m.peer<>'' OR u.channel=m.channel) AND u.unread=1 AND u.reaction=0 "+
+                "ORDER BY u.received_at,u.id LIMIT 1) FROM messages m WHERE m.radio=? AND m.node_id=? AND m.unread=1 AND m.reaction=0 "+
+                "GROUP BY m.peer,CASE WHEN m.peer='' THEN m.channel ELSE -1 END";
+        try(Cursor c=getReadableDatabase().rawQuery(sql,new String[]{radio,nodeId})) {
+            while(c.moveToNext())result.put(c.getString(0).isEmpty()?"c:"+c.getInt(1):"d:"+c.getString(0),c.getLong(2));
         }return result;
     }
     void saveRadio(String radio, String id, String name, String address) {
@@ -510,16 +515,16 @@ final class ChatStore extends SQLiteOpenHelper {
         ContentValues v=new ContentValues(); v.put("unread",unread?1:0);
         getWritableDatabase().update("messages",v,"id=?",new String[]{Long.toString(messageId)});
     }
-    void markDirectRead(String radio,String id,String peer) {
+    void markDirectRead(String radio,String id,String peer,long through) {
         ContentValues v=new ContentValues(); v.put("unread",0);
-        getWritableDatabase().update("messages",v,"radio=? AND node_id=? AND peer=?",
-                new String[]{radio,id,peer});
+        getWritableDatabase().update("messages",v,"radio=? AND node_id=? AND peer=? AND id<=?",
+                new String[]{radio,id,peer,Long.toString(through)});
     }
-    void markChannelRead(String radio,String id,int channel) {
+    void markChannelRead(String radio,String id,int channel,long through) {
         ContentValues v=new ContentValues(); v.put("unread",0);
         getWritableDatabase().update("messages",
-                v,"radio=? AND node_id=? AND channel=? AND peer=''",
-                new String[]{radio,id,Integer.toString(channel)});
+                v,"radio=? AND node_id=? AND channel=? AND peer='' AND id<=?",
+                new String[]{radio,id,Integer.toString(channel),Long.toString(through)});
     }
     int clearDirect(String radio,String id,String peer) {
         return getWritableDatabase().delete("messages","radio=? AND node_id=? AND peer=?",

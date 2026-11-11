@@ -16,7 +16,7 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
     isStyleLoaded:()=>true,getSource:id=>sources.get(id),addSource:(id,value)=>sources.set(id,{...value,setData(data){this.data=data;}}),removeSource:id=>sources.delete(id),
     getLayer:id=>layers.get(id),addLayer:value=>layers.set(value.id,value),removeLayer:id=>layers.delete(id)};
    state={devices:[{radio:'mt',id:'active',connected:true}],myNodes:[]};
-   window.rows=[['!9ea1a414','Hermesh 0'],['!ea8ee2b8','KeepChilli'],['!291b406e','Klif Aegina']].map(([id,name])=>({id,name,radio:'mt',device:'active',lat:37.9846656,lon:23.724032,positionTime:1700000010000,fixTime:1700000000000,receivedAt:1700000020000,precisionBits:13,positionSource:'mt_snapshot'}));
+   window.rows=[['!9ea1a414','Hermesh 0'],['!ea8ee2b8','Keep Chili'],['!291b406e','Klif Aegina']].map(([id,name])=>({id,name,radio:'mt',device:'active',lat:37.9846656,lon:23.724032,positionTime:1700000010000,fixTime:1700000000000,receivedAt:1700000020000,precisionBits:13,positionSource:'mt_snapshot'}));
    onMapData({nodes:rows});clearMapFilters();
   });
   assert.equal(await page.evaluate(()=>mapMarkers.length),1);
@@ -28,7 +28,7 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
   assert.match(text,/Coordinates: 37\.9846656, 23\.724032/);
   assert.match(text,/Position report:.*GPS fix:.*Received by this phone:/);
   assert.match(text,/2\.92 km/);
-  assert.match(text,/Klif Aegina/);assert.match(text,/KeepChilli/);assert.match(text,/Hermesh 0/);
+  assert.match(text,/Klif Aegina/);assert.match(text,/Keep Chili/);assert.match(text,/Hermesh 0/);
   const distances=await page.evaluate(()=>{
    const center=mapData.nodes[0];return mapPrecisionFeatures([center])[0].geometry.coordinates[0].slice(0,-1).map(([lon,lat])=>mapDistanceMeters(center,{lon,lat}));
   });

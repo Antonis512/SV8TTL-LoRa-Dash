@@ -398,3 +398,6 @@ button.reaction-chip { color:var(--text); cursor:pointer; font:inherit; }
 .preset-editor p { white-space:pre-wrap; overflow-wrap:anywhere; }
 
 .chat-search-toggle[aria-expanded="true"]{background:var(--accent-dim)}
+
+.unread-divider { display:flex; flex:none; align-items:center; gap:.6em; align-self:stretch; color:var(--accent, #7dbaff); font-weight:600; font-size:.85em; }
+.unread-divider::before, .unread-divider::after { content:""; flex:1; border-top:1px solid currentColor; }

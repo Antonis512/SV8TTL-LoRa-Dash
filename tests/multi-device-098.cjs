@@ -95,6 +95,40 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
   await page.setViewportSize({width:320,height:640});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:'build/my-nodes-layout.png'});
+  await page.evaluate(()=>{
+   showSettingsPage('sounds');
+   document.querySelector('#geofence-sound-choice button').click();
+   document.querySelector('#geofence-audio').click();
+  });
+  assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c[0]==="pickSound"||c[0]==="setGeofenceAudioEnabled").slice(-2)),[['pickSound','geofence'],['setGeofenceAudioEnabled',true]]);
+  await page.evaluate(()=>{
+   const r=fixture.left;
+   window.historyRows=Array.from({length:205},(_,i)=>({id:i+1,receivedAt:i+1,sender:'Alice',text:'Message '+(i+1),unread:i>=2}));
+   r.chats[1]=historyRows.slice(-100);
+   r.historyUnread={'c:1':3,'d:!abcdef12':7};
+   r.directs['!abcdef12']=historyRows.slice(0,40);
+   onRadioState(fixture);switchTab('chat');selectChannel('left',1);
+  });
+  assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c[0]==='loadOlder').at(-1)),['loadOlder','device1','',1,106]);
+  for(const start of [5,0]){
+   await page.evaluate(start=>{
+    fixture.left.chats[1]=historyRows.slice(start);onRadioState(fixture);
+    onHistoryPage('device1','',1,start===5?100:5);
+   },start);
+  }
+  async function checkDivider(host,text){
+   const divider=page.locator(host+' .unread-divider');
+   assert.equal(await divider.textContent(),'Unread messages');
+   assert.equal(await divider.evaluate(e=>e.nextElementSibling.querySelector('.body').textContent),text);
+   assert.ok(await divider.evaluate(e=>Math.abs(e.getBoundingClientRect().top-e.parentElement.getBoundingClientRect().top)<12));
+  }
+  await checkDivider('#chat-messages','Message 3');
+  assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c[0]==='markChannelRead').at(-1)),['markChannelRead','device1',1,205]);
+  await page.evaluate(()=>{delete fixture.left.historyUnread['c:1'];onRadioState(fixture);});
+  await checkDivider('#chat-messages','Message 3');
+  await page.evaluate(()=>selectDmPeer('left','!abcdef12'));
+  await checkDivider('#dm-chat-history','Message 7');
+  assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c[0]==='markDirectRead').at(-1)),['markDirectRead','device1','!abcdef12',40]);
   assert.deepEqual(errors,[]);console.log('Multi-device Chat and My Nodes layout/config ordering passed.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

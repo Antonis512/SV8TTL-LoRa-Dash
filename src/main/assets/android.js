@@ -60,6 +60,50 @@ let pendingUnreadDevice=null;
 let settingsPage='home';
 const historyPages=new Map();
 function historyPageKey(radio,peer,ch){return JSON.stringify([state[radio].key,peer,ch]);}
+let openHistory=null;
+function chronologicalHistory(entries){
+ return entries.slice().sort((a,b)=>(a.receivedAt||0)-(b.receivedAt||0)||(a.id||0)-(b.id||0));
+}
+function beginHistoryView(host,radio,peer,ch,entries){
+ const key=historyPageKey(radio,peer,ch);
+ if(openHistory?.key!==key)openHistory={key,anchor:0,positioned:false};
+ const view=openHistory;
+ const stored=state[radio].historyUnread?.[peer?'d:'+peer:'c:'+ch];
+ if(!view.opened){
+  view.anchor=typeof stored==='number'?stored:entries.find(m=>m.unread&&!m.reaction)?.id||0;
+  view.opened=!!(view.anchor||entries.length);
+ }
+ const top=host.scrollTop;
+ const keep=view.rendered&&host.scrollHeight-host.clientHeight-top>32;
+ view.rendered=true;
+ clear(host);
+ host.onscroll=null;
+ return {view,top,keep};
+}
+function finishHistoryView(host,context,radio,peer,ch,entries){
+ const {view,top,keep}=context;
+ const divider=host.querySelector('.unread-divider');
+ if(view.anchor&&!view.positioned){
+  if(divider){
+   host.scrollTop+=divider.getBoundingClientRect().top-host.getBoundingClientRect().top-host.clientTop;
+   view.positioned=true;
+   const through=entries.reduce((max,m)=>Math.max(max,m.id||0),0);
+   const key=state[radio].key;
+   queueMicrotask(()=>{
+    if(activeTab!=='chat'||openHistory!==view)return;
+    if(peer)AndroidBridge.markDirectRead(key,peer,through);
+    else AndroidBridge.markChannelRead(key,ch,through);
+   });
+   return;
+  }
+  // The initial history contains only the latest page of each conversation.
+  host.querySelector('.history-older:not(:disabled)')?.click();
+ }
+ host.scrollTop=keep?top:host.scrollHeight;
+}
+function insertUnreadDivider(host,view,entry){
+ if(view.anchor&&entry.id===view.anchor)host.appendChild(node('div','unread-divider','Unread messages'));
+}
 function addHistoryLoader(host,radio,peer,ch,entries){
  const key=historyPageKey(radio,peer,ch),status=historyPages.get(key);
  if(!entries.length||status?.done)return;
@@ -67,7 +111,7 @@ function addHistoryLoader(host,radio,peer,ch,entries){
  button.disabled=!!status?.loading;
  button.onclick=()=>{
   if(historyPages.get(key)?.loading)return;
-  historyPages.set(key,{loading:true,host,height:host.scrollHeight,top:host.scrollTop});
+  historyPages.set(key,{loading:true,seeking:openHistory?.anchor&&!openHistory.positioned,host,height:host.scrollHeight,top:host.scrollTop});
   button.disabled=true;button.textContent='Loading older messages…';
   AndroidBridge.loadOlder(state[radio].key,peer,ch,entries[0].id);
  };
@@ -77,9 +121,10 @@ function addHistoryLoader(host,radio,peer,ch,entries){
 window.onHistoryPage=(key,peer,ch,count)=>{
  const id=JSON.stringify([key,peer,ch]),saved=historyPages.get(id);
  const done=count>=0&&count<100;historyPages.set(id,{done});
- const current=peer?(dmSelection.peer===peer&&state?.[dmSelection.radio]?.key===key):(state?.[network]?.key===key&&channel[network]===ch);
- if(saved?.host&&current){if(count>=0)saved.host.scrollTop=saved.top+saved.host.scrollHeight-saved.height;
-  const button=saved.host.querySelector('.history-older');if(button){button.disabled=false;button.textContent='Load older messages';if(done)button.remove();}}
+ const current=activeTab==='chat'&&openHistory?.key===id&&(peer?(dmSelection.peer===peer&&state?.[dmSelection.radio]?.key===key):(state?.[network]?.key===key&&channel[network]===ch));
+ if(saved?.host&&current){if(count>=0&&!saved.seeking)saved.host.scrollTop=saved.top+saved.host.scrollHeight-saved.height;
+  const button=saved.host.querySelector('.history-older');if(button){button.disabled=false;button.textContent='Load older messages';if(done)button.remove();}
+  if(count>0&&!done&&openHistory.anchor&&!openHistory.positioned)renderChat();}
 };
 let usersListVisible={left:true,right:true};
 let chatFontStep=0, composerFontStep=0;
@@ -159,6 +204,7 @@ function appendLinkedText(container, text) {
 }
 function switchTab(tab) {
   if(tab!=='map'&&activeTab==='map')window.cancelMarkPosition?.();
+  if(tab!==activeTab)openHistory=null;
   activeTab=tab;
   AndroidBridge.contactsActive(tab==='contacts');
   AndroidBridge.mapActive?.(tab==='map');
@@ -304,8 +350,7 @@ function setNetwork(id) {
   dmMode=false;
   if(state && state[id].channels.length &&
       !state[id].channels.some(c=>c.index===channel[id])) channel[id]=state[id].channels[0].index;
-  if(state && state[id].connected && state[id].channels.some(c=>c.index===channel[id]))
-    AndroidBridge.markChannelRead(id,channel[id]);
+  openHistory=null;
   renderChat();
 }
 function chooseConversation(value) {
@@ -320,7 +365,7 @@ function openChannelsScreen() {
 }
 function selectChannel(radio,index) {
   radio=chatSlot(radio);network=radio; channel[radio]=index; dmMode=false;
-  AndroidBridge.markChannelRead(radio,index);
+  openHistory=null;
   renderChat();
 }
 function renderDeviceSelector(slot) {
@@ -360,7 +405,7 @@ function conversationUnread(radio,peer,ch){
  return (peer?device.directs[peer]||[]:device.chats[String(ch)]||[]).some(m=>m.unread);
 }
 function openDmScreen(saved=false) {
-  closeSideZoom();if(!state)return;dmMode=true;savedDmMode=saved;
+  closeSideZoom();if(!state)return;openHistory=null;dmMode=true;savedDmMode=saved;
   if(saved)usersListVisible={left:true,right:true};
   renderChat();
 }
@@ -380,7 +425,7 @@ function selectDmPeer(radio,peer) {
   el('dm-input').value=dmDrafts.get(dmDraftKey(radio,peer))||'';
   resizeComposer(el('dm-input'));
   network=radio;
-  AndroidBridge.markDirectRead(radio,peer);
+  openHistory=null;
   renderChat();
 }
 function replyDm() {
@@ -455,9 +500,10 @@ function renderDmSide(radio) {
 }
 function renderDmScreen() {
   renderDmSide('left'); renderDmSide('right');
-  const history=el('dm-chat-history'); clear(history);
+  const history=el('dm-chat-history');
   const {radio,peer}=dmSelection;
   if(!radio || !peer) {
+    clear(history);openHistory=null;
     resetMessageSearch('dm');
     el('dm-chat-title').textContent='Choose a contact';
     history.appendChild(node('div','empty-panel','Select a name to view direct messages.'));
@@ -467,10 +513,12 @@ function renderDmScreen() {
     return;
   }
   el('dm-chat-title').textContent=dmName(radio,peer)+' · '+radioLabel(radio);
-  const entries=state[radio].directs[peer]||[];
+  const entries=chronologicalHistory(state[radio].directs[peer]||[]);
   ensureMessageSearch('dm',radioType(radio),state[radio].ownId,peer,-1,entries.length);
+  const context=beginHistoryView(history,radio,peer,-1,entries);
   addHistoryLoader(history,radio,peer,-1,entries);
   for(const entry of entries.filter(item=>!item.reaction)) {
+    insertUnreadDivider(history,context.view,entry);
     const bubble=node('div','android-msg'+(entry.own?' own':''));
     appendMessageMeta(bubble,radio,entry); 
     const body=node('div','body'); appendLinkedText(body,entry.text); bubble.appendChild(body);
@@ -487,7 +535,7 @@ function renderDmScreen() {
   el('dm-reply').disabled=!canReply; el('dm-input').disabled=false;
   updateMessageBudget(el('dm-input'));
   el('dm-input').placeholder=canReply?'Direct message…':!state[radio].connected?'Reconnect this radio in Config to send':'Wait for this contact to load';
-  if(!searching)history.scrollTop=history.scrollHeight;
+  if(!searching&&activeTab==='chat')finishHistoryView(history,context,radio,peer,-1,entries);
 }
 function setNodeFilter(id) {
   nodeFilter = id;
@@ -615,10 +663,12 @@ function renderSoundConfig() {
   el('sound-mode').value=mode;
   const host=el('sound-choices'); clear(host);
   const disconnectHost=el('disconnect-sound-choice');clear(disconnectHost);
+  const geofenceHost=el('geofence-sound-choice');clear(geofenceHost);
+  el('geofence-audio').checked=!!state.geofenceAudioEnabled;
   el('disconnect-audio').checked=state.disconnectAudioEnabled!==false;
-  for(const kind of [...(mode==='shared'?['shared']:['mc','mt','dm']),'disconnect']) {
+  for(const kind of [...(mode==='shared'?['shared']:['mc','mt','dm']),'disconnect','geofence']) {
     const row=node('div','sound-row');
-    row.appendChild(node('strong','',kind==='disconnect'?'Device disconnected':kind==='shared'?'All messages':kind.toUpperCase()));
+    row.appendChild(node('strong','',kind==='geofence'?'Geofence alert':kind==='disconnect'?'Device disconnected':kind==='shared'?'All messages':kind.toUpperCase()));
     const choose=node('button','',state.sound[kind]?.selected?'Change system sound':'Select system sound');
     choose.onclick=()=>AndroidBridge.pickSound(kind); row.appendChild(choose);
     const label=node('label','',' Play ');
@@ -626,7 +676,7 @@ function renderSoundConfig() {
     for(let i=1;i<=3;i++){const option=node('option','',i+' time'+(i>1?'s':''));option.value=i;repeats.appendChild(option);}
     repeats.value=String(state.sound[kind]?.repeats||1);
     repeats.onchange=()=>AndroidBridge.setSoundRepeats(kind,Number(repeats.value));
-    label.append(repeats); row.appendChild(label); (kind==='disconnect'?disconnectHost:host).appendChild(row);
+    label.append(repeats); row.appendChild(label); (kind==='geofence'?geofenceHost:kind==='disconnect'?disconnectHost:host).appendChild(row);
   }
 }
 function renderChat() {
@@ -726,12 +776,14 @@ function renderChannelsScreen() {
   const selectedChannel=radio.channels.find(c=>c.index===channel[network]);
   el('channel-chat-title').textContent=(selectedChannel?selectedChannel.name:'Choose a channel')+
     ' · '+radioLabel(network)+(radio.ownName?' · '+radio.ownName:'');
-  const messages = el('chat-messages'); clear(messages);
-  const entries=selectedChannel?radio.chats[String(channel[network])]||[]:[];
+  const messages = el('chat-messages');
+  const entries=selectedChannel?chronologicalHistory(radio.chats[String(channel[network])]||[]):[];
   if(selectedChannel)ensureMessageSearch('channel',radioType(network),radio.ownId,'',channel[network],entries.length);
   else resetMessageSearch('channel');
+  const context=beginHistoryView(messages,network,'',channel[network],entries);
   if(selectedChannel)addHistoryLoader(messages,network,'',channel[network],entries);
   for (const entry of entries.filter(item=>!item.reaction)) {
+    insertUnreadDivider(messages,context.view,entry);
     const bubble = node('div', 'android-msg' + (entry.own ? ' own' : ''));
     appendMessageMeta(bubble,network,entry,true);
     const body = node('div', 'body');
@@ -767,7 +819,7 @@ function renderChannelsScreen() {
   el('chat-input').disabled = false;
   el('chat-send').disabled = !canSend;
   updateMessageBudget(el('chat-input'));
-  messages.scrollTop = messages.scrollHeight;
+  if(!searching&&selectedChannel&&activeTab==='chat')finishHistoryView(messages,context,network,'',channel[network],entries);
   renderReplyPreview();
 }
 function renderMyNodes() {
@@ -975,10 +1027,6 @@ window.onRadioState = function (next) {
     el('dm-chat-status').textContent='';
   }
   const initial=state===null;
-  const scrollPositions=['chat-messages','dm-chat-history'].map(id=>{
-    const e=el(id);return {e,top:e.scrollTop,keep:e.scrollHeight-e.clientHeight-e.scrollTop>32};
-  });
-  const previousChatKey=state?.[network]?.key;
   if(state&&['left','right'].some(slot=>state[slot]?.historyRevision!==next[slot]?.historyRevision))historyPages.clear();
   state = next;
   mtTracerouteReadyAt=performance.now()+Math.max(0,Number(next.mtTracerouteCooldownMs)||0);
@@ -1025,7 +1073,6 @@ window.onRadioState = function (next) {
   el('hdr-radio-name').textContent = next.devices.length+' connected';
   el('nav-chat').classList.toggle('unread',next.myNodes.some(item=>item.unread));
   renderActiveRadioViews();
-  if(previousChatKey===state[network]?.key) for(const saved of scrollPositions) if(saved.keep)saved.e.scrollTop=saved.top;
 };
 window.onScanProgress = function (id, value) {
   el(id + '-progress').value = value;

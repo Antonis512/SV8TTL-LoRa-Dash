@@ -1,5 +1,9 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 11 November 2026 — 0.10.28 publication
+
+The user authorized building and publishing the synchronized cloud changes and local Bluetooth activation, geofence sound and unread-message navigation fixes. These local changes are independently authored. Existing attribution and dependency notices are retained. This build uses the original local debug signing configuration and application ID. Production signing and replacement licensing remain undecided. Physical radio and phone validation remain pending.
+
 ## 10 November 2026 — map precision, provenance and overlapping nodes
 
 Position decoding/storage policy, schema migration, geographic uncertainty circles and selectable marker stacks are locally authored using the protocol facts and references recorded in `MAP-COMPARISON-2026-11-10.md`. Meshtastic Android and firmware were consulted for sharing precision, same-cell coordinate preservation and timestamp meanings; official MeshCore protocol/library sources were consulted for advertised coordinates. No official application implementation or assets were copied into the product. Existing notices, application ID, signing configuration and bundled map attribution are retained. See `MAP-FIXES-2026-11-10.md` for validation and limitations. No APK was built or published for these changes.

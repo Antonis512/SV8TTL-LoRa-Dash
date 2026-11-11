@@ -9,8 +9,8 @@ android {
         applicationId 'org.overmesh.android'
         minSdk 26
         targetSdk 36
-        versionCode 54
-        versionName '0.10.27'
+        versionCode 55
+        versionName '0.10.28'
         testInstrumentationRunner 'org.overmesh.android.HistoryInstrumentation'
     }
     compileOptions {

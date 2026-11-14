@@ -24,7 +24,10 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
   assert.equal(await page.evaluate(()=>mapMarkers[0].element.getAttribute('aria-label')),'3 nodes at this location');
   assert.equal(await page.evaluate(()=>getComputedStyle(mapMarkers[0].element).width),'28px');
   assert.equal(await page.evaluate(()=>sources.get('map-position-precision').data.features.length),1);
-  const text=await page.evaluate(()=>mapMarkers[0].getPopup().el.textContent);
+  await page.evaluate(()=>mapMarkers[0].element.click());
+  assert.equal(await page.locator('#map-node-dialog').evaluate(dialog=>dialog.open),true);
+  const text=await page.locator('#map-node-group').textContent();
+  await page.getByRole('button',{name:'Close node list'}).click();
   assert.match(text,/Coordinates: 37\.9846656, 23\.724032/);
   assert.match(text,/Position report:.*GPS fix:.*Received by this phone:/);
   assert.match(text,/2\.92 km/);
@@ -58,6 +61,15 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
   await page.evaluate(()=>{onMapData({nodes:[...rows,{...rows[0],device:'other',lat:39,lon:24,fixTime:1700000030000}]});document.getElementById('map-device').value='mt:active';renderMap();});
   assert(await page.evaluate(()=>mapFilterRows().every(row=>row.device==='active')));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.evaluate(()=>{
+   const group=Array.from({length:32},(_,i)=>({...rows[0],id:'node-'+i,name:'Station '+i}));
+   showMapNodeGroup(group);
+  });
+  const group=page.locator('#map-node-group');
+  assert(await group.evaluate(e=>e.scrollHeight>e.clientHeight));
+  await group.locator('summary').last().click();
+  assert(await group.locator('details').last().evaluate(e=>e.open));
+  await page.getByRole('button',{name:'Close node list'}).click();
   assert.deepEqual(errors,[]);
   console.log('Map position UI passed: geographic stacks, exact node/receiver selection, precision radii/toggle, timestamps, stale caches, signed/date-line geometry and no MC uncertainty inference');
  }finally{await browser.close();}

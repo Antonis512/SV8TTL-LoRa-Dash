@@ -1,6 +1,12 @@
 'use strict';
 let mapData={nodes:[],positions:[],heard:[],items:[],packs:[]};
 let mapView=null,mapMarkers=[],mapToolName='passive',mapDrawing=null,mapDraft=[],mapMode='online',mapLayerKind='street',mapPackId='',mapFocus=null,mapStyleKey='';
+let draftClosed=false,draftHandles=[],draftSaveId=null,mapStyleReady=false;
+const hiddenFences=new Set();
+try {
+  for(const id of JSON.parse(localStorage.getItem('map-hidden-fences')||'[]'))hiddenFences.add(id);
+} catch(unavailable){}
+let singleNodePopup=null;
 let mapSelected=null,mapFocusWaiting=false,mapAlertPin=null;
 let mapProtocol=null,mapDisplayStyle='full';
 const mapUrl=id=>location.origin+'/packs/'+id+'.pmtiles';
@@ -42,9 +48,16 @@ function initMap(){
     mapNotice((mapMode==='offline'?'Offline':'Online')+' map could not load: '+detail,true);
   });
   mapView.on('load',()=>renderMap());
-  mapView.on('zoomend',()=>renderMap());
-  mapView.on('style.load',()=>{drawMapItems();renderMap();});
-  mapView.on('click',event=>{if(!mapDrawing)return;mapDraft.push([Number(event.lngLat.lng.toFixed(6)),Number(event.lngLat.lat.toFixed(6))]);drawMapItems();mapNotice(mapDraft.length+' point'+(mapDraft.length===1?'':'s')+' chosen. Tap again, then Save.');});
+  mapView.on('style.load',()=>{mapStyleReady=true;renderMap();});
+  mapView.on('click',event=>{
+    if(!mapDrawing||event.originalEvent?.target?.closest?.('.map-draft-handle'))return;
+    if(mapDrawing==='geofence'&&insertFenceMidpoint(event.point))return;
+    if(draftClosed)return;
+    const point=event.lngLat.wrap();
+    mapDraft.push([point.lng,point.lat]);
+    refreshDraft();
+    mapNotice(mapDrawing==='geofence'?'Tap another corner or tap the first circle to close the fence.':mapDraft.length+' points chosen.');
+  });
 }
 window.mapShown=()=>{initMap();setTimeout(()=>mapView?.resize(),40);};
 function activePack(){return mapData.packs.find(p=>p.id===mapPackId&&p.kind===mapLayerKind)||mapData.packs.find(p=>p.kind===mapLayerKind)||null;}
@@ -89,7 +102,7 @@ function setMapStyle(preserveView=false){
     style.layers.push({id:'satellite',type:'raster',source:'imagery'});
   }
   if(pack?.kind==='street'&&pack.schema==='shortbread'&&mapDisplayStyle==='full')style.layers=fullShortbreadLayers();
-  mapView.setStyle(style);
+  mapStyleReady=false;mapView.setStyle(style);
   el('map-empty-pack').hidden=mapMode==='online'||!!pack;
   el('map-source').textContent=mapMode==='online'?'Online map · © OpenStreetMap contributors':pack?'Offline map: '+pack.title+' · '+(pack.kind==='street'?'© OpenStreetMap contributors · ':'Imagery: ')+(pack.source||pack.schema)+(pack.captureDate?' · captured '+pack.captureDate:'')+(pack.requestedRange?' · requested '+pack.requestedRange:'')+' · native zoom '+pack.maxZoom:'No offline map selected';
   if(!preserveView&&mapMode==='offline'&&pack?.bounds?.length===4&&!mapFocus){const [west,south,east,north]=pack.bounds;if(east>west&&north>south)setTimeout(()=>mapView?.fitBounds([[west,south],[east,north]],{padding:35,maxZoom:Math.min(11,pack.maxZoom||11)}),80);}
@@ -108,6 +121,9 @@ window.onMapData=data=>{
     el('map-from').value='';el('map-to').value='';
     el('map-network').value=mapFocus.radio;
     if(mapFocus.device)el('map-device').value=mapFocus.radio+':'+mapFocus.device;
+  }
+  if(draftSaveId&&mapData.items.some(item=>item.id===draftSaveId)){
+    resetDraft();mapNotice('Map item saved.');
   }
   renderGeofenceHistory();
   initMap();setMapMode(mapMode);renderMap();renderMapItems();el('map-send-mark')?.refreshTargets?.();
@@ -196,7 +212,8 @@ function mapPrecisionFeatures(rows){
   });
 }
 function drawMapPrecision(rows){
-  if(!mapView?.isStyleLoaded())return;
+  // The style can accept overlays while its basemap tiles are still loading.
+  if(!mapView||(!mapStyleReady&&!mapView.isStyleLoaded()))return;
   const data={type:'FeatureCollection',features:el('map-show-precision')?.checked===false?[]:mapPrecisionFeatures(rows)};
   const source=mapView.getSource('map-position-precision');
   if(source)source.setData(data);else mapView.addSource('map-position-precision',{type:'geojson',data});
@@ -212,9 +229,20 @@ function renderMap(){
     const n=members.find(item=>mapSelected&&sameMapNode(item,mapSelected))||members.find(item=>item.id===item.device)||members[0];
     const dot=mapText('span',members.length>1?String(members.length):'',`map-node-dot ${n.radio}${members.length>1?' map-node-stack':''}${!mapPositionTime(n)?' undated':Date.now()-mapPositionTime(n)>86400000?' old':''}`);
     dot.setAttribute('aria-label',members.length>1?members.length+' nodes at this location':n.name||n.id);
-    const popup=mapNodePopup(n,placed,members);
-    const marker=new maplibregl.Marker({element:dot}).setLngLat([n.lon,n.lat]).setPopup(new maplibregl.Popup({offset:15}).setDOMContent(popup)).addTo(mapView);mapMarkers.push(marker);
-    if(mapSelected&&members.some(item=>sameMapNode(item,mapSelected)))marker.togglePopup();
+    const marker=new maplibregl.Marker({element:dot}).setLngLat([n.lon,n.lat]).addTo(mapView);
+    mapMarkers.push(marker);
+    dot.tabIndex=0;dot.setAttribute('role','button');
+    dot.onclick=event=>{
+      if(mapDrawing)return;
+      event.stopPropagation();
+      const nearby=nearbyMapNodes(n,placed);
+      if(nearby.length>1)showMapNodeGroup(nearby);
+      else showSingleMapNode(n);
+    };
+    dot.onkeydown=event=>{
+      if(event.key==='Enter'||event.key===' '){event.preventDefault();dot.click();}
+    };
+
   }
   drawMapPrecision(placed);
   const missing=rows.filter(n=>!mapHasPosition(n));el('map-counts').textContent=placed.length+' positioned · '+missing.length+' without position';
@@ -222,7 +250,10 @@ function renderMap(){
   if(mapFocus&&!mapFocusWaiting){
     const requested=mapFocus;mapFocus=null;
     const index=placed.findIndex(n=>sameMapNode(n,requested));
-    if(index>=0){const n=placed[index];mapSelected=n;const markerIndex=groups.findIndex(group=>group.some(item=>sameMapNode(item,n)));mapMarkers[markerIndex].setLngLat([n.lon,n.lat]).setPopup(new maplibregl.Popup({offset:15}).setDOMContent(mapNodePopup(n,placed,groups[markerIndex])));mapMarkers[markerIndex].getPopup().addTo(mapView);mapView.flyTo({center:[n.lon,n.lat],zoom:Math.max(mapView.getZoom(),13)});mapNotice('Selected '+(n.name||n.id)+' · '+n.id);}
+    if(index>=0){const n=placed[index];mapSelected=n;const nearby=nearbyMapNodes(n,placed);
+      if(nearby.length>1)showMapNodeGroup(nearby,n);
+      else showSingleMapNode(n);
+      mapView.flyTo({center:[n.lon,n.lat],zoom:Math.max(mapView.getZoom(),13)});mapNotice('Selected '+(n.name||n.id)+' · '+n.id);}
     else {mapSelected=null;mapNotice('No saved position for '+requested.id+' on this receiving device.',true);}
   }
   for(const item of mapData.items.filter(i=>i.kind==='mark'&&i.enabled)){
@@ -329,16 +360,82 @@ function renderMapPacks(){
     mapButton(row,'Remove',()=>{if(confirm('Remove '+p.title+' from this phone?'))AndroidBridge.removeMapPack(p.id);});host.appendChild(row);
   }
 }
+function resetDraft(){
+  mapDrawing=null;mapDraft=[];draftClosed=false;draftSaveId=null;
+  for(const handle of draftHandles)handle.remove();
+  draftHandles=[];
+}
+function draftGeometry(){
+  if(draftClosed||mapDrawing==='area'&&mapDraft.length>=3)
+    return {type:'Polygon',coordinates:[mapDraft.concat([mapDraft[0]])]};
+  return {type:mapDraft.length===1?'Point':'LineString',coordinates:mapDraft.length===1?mapDraft[0]:mapDraft};
+}
+function insertFenceMidpoint(tap){
+  const points=mapDraft.map(point=>mapView.project(point));
+  const edgeCount=draftClosed?points.length:points.length-1;
+  let nearest=-1,distanceLimit=12;
+  for(let i=0;i<edgeCount;i++){
+    const a=points[i],b=points[(i+1)%points.length];
+    const dx=b.x-a.x,dy=b.y-a.y,lengthSquared=dx*dx+dy*dy;
+    if(!lengthSquared)continue;
+    const along=Math.max(0,Math.min(1,((tap.x-a.x)*dx+(tap.y-a.y)*dy)/lengthSquared));
+    const distance=Math.hypot(tap.x-a.x-along*dx,tap.y-a.y-along*dy);
+    if(distance<distanceLimit){nearest=i;distanceLimit=distance;}
+  }
+  if(nearest<0)return false;
+  const a=points[nearest],b=points[(nearest+1)%points.length];
+  const midpoint=mapView.unproject([(a.x+b.x)/2,(a.y+b.y)/2]).wrap();
+  mapDraft.splice(nearest+1,0,[midpoint.lng,midpoint.lat]);
+  refreshDraft();
+  mapNotice(draftClosed?'Corner added at the midpoint. Drag its circle to adjust it.':'Corner added at the midpoint. Tap the first circle to close the fence.');
+  return true;
+}
+function refreshDraft(){
+  for(const handle of draftHandles)handle.remove();
+  draftHandles=[];
+  if(mapDrawing==='geofence')mapDraft.forEach((point,index)=>{
+    const button=mapText('button','','map-draft-handle');
+    button.type='button';
+    button.setAttribute('aria-label',index===0&&!draftClosed?'Close fence at first corner':'Corner '+(index+1));
+    button.onclick=event=>{
+      event.stopPropagation();
+      if(draftClosed||index!==0)return;
+      if(mapDraft.length<3){mapNotice('Add at least three corners before closing the fence.');return;}
+      draftClosed=true;refreshDraft();mapNotice('Fence closed. Tap an edge to add a midpoint or drag a corner, then Save.');
+    };
+    const marker=new maplibregl.Marker({element:button,draggable:draftClosed}).setLngLat(point).addTo(mapView);
+    marker.on('drag',()=>{
+      const p=marker.getLngLat().wrap();mapDraft[index]=[p.lng,p.lat];
+      mapView.getSource('map-draft')?.setData({type:'Feature',properties:{},geometry:draftGeometry()});
+    });
+    draftHandles.push(marker);
+  });
+  drawMapItems();
+}
+function setFenceVisible(id,visible){
+  if(visible)hiddenFences.delete(id);else hiddenFences.add(id);
+  try{localStorage.setItem('map-hidden-fences',JSON.stringify([...hiddenFences]));}catch(unavailable){}
+  drawMapItems();renderMapItems();
+}
+function viewMapItem(item){
+  if(!mapView)return;
+  el('offline-map').scrollIntoView({block:'center'});
+  const {type,coordinates}=item.geometry;
+  if(type==='Point'){mapView.flyTo({center:coordinates,zoom:Math.max(mapView.getZoom(),13)});return;}
+  if(item.kind==='geofence'&&hiddenFences.has(item.id))setFenceVisible(item.id,true);
+  const bounds=new maplibregl.LngLatBounds();
+  for(const point of type==='Polygon'?coordinates[0]:coordinates)bounds.extend(point);
+  mapView.fitBounds(bounds,{padding:36,maxZoom:18});
+}
 function drawMapItems(){
-  if(!mapView||!mapView.isStyleLoaded())return;
+  if(!mapView||(!mapStyleReady&&!mapView.isStyleLoaded()))return;
   for(const id of ['map-shapes-line','map-shapes-fill','map-shapes','map-draft-line','map-draft-fill','map-draft','map-radio-path-line','map-radio-path']){
     if(mapView.getLayer(id))mapView.removeLayer(id);else if(mapView.getSource(id))mapView.removeSource(id);
   }
-  const shapes=mapData.items.filter(i=>i.kind!=='mark'&&i.enabled).map(i=>({type:'Feature',properties:{title:i.title,kind:i.kind},geometry:i.geometry}));
+  const shapes=mapData.items.filter(i=>(i.kind==='geofence'?!hiddenFences.has(i.id):i.kind!=='mark'&&i.enabled)).map(i=>({type:'Feature',properties:{title:i.title,kind:i.kind},geometry:i.geometry}));
   if(shapes.length){mapView.addSource('map-shapes',{type:'geojson',data:{type:'FeatureCollection',features:shapes}});mapView.addLayer({id:'map-shapes-fill',type:'fill',source:'map-shapes',filter:['==',['geometry-type'],'Polygon'],paint:{'fill-color':'#f59e0b','fill-opacity':.15}});mapView.addLayer({id:'map-shapes-line',type:'line',source:'map-shapes',paint:{'line-color':'#f59e0b','line-width':2}});}
-  if(mapDraft.length){let coordinates=mapDraft.slice();if(mapDrawing==='geofence'&&coordinates.length>=3)coordinates=[coordinates.concat([coordinates[0]])];
-    const geometry={type:mapDrawing==='geofence'&&mapDraft.length>=3?'Polygon':mapDraft.length===1?'Point':'LineString',coordinates:mapDrawing==='geofence'&&mapDraft.length>=3?coordinates:mapDraft.length===1?coordinates[0]:coordinates};
-    mapView.addSource('map-draft',{type:'geojson',data:{type:'Feature',geometry}});
+  if(mapDraft.length){
+    mapView.addSource('map-draft',{type:'geojson',data:{type:'Feature',properties:{},geometry:draftGeometry()}});
     mapView.addLayer({id:'map-draft-fill',type:'fill',source:'map-draft',filter:['==',['geometry-type'],'Polygon'],paint:{'fill-color':'#36c5f0','fill-opacity':.2}});
     mapView.addLayer({id:'map-draft-line',type:'line',source:'map-draft',paint:{'line-color':'#36c5f0','line-width':3,'line-dasharray':[2,2]}});
   }
@@ -360,9 +457,10 @@ function drawMapItems(){
 }
 function renderMapItems(){const host=el('map-items');host.replaceChildren();if(!mapData.items.length)return;host.appendChild(mapText('h3','Saved map items'));
   for(const item of mapData.items){const row=document.createElement('div');row.className='map-item';row.appendChild(mapText('strong',item.title));row.appendChild(mapText('small',' · '+item.kind));
-    const actions=mapText('div','','map-item-actions');mapButton(actions,'View',()=>{const c=item.kind==='mark'?item.geometry.coordinates:item.geometry.type==='Polygon'?item.geometry.coordinates[0][0]:item.geometry.coordinates[0];mapView.flyTo({center:c,zoom:Math.max(mapView.getZoom(),13)});});
+    const actions=mapText('div','','map-item-actions');mapButton(actions,'View',()=>viewMapItem(item));
+    if(item.kind==='geofence')mapButton(actions,hiddenFences.has(item.id)?'Show on map':'Hide on map',()=>setFenceVisible(item.id,hiddenFences.has(item.id)));
     if(item.kind==='mark')mapButton(actions,'Send by radio',()=>{mapTool('mark');el('map-send-mark').value=item.id;});
-    if(item.kind!=='mark')mapButton(actions,item.enabled?'Turn off':'Turn on',()=>AndroidBridge.toggleMapItem(item.id,!item.enabled));
+    if(item.kind!=='mark')mapButton(actions,item.kind==='geofence'?(item.enabled?'Disable alerts':'Enable alerts'):(item.enabled?'Turn off':'Turn on'),()=>AndroidBridge.toggleMapItem(item.id,!item.enabled));
     mapButton(actions,'Save file',()=>AndroidBridge.exportMapItem(item.id));
     mapButton(actions,'Delete',()=>{if(confirm('Delete '+item.title+'?'))AndroidBridge.deleteMapItem(item.id);});row.appendChild(actions);host.appendChild(row);
   }
@@ -393,7 +491,7 @@ function markInput(host,label,type){
 }
 function mapTool(name){
   cancelMarkPosition();
-  mapToolName=name;mapDrawing=null;mapDraft=[];drawMapItems();for(const b of document.querySelectorAll('.map-tool-nav button'))b.classList.toggle('active',b.textContent===({passive:'Passive activity',active:'Ask positions',route:'Radio path',mark:'Marks',overlay:'Overlays',geofence:'Geofences'}[name]));
+  mapToolName=name;resetDraft();drawMapItems();for(const b of document.querySelectorAll('.map-tool-nav button'))b.classList.toggle('active',b.textContent===({passive:'Passive activity',active:'Ask positions',route:'Radio path',mark:'Marks',overlay:'Overlays',geofence:'Geofences'}[name]));
   const host=el('map-tool-panel');host.replaceChildren();const title={passive:'Passive activity',active:'Ask nodes for positions',route:'Radio path',mark:'Marks',overlay:'Overlays',geofence:'Geofences'}[name];host.appendChild(mapText('h3',title));
   const instruction=text=>host.appendChild(mapText('p',text));
   if(name==='passive'){
@@ -500,13 +598,15 @@ function mapTool(name){
     mark.refreshTargets=updateTargets;
     updateTargets();
   }else if(name==='overlay'||name==='geofence'){
-    instruction(name==='overlay'?'1. Choose a line or area. 2. Tap points on the map. 3. Name and save it. Share it as a file when needed.':'1. Tap at least three corners to draw an area. 2. Name and save it. 3. This phone alerts when a node reports entering or leaving. Share the area file with other phones if they need their own alerts.');
+    instruction(name==='overlay'?'1. Choose a line or area. 2. Tap points on the map. 3. Name and save it. Share it as a file when needed.':'Tap at least three corners, then tap the first circle to close the fence. Tap an edge to add a midpoint. Drag circles to adjust the boundary before saving.');
     const title=mapInput(host,'Name');const desc=mapInput(host,'Description');const shape=name==='overlay'?mapSelect(host,'Shape',[['LineString','Line'],['Polygon','Area']]):null;
-    mapButton(host,'Start drawing',()=>{mapDrawing=name==='geofence'?'geofence':shape.value==='Polygon'?'geofence':'overlay';mapDraft=[];mapNotice('Tap corners on the map, then Save.');});
-    mapButton(host,'Undo last point',()=>{mapDraft.pop();drawMapItems();});
+    mapButton(host,'Start drawing',()=>{resetDraft();mapDrawing=name==='geofence'?'geofence':shape.value==='Polygon'?'area':'overlay';refreshDraft();el('offline-map').scrollIntoView({block:'center'});mapNotice('Tap the map to place corners.');});
+    mapButton(host,'Undo last point',()=>{if(draftClosed)draftClosed=false;else mapDraft.pop();refreshDraft();});
     mapButton(host,'Save',()=>{const polygon=name==='geofence'||shape.value==='Polygon',needed=polygon?3:2;if(!title.value.trim()||mapDraft.length<needed){mapNotice('Enter a name and tap at least '+needed+' points.');return;}
+      if(name==='geofence'&&!draftClosed){mapNotice('Tap the first circle to close the fence before saving.');return;}
+      draftSaveId=draftSaveId||crypto.randomUUID();
       const geometry=polygon?{type:'Polygon',coordinates:[mapDraft.concat([mapDraft[0]])]}:{type:'LineString',coordinates:mapDraft};
-      AndroidBridge.saveMapItem(JSON.stringify({id:crypto.randomUUID(),kind:name,title:title.value.trim(),description:desc.value.trim(),geometry,enabled:true,created:Date.now(),edited:Date.now()}));mapDrawing=null;mapDraft=[];drawMapItems();});
+      AndroidBridge.saveMapItem(JSON.stringify({id:draftSaveId,kind:name,title:title.value.trim(),description:desc.value.trim(),geometry,enabled:true,created:Date.now(),edited:Date.now()}));});
     mapButton(host,'Import shared map item',()=>AndroidBridge.importMapItem());
   }
 }
@@ -514,7 +614,34 @@ mapTool('passive');
 try{el('map-show-precision').checked=localStorage.getItem('map-show-precision')!=='false';}catch(unavailable){}
 
 function sameMapNode(a,b){return a.radio===b.radio&&a.id===b.id&&(!b.device||a.device===b.device);}
-function mapNodePopup(n,placed,members=[]){
+function nearbyMapNodes(node,placed){
+  const point=mapView.project([node.lon,node.lat]);
+  return placed.filter(other=>{
+    if(other.radio===node.radio&&mapDistanceMeters(node,other)<5)return true;
+    const p=mapView.project([other.lon,other.lat]);
+    return Math.hypot(p.x-point.x,p.y-point.y)<32;
+  });
+}
+function showSingleMapNode(n){
+  singleNodePopup?.remove();
+  singleNodePopup=new maplibregl.Popup({offset:15}).setLngLat([n.lon,n.lat]).setDOMContent(mapNodePopup(n)).addTo(mapView);
+}
+function showMapNodeGroup(nodes,selected){
+  singleNodePopup?.remove();
+  const dialog=el('map-node-dialog'),list=el('map-node-group');
+  el('map-node-heading').textContent=nodes.length+' nodes at this location';
+  list.replaceChildren();
+  for(const n of nodes){
+    const details=document.createElement('details'),summary=document.createElement('summary');
+    summary.append(mapText('strong',n.name||n.id),mapText('small',n.radio.toUpperCase()+' · '+n.id));
+    details.append(summary,mapNodePopup(n));details.open=!!selected&&sameMapNode(n,selected);
+    list.appendChild(details);
+  }
+  if(!dialog.open)dialog.showModal();
+  list.scrollTop=0;
+  list.querySelector('details[open]')?.scrollIntoView({block:'nearest'});
+}
+function mapNodePopup(n){
   const popup=document.createElement('div');
   popup.appendChild(mapText('strong',n.name||n.id));
   popup.appendChild(mapText('div',n.radio.toUpperCase()+' · '+n.id));
@@ -533,13 +660,10 @@ function mapNodePopup(n,placed,members=[]){
     n.radio==='mc'?'Advertised location (may be manually configured)':n.precisionBits===32?'Full shared precision':n.precisionBits>0?'Reported sharing precision: '+n.precisionBits+' bits':'Position precision not reported'));
   if(n.positionSource==='mt_preserved')popup.appendChild(mapText('div','Previously known precise position retained within the newly reported approximate area.'));
   if(!time)popup.appendChild(mapText('div','The age of these coordinates is unknown.'));
-  mapButton(popup,'Show saved positions',()=>showMapTrail(n));
-  const point=mapView.project([n.lon,n.lat]);
-  const nearby=members.length>1?members:placed.filter(other=>{const p=mapView.project([other.lon,other.lat]);return Math.hypot(p.x-point.x,p.y-point.y)<32;});
-  if(nearby.length>1){
-    popup.appendChild(mapText('div',nearby.length+' nodes at or near this point:'));
-    for(const other of nearby)mapButton(popup,(other.name||other.id)+' · '+other.id,()=>openMapNode(other.radio,other.id,other.device));
-  }
+  mapButton(popup,'Show saved positions',()=>{
+    if(el('map-node-dialog').open)el('map-node-dialog').close();
+    showMapTrail(n);
+  });
   return popup;
 }
 window.openGeofenceHistory=()=>{

@@ -31,6 +31,25 @@ const server = http.createServer((request,response) => {
     ],positions:[],heard:[],items:[],packs:[]}); });
     await page.waitForFunction(() => !!mapView?.getSource('openstreetmap'));
     await page.waitForFunction(() => !!mapView?.getLayer('map-position-precision-fill'));
+    // Measure the rendered fill boundary for the same 2.92 km report at two zooms.
+    const widths=[];
+    for(const zoom of [10,11]){
+      await page.evaluate(z=>mapView.jumpTo({center:[23.72,37.98],zoom:z}),zoom);
+      await page.waitForFunction(()=>mapView.queryRenderedFeatures(mapView.project([23.72,37.98]),{layers:['map-position-precision-fill']}).length>0);
+      const edge=await page.evaluate(()=>{
+        const center=mapView.project([23.72,37.98]);
+        for(let dx=1;dx<190;dx++){
+          const point=[center.x+dx,center.y];
+          if(!mapView.queryRenderedFeatures(point,{layers:['map-position-precision-fill']}).length){
+            const boundary=mapView.unproject(point);
+            return {dx,meters:mapDistanceMeters({lat:37.98,lon:23.72},{lat:boundary.lat,lon:boundary.lng})};
+          }
+        }
+      });
+      assert(edge&&Math.abs(edge.meters-2918)<100,JSON.stringify(edge));
+      widths.push(edge.dx);
+    }
+    assert(Math.abs(widths[1]-2*widths[0])<=2,JSON.stringify(widths));
     assert.equal(await page.locator('#map-role optgroup').count(),2);
     assert.equal(await page.locator('#map-role option[value="mc:User"]').innerText(),'MC · Companion');
     await page.locator('#map-role').selectOption('mc:User');

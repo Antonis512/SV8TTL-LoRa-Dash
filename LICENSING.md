@@ -1,5 +1,9 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 12 November 2026 — 0.10.31
+
+Member mode, its translations, and the Chat, notification, and map changes are locally authored. The battery display interprets fields documented in [Meshtastic DeviceMetrics](https://github.com/meshtastic/protobufs/blob/master/meshtastic/telemetry.proto) and the [MeshCore companion battery response](https://github.com/meshcore-dev/MeshCore/blob/main/examples/companion_radio/MyMesh.cpp). The Android update uses the existing application ID and debug signing certificate.
+
 ## 11 November 2026 — 0.10.29
 
 The connected-radio statistics and Chat changes are independently authored. The implementation follows the field definitions and behavior in the [Meshtastic Android widget](https://github.com/meshtastic/Meshtastic-Android/blob/main/feature/widget/src/main/kotlin/org/meshtastic/feature/widget/LocalStatsWidgetState.kt) and [MeshCore companion firmware](https://github.com/meshcore-dev/MeshCore/blob/main/examples/companion_radio/MyMesh.cpp).

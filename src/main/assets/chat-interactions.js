@@ -66,13 +66,13 @@ function dialogAction(card,label,action) {
 }
 function cancelDialog(card) {dialogAction(card,'Cancel',()=>el('dm-context').hidden=true);}
 
-function messageIdentity(radio,message) {
-  if(message.own) return {name:state[radio].ownName||'You',id:null,text:message.text};
-  const exact=state[radio].nodes.find(item=>item.id===message.sender);
+function messageIdentity(radio,message,device=state[radio]) {
+  if(message.own) return {name:device.ownName||'You',id:null,text:message.text};
+  const exact=device.nodes.find(item=>item.id===message.sender);
   if(exact) return {name:exact.name||exact.id,id:exact.id,text:message.text};
-  if(radioType(radio)==='mc'&&message.sender==='MeshCore') {
+  if((device.radio||radioType(radio))==='mc'&&message.sender==='MeshCore') {
     // Channel packets carry a display-name prefix, not a public key. Never guess between duplicate names.
-    const matches=state[radio].nodes.filter(item=>item.name&&message.text.startsWith(item.name+': '));
+    const matches=device.nodes.filter(item=>item.name&&message.text.startsWith(item.name+': '));
     const longest=matches.reduce((n,item)=>Math.max(n,item.name.length),0);
     const candidates=matches.filter(item=>item.name.length===longest);
     if(candidates.length===1) return {name:candidates[0].name,id:candidates[0].id,text:message.text.slice(longest+2)};

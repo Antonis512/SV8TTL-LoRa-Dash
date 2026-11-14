@@ -31,7 +31,7 @@ window.resetContactPreferences=()=>{contactPrefsLoaded=false;AndroidBridge.loadC
 window.onContactsData=data=>{
   contactItems=Array.isArray(data.items)?data.items:[];
   if(!contactPrefsLoaded){contactView={...contactView,...data.view};contactPrefsLoaded=true;el('contacts-search').value=contactView.query;el('contacts-favorites').checked=contactView.favorites;el('contacts-sort').value=contactView.sort;el('contacts-network').value=contactView.network;}
-  renderContacts();
+  renderContacts();window.memberContactsChanged?.();
   if(el('contacts-dialog').open)contactPickerRefresh?.();
 };
 window.onContactNodes=radios=>{contactRadios=radios||[];installContactRadios();if(activeTab==='contacts')renderContacts();};

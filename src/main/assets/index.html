@@ -21,6 +21,23 @@
 </div>
 
 <main id="tab-chat" class="tab-panel">
+  <section id="member-chat" hidden>
+    <div id="member-controls"><div class="member-languages"><span data-member-text="translate"></span><button type="button" lang="en" aria-label="English" onclick="memberLanguage('en')">🇬🇧</button><button type="button" lang="el" aria-label="Ελληνικά" onclick="memberLanguage('el')">🇬🇷</button></div>
+    <button id="member-connect" onclick="connectAllAvailable()" data-member-text="connect"></button>
+    <label><span data-member-text="device"></span><select id="member-radio" onchange="memberChangeRadio()"></select></label>
+    <p class="help" data-member-text="singleDestination"></p>
+    <label class="member-check"><input id="member-use-channel" type="radio" name="member-route" onchange="memberChangeRoutes()"><span data-member-text="channels"></span></label>
+    <div id="member-channel-list"></div>
+    <label class="member-check"><input id="member-use-dm" type="radio" name="member-route" onchange="memberToggleDM()"><span data-member-text="dm"></span></label>
+    <button id="member-pick" onclick="openMemberRecipients()"></button>
+    </div>
+    <h3 id="member-history-heading" data-member-text="history"></h3><div id="member-history" role="region" aria-labelledby="member-history-heading" tabindex="0"></div>
+    <div id="member-composer"><div id="member-reply-info"></div>
+    <label><span data-member-text="message"></span><textarea id="member-input" rows="2" oninput="memberBudget()"></textarea></label>
+    <select id="member-template" onchange="memberUseTemplate()"></select>
+    <div id="member-budget" role="status"></div><button id="member-send" data-member-text="send" onclick="sendMember()"></button>
+    <div id="member-result" role="status"></div></div>
+  </section>
   <div id="chat-header-bar">
     <div class="chat-header-network"><button id="header-mc-pill" class="cpill" onclick="setNetwork('left')"></button><select id="chat-mc-device" class="header-channel" aria-label="Left chat device" onchange="selectChatDevice('left',this.value)"></select></div>
     <div id="chat-mode-group"><button id="chat-dm-pill" class="cpill" onclick="openDmScreen()">DM</button><button id="chat-channels-pill" class="cpill" onclick="openChannelsScreen()">Channels</button></div>
@@ -128,6 +145,10 @@
   <section id="map-tool-panel" aria-live="polite"></section>
   <div id="map-items"></div>
 </main>
+<dialog id="map-node-dialog" class="log-dialog map-dialog" aria-labelledby="map-node-heading">
+  <div class="log-dialog-head"><h2 id="map-node-heading">Nodes at this location</h2><button type="button" aria-label="Close node list" onclick="this.closest('dialog').close()">×</button></div>
+  <div class="log-dialog-body" id="map-node-group"></div>
+</dialog>
 <dialog id="map-alerts-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><h2>Geofence alerts</h2><button type="button" aria-label="Close geofence alerts" onclick="el('map-alerts-dialog').close()">×</button></div><div class="log-dialog-body" id="map-alerts-list"></div></dialog>
 <dialog id="map-offline-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><h2>Offline maps</h2><button type="button" aria-label="Close Offline maps" onclick="el('map-offline-dialog').close()">×</button></div><div class="log-dialog-body map-offline-choices"><button type="button" onclick="openInstalledMaps()"><strong>Installed maps</strong><span>Choose a map already on this phone.</span></button><button type="button" onclick="openMapImport()"><strong>Import maps</strong><span>Add a BBBike pack or download a Copernicus area.</span></button><button type="button" onclick="openMapDisplayStyle()"><strong>Map Display Style</strong><span>Choose Full or Dark for offline vector maps.</span></button></div></dialog>
 <dialog id="map-style-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><button type="button" aria-label="Back to Offline maps" onclick="backToOfflineMaps('map-style-dialog')">←</button><h2>Map Display Style</h2><button type="button" aria-label="Close Map Display Style" onclick="el('map-style-dialog').close()">×</button></div><div class="log-dialog-body map-style-choices"><label><input type="radio" name="map-display-style" value="full" onchange="setMapDisplayStyle(this.value)"><span><strong>Full</strong><small>Colorful land use, water, roads, buildings and labels.</small></span></label><label><input type="radio" name="map-display-style" value="dark" onchange="setMapDisplayStyle(this.value)"><span><strong>Dark</strong><small>The original dark map style.</small></span></label><p>Applies to offline vector maps. Satellite imagery keeps its original colors.</p></div></dialog>
@@ -197,12 +218,19 @@
     </div>
     <div id="settings-home">
     <div class="settings-shortcuts">
+      <button id="config-connect-all" type="button" onclick="showSettingsPage('nodes')"><strong>Connect All Available</strong></button>
+      <h2>Radios</h2>
       <button type="button" onclick="showSettingsPage('nodes')"><strong>My Nodes</strong><span>Connect and manage known radios</span></button>
       <button type="button" onclick="showSettingsPage('connections')"><strong>Add Radio Connections</strong><span>Add a radio using Bluetooth or USB</span></button>
+      <button type="button" onclick="showSettingsPage('timeouts')"><strong>Request timeouts</strong><span>Signal Quality, Ping and traceroute</span></button>
+      <h2>Messaging</h2>
       <button type="button" onclick="showSettingsPage('presets')"><strong>Message Templates</strong><span>Save messages for Chat and replies</span></button>
       <button type="button" onclick="showSettingsPage('sending')"><strong>Sending options</strong><span>Send to multiple · pause or continue a saved chain</span></button>
-      <button type="button" onclick="showSettingsPage('timeouts')"><strong>Request timeouts</strong><span>Signal Quality, Ping and traceroute</span></button>
+      <button id="member-config-button" type="button" onclick="openMemberSetup()"><strong data-member-text="mode">Untrained Member Mode</strong></button>
+      <h2>Map &amp; alerts</h2>
+      <button type="button" onclick="openGeofenceHistory()"><strong>Geofence alerts</strong><span>View recorded alerts on the map</span></button>
       <button type="button" onclick="showSettingsPage('sounds')"><strong>Notifications</strong><span>Background notifications, sounds and repeats</span></button>
+      <h2>Data &amp; app</h2>
       <button type="button" onclick="showSettingsPage('backup')"><strong>App backup</strong><span>Export or merge radios, messages, Log and templates</span></button>
       <button type="button" onclick="showSettingsPage('channel-backup')"><strong>Channel backup</strong><span>Export channel chat as CSV</span></button>
       <button type="button" onclick="AndroidBridge.exportDebugLog()"><strong>Export debug log</strong><span>App diagnostics · up to 10 MB · excludes message bodies and keys</span></button>
@@ -269,15 +297,15 @@
     </fieldset>
     </div>
     <div id="settings-my-nodes-page" class="settings-subpage" hidden>
-      <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
-      <h2>My Nodes</h2>
+      <button id="nodes-back" class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
+      <h2 id="nodes-title">My Nodes</h2>
       <div class="actions"><button id="connect-all-available" type="button" onclick="connectAllAvailable()">Connect All Available</button></div>
-      <div class="actions"><button id="disconnect-all" type="button" onclick="AndroidBridge.disconnectAll()">Disconnect All</button></div>
+      <div class="actions node-management"><button id="disconnect-all" type="button" onclick="AndroidBridge.disconnectAll()">Disconnect All</button></div>
       <div id="connect-available-status" role="status" aria-live="polite" hidden><progress aria-label="Discovering and connecting radios"></progress><span>Discovering and connecting available radios…</span></div>
-      <div id="my-nodes-list"></div><div class="actions known-actions"><button id="connect-selected" type="button" onclick="connectSelected()">Connect Selected</button><button id="disconnect-selected" type="button" onclick="disconnectSelected()">Disconnect Selected</button></div>
+      <div id="my-nodes-list"></div><div class="actions known-actions node-management"><button id="connect-selected" type="button" onclick="connectSelected()">Connect Selected</button><button id="disconnect-selected" type="button" onclick="disconnectSelected()">Disconnect Selected</button></div>
 
 
-      <div class="actions"><button onclick="AndroidBridge.chooseNodeExport()">Export node backup</button><button onclick="AndroidBridge.importNode()">Import node backup</button></div>
+      <div class="actions node-management"><button onclick="AndroidBridge.chooseNodeExport()">Export node backup</button><button onclick="AndroidBridge.importNode()">Import node backup</button></div>
     </div>
     <div id="settings-channel-backup-page" class="settings-subpage" hidden>
       <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
@@ -340,6 +368,8 @@
   <div id="preset-choice-list" class="settings-window-body"></div>
   <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('presets')">Close</button></div>
 </dialog>
+<dialog id="member-setup" class="settings-window"><div class="settings-window-header"><h2 data-member-text="mode"></h2></div><div id="member-setup-body" class="settings-window-body"></div><div class="settings-window-footer"><button onclick="saveMemberSetup()" data-member-text="save"></button><button onclick="this.closest('dialog').close()" data-member-text="cancel"></button></div></dialog>
+<dialog id="member-recipients" aria-describedby="member-recipient-help" class="settings-window" oncancel="event.preventDefault();cancelMemberRecipients()"><div class="settings-window-header"><h2 data-member-text="recipients"></h2></div><div class="settings-window-body"><p id="member-recipient-help" class="help" data-member-text="singleRecipient"></p><div id="member-people"></div></div><div class="settings-window-footer"><p id="member-recipient-warning" role="alert" hidden></p><button onclick="cancelMemberRecipients()" data-member-text="cancel"></button><button onclick="confirmMemberRecipients()" data-member-text="ok"></button></div></dialog>
 <dialog id="message-template-editor" class="settings-window"><div class="settings-window-header"><h2>Message Template</h2><button type="button" class="window-x" onclick="closeMessageTemplateEditor()">×</button></div><div class="settings-window-body"><label>Template name<input id="message-template-title" class="form-input" maxlength="200" placeholder="e.g. Status Update"></label><textarea id="message-template-text" class="form-input" rows="8" maxlength="4096" placeholder="Message text…" oninput="updateMessageTemplateBudget()"></textarea><div id="message-template-budget" class="help" aria-live="polite"></div><p id="message-template-status" class="help" role="status"></p></div><div class="settings-window-footer"><button type="button" onclick="saveMessageTemplateEditor()">Save template</button><button type="button" onclick="closeMessageTemplateEditor()">Cancel</button></div></dialog>
 <dialog id="settings-window-history" class="settings-window" aria-labelledby="settings-window-history-title">
   <div class="settings-window-header"><h2 id="settings-window-history-title">Saved messages</h2><button type="button" class="window-x" aria-label="Close Saved messages" onclick="closeSettingsWindow('history')">×</button></div>
@@ -355,7 +385,7 @@
   <button class="nav-btn" data-tab="log" onclick="switchTab('log')"><span class="nav-icon">≡</span><span>Log</span></button>
   <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')"><span class="nav-icon">⊞</span><span>Config</span></button>
 </nav>
-<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="radio-presets.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="contacts.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
+<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="radio-presets.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="contacts.js"></script><script src="member-mode.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
 </body>
 </html>
 

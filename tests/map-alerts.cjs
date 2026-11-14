@@ -22,7 +22,8 @@ await page.evaluate(()=>{
 assert.equal(await page.evaluate(()=>waitingFocus),true);
 assert.equal(await page.locator('#map-device').inputValue(),'mt:rx');
 assert.equal(await page.evaluate(()=>mapSelected.name),'First');
-assert.match(await page.evaluate(()=>mapMarkers[0].getPopup().el.textContent),/Second.*two/);
+assert.match(await page.locator('#map-node-group').textContent(),/Second.*two/);
+await page.getByRole('button',{name:'Close node list'}).click();
 assert.deepEqual(await page.evaluate(()=>lastFlight.center),[23,38]);
 await page.evaluate(()=>{fixture.nodes[0].name='Renamed';onMapData(fixture);openGeofenceHistory();});
 assert.match(await page.locator('#map-alerts-list').innerText(),/First entered Home/);

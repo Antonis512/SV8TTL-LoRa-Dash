@@ -33,6 +33,14 @@ public class ReactionProtocolSmoke {
   data=new ProtoWire.Writer().varint(1,1).bytes(2,"normal DM".getBytes(StandardCharsets.UTF_8)).build();
   packet=new ProtoWire.Writer().fixed32(1,0xabcdef12L).fixed32(2,0x12345678L).bytes(4,data).fixed32(6,101).build();
   mt.receive(new ProtoWire.Writer().bytes(2,packet).build(),events);check(directs.size()==1&&(long)directs.get(0)[4]==101,"DM packet reference preserved");
+  ProtoWire.Writer exhausted=new ProtoWire.Writer().fixed32(1,0xabcdef12L).fixed32(2,0x12345678L).bytes(4,data).varint(15,3);
+  mt.receive(new ProtoWire.Writer().bytes(2,exhausted.build()).build(),events);
+  check((int)directs.get(0)[3]==-1,"Missing legacy route stays unknown");
+  check((int)directs.get(1)[3]==3,"Omitted zero remaining limit counts all three hops");
+  byte[] modern=new ProtoWire.Writer().varint(1,1).bytes(2,new byte[]{65}).varint(9,0).build();
+  packet=new ProtoWire.Writer().fixed32(1,0xabcdef12L).fixed32(2,0x12345678L).bytes(4,modern).build();
+  mt.receive(new ProtoWire.Writer().bytes(2,packet).build(),events);
+  check((int)directs.get(2)[3]==0,"Modern zero-hop packet displays zero");
   System.out.println("Reaction protocol checks passed: Unicode, numeric restriction, channel/DM scope and packet references");
  }
 }

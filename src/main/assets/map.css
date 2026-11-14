@@ -71,3 +71,14 @@
 #tab-map #map-tool-panel .mark-input button{position:absolute;right:1px;bottom:1px;width:42px;height:40px;margin:0;border:0;background:transparent;font-size:19px}
 
 .map-alert-record{padding:12px 0;border-bottom:1px solid #53677a;overflow-wrap:anywhere}.map-alert-record button{margin:6px 6px 0 0}.maplibregl-popup-content{max-height:55vh;overflow:auto;overflow-wrap:anywhere}
+
+.map-draft-handle{z-index:2;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:transparent;touch-action:none}
+.map-draft-handle::after{content:"";display:block;width:14px;height:14px;margin:auto;border:2px solid white;border-radius:50%;background:#087691;box-shadow:0 0 0 2px #143038}
+.map-draft-handle[aria-label^="Close fence"]::after{background:#b87509}
+#map-node-dialog{width:min(94vw,32rem);max-height:86vh}
+#map-node-group{overscroll-behavior:contain;font-size:15px;line-height:1.5;overflow-wrap:anywhere}
+#map-node-group details{border:1px solid var(--border);border-radius:8px;background:var(--bg3)}
+#map-node-group summary{cursor:pointer;padding:10px 14px;min-height:44px}
+#map-node-group summary small{display:block;color:var(--muted)}
+#map-node-group details>div{border-top:1px solid var(--border);padding:12px 14px}
+#map-node-dialog button{min-height:44px}

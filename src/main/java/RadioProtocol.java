@@ -24,11 +24,15 @@ interface RadioProtocol {
         default void signalQuality(long requestId,String target,String result) {}
         default void signalSample(String target,long seconds,Float snr,Integer rssi,int hops,String stats,boolean requested,boolean mqtt) {}
         default void advertExport(String uri) {}
+        default void directPacket(int channel,String id,String text,long time,int hops,long packetId,long replyId) {
+            directPacket(id,text,time,hops,packetId,replyId);
+        }
         default void directPacket(String id,String text,long time,int hops,long packetId,long replyId) {directMessage(id,text,time,hops);}
         default void reaction(int channel,String sender,String peer,String text,long time,long packetId,long replyId) {}
         default void lastHeard(String id,long seconds) {}
         default void lastHeard(String id,long seconds,boolean viaRadio) {lastHeard(id,seconds);}
         default void radioSettings(String label) {}
+        default void ownBattery(String label) {}
         default void ownRadioUsage(String label) {}
         default void channelMessage(int channel,String sender,String text,long receivedAt,int hops,long packetId,long replyId) { message(channel,sender,text,receivedAt,hops); }
         default void advertResult(String text,boolean success) { actionResult(text); }
@@ -100,7 +104,8 @@ final class MeshtasticProtocol implements RadioProtocol {
     private Float channelUtilization, airUtilTx;
 
     private void readUsage(byte[] bytes, boolean localStats, Events events) {
-        if (!localStats && receivedLocalStats) return;
+        String battery=null;
+        float voltage=0;
         // LocalStats uses proto3 scalar defaults. DeviceMetrics fields are optional.
         Float channel = localStats ? Float.valueOf(0) : channelUtilization;
         Float air = localStats ? Float.valueOf(0) : airUtilTx;
@@ -113,11 +118,18 @@ final class MeshtasticProtocol implements RadioProtocol {
                 Float percent = Float.isFinite(value) && value >= 0 && value <= 100 ? value : null;
                 if (reader.field == channelField) channel = percent;
                 else air = percent;
+            } else if(!localStats && reader.field==1 && reader.wire==0) {
+                long level=reader.number();
+                battery=level>100?"External power":level+"%";
+            } else if(!localStats && reader.field==2 && reader.wire==5) {
+                voltage=Float.intBitsToFloat((int)reader.number());
             } else if(localStats && reader.field==1 && reader.wire==0) {
                 hasUptime=reader.number()!=0;
             } else reader.skip();
         }
-        if(localStats && !hasUptime)return;
+        if(battery!=null)events.ownBattery(battery);
+        else if(Float.isFinite(voltage)&&voltage>0)events.ownBattery(String.format(java.util.Locale.ROOT,"%.2f V",voltage));
+        if((!localStats && receivedLocalStats)||(localStats && !hasUptime))return;
         receivedLocalStats = localStats;
         channelUtilization = channel;
         airUtilTx = air;
@@ -557,11 +569,9 @@ final class MeshtasticProtocol implements RadioProtocol {
         }
         String sender = "!" + String.format("%08x", from);
         if(from!=myNode) events.lastHeard(sender,receivedAt,!mqtt);
-        int hops=hopStart>=0 && hopLimit>=0 && hopStart>=hopLimit ? hopStart-hopLimit : -1;
-        // Old firmware omits hop_start: zero without a modern Data bitfield is not proof of direct RF.
-        int signalStart=hopStart<0&&hasBitfield?0:hopStart;
-        int signalLimit=hopLimit<0?0:hopLimit;
-        int signalHops=(signalStart>0||hasBitfield)&&signalStart>=signalLimit?signalStart-signalLimit:-1;
+        // Proto3 omits zero scalar values. A zero start is trustworthy with a modern Data bitfield.
+        int start=Math.max(0,hopStart), remaining=Math.max(0,hopLimit);
+        int hops=(start>0||hasBitfield)&&start>=remaining ? start-remaining : -1;
         if(signalSnr!=null&&!Float.isFinite(signalSnr))signalSnr=null;
         String statsText="";boolean requested=false;
         if(port==67&&body!=null&&!wantResponse) {
@@ -579,7 +589,7 @@ final class MeshtasticProtocol implements RadioProtocol {
         }
         if(from!=0&&((from!=myNode&&!mqtt&&(signalSnr!=null||signalRssi!=null))||!statsText.isEmpty()))
             events.signalSample(sender,receivedAt,from==myNode||mqtt?null:signalSnr,
-                from==myNode||mqtt?null:signalRssi,signalHops,statsText,requested,mqtt);
+                from==myNode||mqtt?null:signalRssi,hops,statsText,requested,mqtt);
         if(requested) {
             signalTargets.remove(requestId);events.signalQuality(requestId,sender,"Node statistics received and saved.");
         }
@@ -590,7 +600,7 @@ final class MeshtasticProtocol implements RadioProtocol {
                 if(replyId!=0&&(to==myNode||to==0xffffffffL)) events.reaction(channel,sender,to==myNode?sender:"",text,receivedAt,packetId,replyId);
                 return;
             }
-            if (to == myNode && from != myNode) events.directPacket(sender,text,receivedAt,hops,packetId,replyId);
+            if (to == myNode && from != myNode) events.directPacket(channel,sender,text,receivedAt,hops,packetId,replyId);
             else events.channelMessage(channel,sender,text,receivedAt,hops,packetId,replyId);
         }
         else if (port == 3 && body != null) {
@@ -777,15 +787,20 @@ final class MeshCoreProtocol implements RadioProtocol {
     }
     byte[] pollRadioUsage() {
         long now=clock.getAsLong();
-        if (firmwareVersion >= 8 && channelsLoaded && !syncStalled && !initializing && !syncRequested && !syncInFlight
+        if (channelsLoaded && !syncStalled && !initializing && !syncRequested && !syncInFlight
                 && operation.isEmpty() && dmSends.isEmpty() && discoveryId==0
-                && pending == null && now >= nextUsageAt) {
+                && pending == null) {
+            if(now>=nextBatteryAt){
+                nextBatteryAt=now+60000;
+                return new byte[]{20}; // Local companion battery and storage request
+            }
+            if(firmwareVersion<8||now<nextUsageAt)return null;
             nextUsageAt = now + 60000;
             return new byte[]{56, 1}; // GET_STATS, radio subtype (local companion link)
         }
         return null;
     }
-    private long nextUsageAt;
+    private long nextUsageAt,nextBatteryAt;
     private int channelTextLimit;
     @Override public int textLimit(boolean direct) { return direct ? 138 : channelTextLimit; }
     private boolean syncRequested;
@@ -835,6 +850,7 @@ final class MeshCoreProtocol implements RadioProtocol {
     private long lastMessageTimestamp;
 
     @Override public byte[] initialCommand() {
+        nextUsageAt=nextBatteryAt=0;
         initializing=true;channelsLoaded=false;syncStalled=false;syncInFlight=false;syncRequested=false;
         loadDeadline=clock.getAsLong()+30000;
         byte[] name = "SV8TTL LoRa Dash".getBytes(StandardCharsets.UTF_8);
@@ -973,6 +989,10 @@ final class MeshCoreProtocol implements RadioProtocol {
                 if(!ownKey.isEmpty())events.positionInfo(ownKey,new NodePosition(lat,lon,0,0,System.currentTimeMillis(),0,"mc_self"));
                 events.ownPosition(lat,lon);
             }
+        }
+        else if(type==12 && packet.length>=3){
+            int millivolts=(packet[1]&255)|((packet[2]&255)<<8);
+            events.ownBattery(millivolts==0?"":String.format(java.util.Locale.ROOT,"%.2f V",millivolts/1000.0));
         }
         else if (type == 24 && packet.length >= 14 && packet[1] == 1) {
             long tx = Integer.toUnsignedLong(littleInt(packet, 6));

@@ -106,7 +106,7 @@ function renderMessageSearchResults(kind,list){
     if(kind!=='saved'){
       const slot=kind==='channel'?network:dmSelection.radio;
       appendMessageDelivery(bubble,slot,entry,kind==='channel');
-      if(Number.isFinite(entry.hops)&&entry.hops>=0)bubble.appendChild(node('div','message-hops',entry.hops+' hops'));
+      appendMessageHops(bubble,slot,entry);
       bindMessageActions(bubble,slot,entry,kind==='channel'?{peer:null,channel:search.channel}:{peer:search.peer,channel:-1});
     }
     list.appendChild(bubble);

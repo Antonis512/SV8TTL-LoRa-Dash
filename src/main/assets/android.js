@@ -61,8 +61,11 @@ let settingsPage='home';
 const historyPages=new Map();
 function historyPageKey(radio,peer,ch){return JSON.stringify([state[radio].key,peer,ch]);}
 let openHistory=null;
+function compareMessageTime(a,b){
+ return (a.receivedAt||0)-(b.receivedAt||0)||(a.id||0)-(b.id||0);
+}
 function chronologicalHistory(entries){
- return entries.slice().sort((a,b)=>(a.receivedAt||0)-(b.receivedAt||0)||(a.id||0)-(b.id||0));
+ return entries.slice().sort(compareMessageTime);
 }
 function beginHistoryView(host,radio,peer,ch,entries){
  const key=historyPageKey(radio,peer,ch);
@@ -203,6 +206,7 @@ function appendLinkedText(container, text) {
   container.appendChild(document.createTextNode(text.slice(offset)));
 }
 function switchTab(tab) {
+  if(state?.memberConfig?.enabled&&tab!=='settings')tab='chat';
   if(tab!=='map'&&activeTab==='map')window.cancelMarkPosition?.();
   if(tab!==activeTab)openHistory=null;
   activeTab=tab;
@@ -213,7 +217,7 @@ function switchTab(tab) {
   closeSideZoom();
   for (const panel of document.querySelectorAll('.tab-panel')) panel.hidden = panel.id !== 'tab-' + tab;
   for (const button of document.querySelectorAll('.nav-btn')) button.classList.toggle('active', button.dataset.tab === tab);
-  if (tab === 'chat') AndroidBridge.markRead(network);
+  if (tab === 'chat'&&!state?.memberConfig?.enabled) AndroidBridge.markRead(network);
   if (tab === 'log') loadLog();
   if (tab === 'contacts') {AndroidBridge.loadContacts();window.renderContacts?.();}
   document.querySelector('.nav-btn.active')?.scrollIntoView({block:'nearest',inline:'nearest'});
@@ -238,6 +242,7 @@ function renderActiveRadioViews(){
   }
 }
 function showSettingsPage(page) {
+  if(state?.memberConfig?.enabled&&page!=='nodes')page='home';
   settingsPage=['home','nodes','sounds','backup','channel-backup','connections','about','sending','timeouts','presets'].includes(page)?page:'home';
   el('settings-timeouts-page').hidden=settingsPage!=='timeouts';
   el('settings-sending-page').hidden=settingsPage!=='sending';
@@ -273,6 +278,7 @@ function renderPresetEditors(values) {
 }
 let editingMessageTemplate=-1;
 function openMessageTemplateEditor(text='',index=-1,title=''){
+  if(state?.memberConfig?.enabled)return;
   editingMessageTemplate=index;el('message-template-title').value=title;el('message-template-text').value=text;el('message-template-status').textContent='';
   if(!el('message-template-editor').open)el('message-template-editor').showModal();updateMessageTemplateBudget();el('message-template-text').focus();
 }
@@ -320,6 +326,7 @@ function insertPreset(text) {
 }
 let pendingSavedView=null;
 function openSettingsWindow(name) {
+  if(state?.memberConfig?.enabled)return;
   const dialog=el('settings-window-'+name);
   if(dialog&&!dialog.open)dialog.showModal();
 }
@@ -498,6 +505,12 @@ function renderDmSide(radio) {
     bindDmContact(button,radio,contact.id); side.appendChild(button);
   }
 }
+function appendMessageHops(bubble,radio,entry) {
+  if(Number.isInteger(entry.hops)&&entry.hops>=0)
+    bubble.appendChild(node('div','message-hops',entry.hops+(entry.hops===1?' hop':' hops')));
+  else if(!entry.own&&radioType(radio)==='mt')
+    bubble.appendChild(node('div','message-hops','Hop count unknown'));
+}
 function renderDmScreen() {
   renderDmSide('left'); renderDmSide('right');
   const history=el('dm-chat-history');
@@ -523,8 +536,7 @@ function renderDmScreen() {
     appendMessageMeta(bubble,radio,entry); 
     const body=node('div','body'); appendLinkedText(body,entry.text); bubble.appendChild(body);
     appendMessageDelivery(bubble,radio,entry);
-    if(Number.isFinite(entry.hops) && entry.hops>=0)
-      bubble.appendChild(node('div','message-hops',entry.hops+' hops'));
+    appendMessageHops(bubble,radio,entry);
     bindMessageActions(bubble,radio,entry,{peer,channel:-1});
     appendReactions(bubble,radio,entry,entries);
     history.appendChild(bubble);
@@ -680,6 +692,7 @@ function renderSoundConfig() {
   }
 }
 function renderChat() {
+  if(state?.memberConfig?.enabled){renderMemberChat();return;}
   el(dmMode?'dm-center':'channels-center').prepend(el('chat-font-bar'));
   if (!state) return;
   for(const side of ['left','right']) {
@@ -802,8 +815,7 @@ function renderChannelsScreen() {
       bubble.appendChild(repeats);
     }
 
-    if(Number.isFinite(entry.hops) && entry.hops>=0)
-      bubble.appendChild(node('div','message-hops',entry.hops+' hops'));
+    appendMessageHops(bubble,network,entry);
     bindMessageActions(bubble,network,entry,{peer:null,channel:channel[network]});
     appendReactions(bubble,network,entry,entries);
     messages.appendChild(bubble);
@@ -826,6 +838,15 @@ function renderMyNodes() {
   if (!state) return;
   const list = el('my-nodes-list'); clear(list);
   const known=state.myNodes.filter(item=>item.id);
+  if(state.memberConfig?.enabled){
+    if(!known.length)list.appendChild(node('div','empty-panel',mtWord('noSaved')));
+    for(const item of known){
+      const card=node('section','radio-card');
+      card.append(node('strong','',item.name||item.id),node('div','node-facts',item.radio.toUpperCase()+' · '+mtWord(item.connected?'online':item.connecting?'connecting':'offline')));
+      list.appendChild(card);
+    }
+    return;
+  }
   if (!known.length) list.appendChild(node('div','empty-panel','No saved radios yet. Scan and connect one to add it here.'));
   for (const item of known) {
     const card = node('section','radio-card'+(item.unread?' unread-node':''));
@@ -842,7 +863,7 @@ function renderMyNodes() {
     card.appendChild(heading);
     if(item.connected) {
       const missing=item.radio==='mc'?'TX airtime · RX airtime':'AirUtil TX · ChUtil';
-      card.appendChild(node('div','node-facts',item.radioUsage || missing+' · Not reported'));
+      card.appendChild(node('div','node-facts',(item.radioUsage || missing+' · Not reported')+' · Battery: '+(item.battery||'—')));
     }
     if(item.unread) card.appendChild(node('span','unread-badge',item.dmUnread?'Unread direct messages':'Unread messages'));
     card.appendChild(node('div','node-facts',(item.detectedRadio||item.radio).toUpperCase() + (item.id ? ' · ' + (item.radio==='mc'?'Public key: ':'Node ID: ') + item.id : '') +
@@ -1032,20 +1053,21 @@ window.onRadioState = function (next) {
   }
   const initial=state===null;
   if(state&&['left','right'].some(slot=>state[slot]?.historyRevision!==next[slot]?.historyRevision))historyPages.clear();
+  const memberChanged=!!state?.memberConfig?.enabled!==!!next.memberConfig?.enabled;
   state = next;
+  window.syncMemberMode?.(memberChanged);
   mtTracerouteReadyAt=performance.now()+Math.max(0,Number(next.mtTracerouteCooldownMs)||0);
   updateTracerouteButtons();
   window.installContactRadios?.();
   el('message-split-enabled').checked=next.messageSplitEnabled!==false;
   if(document.activeElement!==el('message-split-interval'))el('message-split-interval').value=next.messageSplitIntervalSeconds??5;
-  el('connect-all-available').disabled=!!next.connectingAvailable;
-  el('connect-available-status').hidden=!next.connectingAvailable;
+  renderConnectAllState(!!next.connectingAvailable);
   el('multi-send-enabled').checked=!!next.multiSendEnabled;
   multiSendReadyAt=performance.now()+Math.max(0,Number(next.multiSendCooldownMs)||0);updateMultiSendAvailability();
   if(document.activeElement!==el('channel-observation'))el('channel-observation').value=next.channelObservationSeconds??5;
   if(document.activeElement!==el('send-settling'))el('send-settling').value=next.settlingSeconds||3;
   for(const [id,value] of [['mc-direct-attempts',next.mcDirectAttempts],['mc-flood-attempts',next.mcFloodAttempts]])if(document.activeElement!==el(id))el(id).value=value||4;
-  if(initial&&!next.devices.length&&!next.mc.connected&&!next.mt.connected) {
+  if(initial&&!next.memberConfig?.enabled&&!next.devices.length&&!next.mc.connected&&!next.mt.connected) {
     restoringNavigation=true; switchTab('settings'); showSettingsPage('home'); restoringNavigation=false; navigationStack.length=0;
   }
   chatFontStep=Math.max(0,Math.min(6,Number(next.chatFontStep)||0));
@@ -1074,7 +1096,7 @@ window.onRadioState = function (next) {
   el('message-notifications-status').textContent = !next.messageNotificationsAllowed
     ? 'Android notifications are blocked. Enable them in Android notification settings to receive background previews.'
     : next.backgroundMessageNotifications ? 'Background message notifications are on.' : 'Background message notifications are off.';
-  el('hdr-radio-name').textContent = next.devices.length+' connected';
+  el('hdr-radio-name').textContent = next.devices.length+' '+(next.memberConfig?.enabled?mtWord('connected'):'connected');
   el('nav-chat').classList.toggle('unread',next.myNodes.some(item=>item.unread));
   renderActiveRadioViews();
 };
@@ -1140,6 +1162,9 @@ function navigationState() {
   return {activeTab,settingsPage,network,channel:{...channel},dmMode,savedDmMode,dmSelection:{...dmSelection},openedNode};
 }
 function navigateBack() {
+  const memberDialog=document.querySelector('#member-setup[open],#member-recipients[open]');
+  if(memberDialog){if(memberDialog.id==='member-recipients')cancelMemberRecipients();else memberDialog.close();return;}
+
   if(!el('dm-context').hidden) { el('dm-context').hidden=true; return; }
   if(el('contacts-dialog')?.open){window.closeContactDialog?.();return;}
   if(activeTab==='contacts'&&window.contactDetailBack?.())return;
@@ -1184,9 +1209,20 @@ function toggleInformation(button) {
   const text=el(button.getAttribute('aria-controls'));
   text.hidden=!text.hidden;button.setAttribute('aria-expanded',String(!text.hidden));
 }
+function renderConnectAllState(busy){
+  for(const id of ['connect-all-available','member-connect'])el(id).disabled=busy;
+  el('connect-available-status').hidden=!busy;
+  const member=!!state?.memberConfig?.enabled;
+  const label=member?mtWord('connect'):'Connect All Available';
+  el('config-connect-all').firstElementChild.textContent=label;
+  el('connect-all-available').textContent=busy?(member?mtWord('connecting'):'Connecting…'):label;
+  el('nodes-title').textContent=member?mtWord('myNodes'):'My Nodes';
+  el('nodes-back').textContent='← '+(member?mtWord('config'):'Config');
+  el('connect-available-status').querySelector('span').textContent=member?mtWord('discovering'):'Discovering and connecting available radios…';
+  el('member-connect').textContent=mtWord(busy?'connecting':'connect');
+}
 function connectAllAvailable() {
-  el('connect-all-available').disabled=true;
-  el('connect-available-status').hidden=false;
+  renderConnectAllState(true);
   AndroidBridge.connectAllAvailable();
 }
 

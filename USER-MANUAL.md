@@ -1,24 +1,26 @@
 # SV8TTL LoRa Dash
 
-In Untrained Member Mode, choose a channel or contact in Chat, then tap **Send my location** above the message box. Confirm the destination after the phone obtains a location. Received shared locations have a **View on map** button beside the message.
-
 **Beta · User manual**  
-For version **0.10.29 (56)** · 11 November 2026
+For version **0.10.32 (59)** · 16 November 2026
 
 Language: **English** · [Ελληνικά](USER-MANUAL-el.md)
 
 SV8TTL LoRa Dash is a standalone Android app for connecting to MeshCore and Meshtastic radios through Bluetooth Low Energy or USB serial. Multiple radios can be connected simultaneously, including more than two and a mix of both families: the app sets no fixed device-count limit, but the practical maximum depends on the phone and connections and has not yet been established by physical testing. Chat provides two device viewing slots, with selectors for switching between all connected radios. Core radio messaging works without internet, a Windows computer, or a TCP radio connection.
 
+**New to mesh radio?** Untrained Member Mode gives you one Chat screen to choose a destination, send a message or your phone’s location, and reply. Set up **Contacts** first. This is your address book for people: one person can have both a MeshCore (MC) and a Meshtastic (MT) node. You can then choose which contacts and channels to make available in member mode.
+
 This is an independent Android adaptation based on OverMesh Lite, incorporating original OverMesh assets. It is not an official OverMesh release. Credits and notices are available in **Config → About** and [LICENSE](LICENSE).
 
-The pictures show the app interface at phone size with fictional names, IDs, messages and readings. Physical radio and phone checks are tracked in [PHONE-TESTS.md](PHONE-TESTS.md).
+The pictures show the app interface rendered at phone size with fictional names, IDs, messages and readings. Physical radio and phone checks are tracked in [PHONE-TESTS.md](PHONE-TESTS.md).
 
 ## Contents
 
 1. [Install and connect](#1-install-and-connect)
 2. [Find your way around](#2-find-your-way-around)
-   - [Config buttons, from top to bottom](#config-buttons-from-top-to-bottom)
+   - [Config controls](#config-controls)
 3. [Use Chat](#3-use-chat)
+   - [Set up Contacts and Untrained Member Mode](#member-guide)
+   - [Long-press actions in Chat](#chat-hold)
 4. [Save preset messages](#4-save-preset-messages)
 5. [Understand sending and delivery](#5-understand-sending-and-delivery)
 6. [Split messages and send to multiple destinations](#6-split-messages-and-send-to-multiple-destinations)
@@ -75,11 +77,11 @@ Multiple radios can remain connected. Use the individual disconnect controls or 
 
 **MC** means MeshCore. **MT** means Meshtastic. **DM** means direct message.
 
-### Config buttons, from top to bottom
+### Config controls
 
-The following sections follow the order of the buttons on the main **Config** screen. Inside a section, **← Config** returns to that screen. A round **i** button shows or hides the explanation beside it. **×** and **Close** dismiss a settings window; use any explicit Save button before leaving an editor.
+Use the **Radios**, **Messaging**, **Map & alerts** and **Data & app** headings to find a setting in **Config**. Inside a section, **← Config** returns to that screen. A round **i** button shows or hides the explanation beside it. **×** and **Close** dismiss a settings window; use any explicit Save button before leaving an editor.
 
-#### 1. My Nodes
+#### My Nodes
 
 Read the statistics below each connected device name. **Device 1 (MeshCore)** shows cumulative TX and RX airtime in seconds on supported companions. **Device 2 (Meshtastic)** shows **AirUtil TX**, the percentage of the last hour it spent transmitting, and **ChUtil**, the percentage of time it sensed a busy channel. “Not reported” means a reading is unavailable. This screen does not calculate remaining duty-cycle allowance.
 
@@ -103,7 +105,7 @@ Opens your saved radios and their locally stored messages. From top to bottom, i
 
 Within **View messages**, choose a channel or **Direct**. The full-screen window shows saved messages newest first; **Load older messages** pages through older records. Search matches body text across the entire stored conversation, and **Senders** checkboxes limit both the visible list and search results. **Open in Chat** returns to the conversation for replies. **Export backup** saves the radio's JSON history; **Export CSV** saves it for reading or analysis. Enter an age in days and press **Erase** to remove older stored messages through the confirmation flow. The **×** at the top right returns to My Nodes.
 
-#### 2. Add Radio Connections
+#### Add Radio Connections
 
 Opens connection controls for new radios. The **MeshCore** group comes first, followed by **Meshtastic**, with the same buttons in each:
 
@@ -114,11 +116,11 @@ Opens connection controls for new radios. The **MeshCore** group comes first, fo
 | **Disconnect** | Appears when applicable and disconnects the session represented by that family panel. Use My Nodes for individual saved-radio control. |
 | **Stop scanning** | Appears during scanning and stops discovery. |
 
-#### 3. Preset Messages
+#### Message Templates
 
-Opens the reusable-message editor. Each message has a **Remove** button that removes its entry from the editor. Below the entries, **Add new** adds an empty message field and **Save** stores your additions, edits and removals. Up to 50 nonempty messages can be saved. To use them, open **Presets** in an expanded Chat or Reply editor; choosing a preset inserts it into the draft without sending it.
+Choose **Add new** to enter a template name and message, then **Save**. Each saved template has **Edit** and **Remove** controls. In Chat, tap **Templates** to insert saved text.
 
-#### 4. Sending options
+#### Sending options
 
 Opens three buttons, in this order:
 
@@ -134,11 +136,11 @@ In **Message Split**, **Enable Message Split** allows oversized drafts to become
 
 In **MeshCore DM attempts**, enter **Known route** and **Flood** counts, then press **Save attempts**. Each accepts 1–10 and includes the first transmission. The settings apply to new DMs on supported firmware. **Close / ×** dismisses the window. See [sending and delivery](#5-understand-sending-and-delivery) and [splitting and multi-send](#6-split-messages-and-send-to-multiple-destinations) for their effects.
 
-#### 5. Request timeouts
+#### Request timeouts
 
 Opens three numeric fields, from top to bottom: **Signal Quality**, **Ping**, and **Traceroute**. Each sets how long a new request waits for a response, from 5–600 seconds, with a default of 60. Changes save when a field changes; there is no separate Save button. A request already running retains its original timeout.
 
-#### 6. Notifications
+#### Notifications
 
 Opens three groups in this order:
 
@@ -148,29 +150,74 @@ Opens three groups in this order:
 | **Message Notification sounds** | **Play a sound for new messages** enables message audio. **Sound setup** selects separate MC/MT/DM sounds or one shared sound. **Select system sound / Change system sound** opens Android's sound picker for each displayed category. Its **Play** selector sets one, two or three plays. |
 | **Unexpected Disconnection of Device** | **Play a sound when a device disconnects unexpectedly** enables disconnect audio. **Select system sound / Change system sound** chooses that sound, and **Play** sets its repeat count. Intentional disconnects and app closure do not trigger it. |
 
-#### 7. App backup
+#### App backup
 
 Opens **Export full backup**, followed by **Import full backup**. Export saves radios, messages, settings, Log, Map records and installed map packs to a ZIP file through Android's file picker. Import merges missing data while keeping existing settings and histories. Older full JSON backups still import. Presets and destination sets are included; Signal Quality history is excluded. See [Back up and restore](#9-back-up-and-restore) for migration details.
 
-#### 8. Channel backup
+#### Channel backup
+
+In **Config → Notifications**, **New Node Seen** controls alerts for newly seen MT nodes after the radio’s initial sync.
 
 Opens a **Connected device** selector, followed by a **Channel** selector. Choose the radio and one of its reported channels, then press **Export channel as CSV**. The button becomes available when the required selection is ready. This exports that channel's messages stored on the phone, not a radio-configuration backup.
 
-#### 9. Export debug log
+#### Export debug log
 
 Opens the export flow for the app's diagnostic log, up to 10 MB. Use it when reporting connection or app problems. Message bodies and keys are excluded. Review the exported file before sharing it.
 
-#### 10. Check for Updates
+#### Check for Updates
 
 Checks **Antonis512/SV8TTL-LoRa-Dash** on GitHub for a newer APK and displays the result. When offered, **Update** downloads and verifies the APK before opening Android's installer. **Close / ×** dismisses the window. Internet access is required for this check and download; Android asks separately for installation approval.
 
-#### 11. About
+#### About
 
 Displays the installed version, **Beta** designation, **By SV8TTL**, the independent adaptation description, and open-source licenses and notices. The **OverMesh Lite by Slofi** link opens the upstream project. Use **← Config** to return.
 
 ## 3. Use Chat
 
 <img src="docs/manual/chat.png" width="360" alt="Chat with User 1 and User 2 and the Send to multiple button between the Users buttons">
+
+<a id="member-guide"></a>
+
+### Set up Contacts and Untrained Member Mode
+
+1. In the full app, open **Contacts → + Add Contact** and enter the person’s name. Choose **Assign Nodes**, select their radio nodes, then tap **Done → Save Contact**. For someone already in your address book, open their profile and choose **Assign Nodes**.
+2. Connect the radios and let their channels and nodes load. Open **Config → Untrained Member Mode**, tick **Enable member mode**, select the channels for each radio and the prepared contacts, then tap **Save**. The flags in member Chat switch between English and Greek.
+3. In **Chat**, choose the sending radio, then one channel or one contact. For a DM, select the contact **and** one of their available nodes, then tap **OK**. To answer someone already in the history, tap **Reply** beside their message.
+4. To share the **phone’s position**, tap **Send my location** above the message box. Allow Android location access if prompted. When the coordinates appear, check the destination and tap **Send** or **Cancel**. Your typed draft stays in the box.
+5. MT sends a waypoint and MC sends a map marker message. In Dash, the recipient can tap **View on map** to see the pin and who shared it, then close the map to return to Chat. To return to the full app, open **Config → Disable Untrained Member Mode**.
+
+<img src="docs/manual/contact-profile.png" width="320" alt="Contact profile with Assign Nodes beneath the person’s name">
+
+*Use Assign Nodes on the person’s profile to link the radios they use.*
+
+<img src="docs/manual/member-chat-en.png" width="320" alt="Member Chat with a destination selector, message history and Send my location above the message box">
+
+*Send my location shares your position. View on map opens a position someone sent you.*
+
+<img src="docs/manual/location-en.png" width="320" alt="Location confirmation showing the recipient, coordinates and Cancel and Send buttons">
+
+*Here the location is addressed to Pat over MT. Check the name or channel before tapping Send.*
+
+<a id="chat-hold"></a>
+
+### Long-press actions in Chat
+
+In standard Chat, hold your finger still for about half a second. The action depends on exactly where you press.
+
+| Press and hold | What opens |
+|---|---|
+| **DM** at the top of Chat | Saved direct conversations. Tap a name to read its history. |
+| A name under **Saved conversations** | **Delete this Conversation** for that local conversation. |
+| A name under **All contacts** on the DM screen | Node details and history tools. **Erase older messages** lets you specify an age in days. **Clear DM history** clears the conversation. **Export chat as CSV** saves a copy. |
+| A name under **Messageable users** on the Channels screen | Details and available actions for that node. A quick tap opens a DM instead. |
+| A received message | The sender’s node actions when Dash can identify them. If the sender is ambiguous, Dash opens the message menu. |
+| Your own message | The message menu, including send status and, when available, resend or stop retries. |
+
+A **quick tap** on a message opens actions such as **Copy Text**, **Add to Log**, **Add to Message Templates** and **Delete Message**. Received messages also offer **Reply**. In member mode, use the visible **Reply** button.
+
+<img src="docs/manual/hold-sender.png" width="320" alt="MeshCore node actions opened by holding a message from Alice">
+
+*Alice is a known MC contact. The actions offered depend on the node and the connected radio.*
 
 ### Choose between connected radios
 
@@ -216,10 +263,10 @@ Meshtastic reactions require a message with a saved packet reference. The app of
 
 ## 4. Save preset messages
 
-1. Open **Config → Preset Messages**.
-2. Tap **Add new** and enter reusable text. You can save up to 50 messages.
-3. Tap **Save** after adding, editing or removing entries.
-4. Open the expanded Chat or Reply editor and tap **Presets**.
+1. Open **Config → Message Templates**.
+2. Tap **Add new** and enter a name and reusable text. You can save up to 50 messages.
+3. Tap **Save** to store the template.
+4. Open the expanded Chat or Reply editor and tap **Templates**.
 5. Choose an entry, review the resulting draft and send when ready.
 
 Choosing a preset inserts text without replacing the existing draft or sending it. Normal byte limits and splitting rules still apply. Full App Backup includes saved presets.
@@ -287,9 +334,13 @@ Meshtastic **Signal Quality** stores reception history separately for each recei
 
 Under **Config → Request timeouts**, set separate waits for Signal Quality, Ping and traceroute. Changes apply to new requests. A timeout is not a measurement of poor signal.
 
+In **Config → Radios → MT utilization history**, enable recording for connected MT radios. Select devices and a time range to compare AirUtil TX and ChUtil in a graph or table. To delete records, select the individual device and choose the displayed period or its entire history.
+
 ### Use Map offline
 
-Map starts without a basemap. Node positions can still appear on its blank background. Every position, hearing event, mark, overlay and geofence is stored on the phone. Map works without internet after you install a map pack.
+Tap **Maximize map** to fill the screen and **Restore map** to return. On MT, the circle indicates uncertainty in the shared position. It appears by default when position precision is available, including around grouped nodes.
+
+The map opens in Online mode. Tap **Online ⇄** to switch to Offline mode. Node positions can still appear with no installed basemap. Every position, hearing event, mark, overlay and geofence is stored on the phone. Map works without internet after you install a map pack.
 
 1. While online, open **Map → Offline maps → Open BBBike area download**. Choose the area you need and the **PMTiles** format. Download the completed file or ZIP to your phone. A smaller area is easier to store and back up.
 2. In **Offline maps**, choose **Detailed map**, **BBBike / Shortbread**, then **Install file from phone**. Select the download. You can instead use a compatible Protomaps PMTiles pack and select **Protomaps**.

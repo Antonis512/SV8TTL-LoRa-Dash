@@ -307,8 +307,14 @@ public final class MainActivity extends Activity {
         if(markLocationListener!=null)finishMarkLocation(null,"Phone position request stopped.");
         super.onStop();
     }
-    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);openGeofenceNotification();}
-    private void openGeofenceNotification(){
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);openNotificationTarget();}
+    private void openNotificationTarget(){
+        if(pageReady&&web!=null&&getIntent().hasExtra("newNode")){
+            String node=getIntent().getStringExtra("newNode"),device=getIntent().getStringExtra("receivingDevice");
+            getIntent().removeExtra("newNode");
+            if(node!=null && device!=null && node.matches("![0-9a-f]{8}") && device.matches("![0-9a-f]{8}"))
+                web.evaluateJavascript("window.openNewNode("+JSONObject.quote(device)+","+JSONObject.quote(node)+")",null);
+        }
         if(pageReady&&web!=null&&getIntent().getBooleanExtra("geofenceHistory",false)){
             getIntent().removeExtra("geofenceHistory");
             web.evaluateJavascript("window.openGeofenceHistory()",null);
@@ -429,6 +435,7 @@ public final class MainActivity extends Activity {
             Long token=outgoingWrites.remove(payload); if(token==null) return;
             ChatEntry entry=trackedMessages.get(token);
             if(!success) {
+                if(meshcore && protocol instanceof MeshCoreProtocol && ((MeshCoreProtocol)protocol).manualResetPending(token))nodeActionResult("Path reset write failed: "+reason,key);
                 if(!meshcore)mtTracerouteAllowance.submissionFailed(key,token);
                 if(entry!=null) delivery(token,"failed: "+reason);
                 else if(pendingTrace==token||pendingMtTraces.containsKey(token)) {
@@ -574,7 +581,7 @@ public final class MainActivity extends Activity {
             }
             return saved;
         }
-        boolean connected, syncSucceeded;
+        boolean connected, syncSucceeded, startupSoundPlayed;
         boolean loading;
         boolean scanning;
         int scanProgress;
@@ -619,7 +626,7 @@ public final class MainActivity extends Activity {
             debug(key+" detected="+(meshcore?"MC":"MT"));publish();
         }
         void start() {
-            syncSucceeded=false;
+            startupSoundPlayed=false;syncSucceeded=false;
             loadingStorage.clear();loadingContactNames.clear();installingNodes=storageFailed=false;
             loadingStage="Connecting";loadingNodes=loadingChannels=0;
             generation++;
@@ -665,8 +672,8 @@ public final class MainActivity extends Activity {
         void disconnect() {
             generation++;
             close();
-            protocol = null;
             markPendingUnconfirmed();
+            protocol = null;
             knownNodes.clear(); channelNames.clear(); pendingSends.clear();
             chats.clear(); directs.clear(); ownId = ""; ownName = ""; unread = false;
             loading = false;
@@ -772,6 +779,30 @@ public final class MainActivity extends Activity {
             main.post(()->{
                 if(attempt!=generation || ownBattery.equals(label))return;
                 ownBattery=label;
+                publishRadioUpdate();
+            });
+        }
+        private void messageSound(String kind,boolean startup) {
+            if(startup && (startupSoundPlayed || !soundAllowed(kind)))return;
+            if(startup)startupSoundPlayed=true;
+            enqueueSound(kind,startup);
+        }
+        @Override public void usageSample(Float air,Float channel) {
+            int attempt=generation;
+            long timestamp=System.currentTimeMillis();
+            main.post(()->{
+                if(generation!=attempt || !connected || meshcore || ownId.isEmpty() ||
+                        !getPreferences(0).getBoolean("record_mt_usage",false))return;
+                String device=ownId;
+                storeRadioUpdate(()->chatStore.saveUsage(device,timestamp,air,channel));
+            });
+        }
+        @Override public void pathReset(String id) {
+            int attempt=generation;
+            main.post(()->{
+                if(generation!=attempt)return;
+                NodeEntry n=knownNodes.get(id);
+                if(n!=null)knownNodes.put(id,new NodeEntry(id,n.name,n.role,n.model,n.channel,-1,n.latitude,n.longitude));
                 publishRadioUpdate();
             });
         }
@@ -898,7 +929,7 @@ public final class MainActivity extends Activity {
         // PhoneAPI packets may arrive while the node transaction is installing.
         // Serialize their deduplication + persistence with that transaction, never wait on SQLite on main.
         private void saveMtIncoming(int channel,String sender,String peer,String text,long receivedAt,int hops,long packetId,long replyId,boolean reaction) {
-            int attempt=generation;String device=ownId;boolean deduplicate=receivedAt>0||loading;
+            int attempt=generation;String device=ownId;boolean startup=loading;boolean deduplicate=receivedAt>0||loading;
             radioWorker.execute(()->{
                 if(generation!=attempt)return;
                 try {
@@ -923,7 +954,7 @@ public final class MainActivity extends Activity {
                         else directs.computeIfAbsent(peer,ignored->new ArrayList<>()).add(entry);
                         if(!reaction){
                             unread=true;showMessageNotification(this,sender,text);
-                            enqueueSound(peer.isEmpty()?"mt":"dm");
+                            messageSound(peer.isEmpty()?"mt":"dm",startup);
                         }
                         publishRadioUpdate();
                     });
@@ -992,7 +1023,7 @@ public final class MainActivity extends Activity {
                 chats.computeIfAbsent(channel, ignored -> new ArrayList<>()).add(entry);
                 unread = true;
                 showMessageNotification(this, sender, text);
-                enqueueSound(meshcore?"mc":"mt");
+                messageSound(meshcore?"mc":"mt",loading);
                 if (selected == this && page == 1 && selectedChannel() == channel) renderChat();
                 publishRadioUpdate();
             });
@@ -1017,7 +1048,7 @@ public final class MainActivity extends Activity {
                 directs.computeIfAbsent(id, ignored -> new ArrayList<>()).add(entry);
                 unread = true;
                 showMessageNotification(this, id, text);
-                enqueueSound("dm");
+                messageSound("dm",loading);
                 publishRadioUpdate();
             });
         }
@@ -1034,6 +1065,15 @@ public final class MainActivity extends Activity {
             int currentGeneration = generation;
             main.post(() -> {
                 if (generation != currentGeneration) return;
+                if(!meshcore && !model.isEmpty() && !ownId.isEmpty() && !id.equals(ownId)){
+                    String seenKey="mt_seen_identity:"+ownId+":"+id;
+                    SharedPreferences prefs=getPreferences(0);
+                    if(!prefs.contains(seenKey)){
+                        prefs.edit().putBoolean(seenKey,true).apply();
+                        if(syncSucceeded && !loading && connected && prefs.getBoolean("new_node_alerts",true))
+                            MessageNotifications.showNewNode(MainActivity.this,ownId,id,name.isEmpty()?id:name);
+                    }
+                }
                 NodeEntry old = knownNodes.get(id);
                 NodePosition position=nodePositions.getOrDefault(id,NodePosition.unknown(latitude,longitude));
                 double lat=position.valid()?position.latitude:old==null?Double.NaN:old.latitude;
@@ -1324,7 +1364,7 @@ public final class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view, String url) {
                 debug("WebView page finished app="+APP_URL.equals(url));
                 pageReady = APP_URL.equals(url); publish();
-                openGeofenceNotification();
+                openNotificationTarget();
                 if(pageReady&&!closing&&!startupCheckStarted){
                     startupCheckStarted=true;
                     offerStartupUpdate=true;
@@ -1374,6 +1414,22 @@ public final class MainActivity extends Activity {
     }
 
     private final class Bridge {
+        @JavascriptInterface public boolean usageRecording() {return getPreferences(0).getBoolean("record_mt_usage",false);}
+        @JavascriptInterface public void recordUsage(boolean enabled) {getPreferences(0).edit().putBoolean("record_mt_usage",enabled).apply();}
+        @JavascriptInterface public String usageDevices() {return chatStore.usageDevices().toString();}
+        @JavascriptInterface public String usageHistory(String device,long start,long end,boolean graph,int page) {
+            return chatStore.usageHistory(device,start,end,graph,page).toString();
+        }
+        @JavascriptInterface public void deleteUsage(String device,long start,long end) {
+            main.post(()->{
+                int[] deleted=new int[1];
+                storeRadioUpdate(()->deleted[0]=chatStore.getWritableDatabase().delete("mt_usage",
+                        "device=? AND time BETWEEN ? AND ?",new String[]{device,String.valueOf(start),String.valueOf(end)}));
+                flushRadioStorage(()->{
+                    if(pageReady && !closing)web.evaluateJavascript("usageDeleted("+deleted[0]+")",null);
+                });
+            });
+        }
         @JavascriptInterface public void showActionNotice(String title,String text) {
             main.post(() -> {
                 if(visible && !closing && !isFinishing())
@@ -1423,6 +1479,9 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void setMemberLanguage(String language){main.post(()->{
             getPreferences(0).edit().putString("member_language","el".equals(language)?"el":"en").apply();publish();
         });}
+        @JavascriptInterface public void sendMemberLocation(String destinations,double lat,double lon){
+            main.post(()->queueMemberMessage(destinations,"",new double[]{lat,lon}));
+        }
         @JavascriptInterface public void sendMemberMessage(String destinations,String text){main.post(()->queueMemberMessage(destinations,text));}
         @JavascriptInterface public void connectAllAvailable(){main.post(MainActivity.this::connectAllAvailable);}
         @JavascriptInterface public void sendingChain(){main.post(()->showChain());}
@@ -1729,7 +1788,7 @@ public final class MainActivity extends Activity {
                 pendingBleActions.clear();
                 if(scanningSession!=null)MainActivity.this.stopScanning(scanningSession,"Scan cancelled");
                 awaitingUsb=null;awaitingUsbSession=null;
-                for(RadioSession s:sessions.values()) MainActivity.this.disconnect(s);
+                for(RadioSession s:new ArrayList<>(sessions.values())) if(s.connected||s.loading||s.scanning) MainActivity.this.disconnect(s);
                 publish();
             });
         }
@@ -1737,7 +1796,7 @@ public final class MainActivity extends Activity {
             main.post(() -> {
                 pendingKnownConnections.remove(radio+":"+id);
                 pendingBleActions.remove("known:"+radio+":"+id);
-                for(RadioSession s:sessions.values()) if(s.matches(radio,id)) {
+                for(RadioSession s:new ArrayList<>(sessions.values())) if(s.matches(radio,id) && (s.connected||s.loading||s.scanning)) {
                     pendingBleActions.remove("device:"+s.key);
                     if(awaitingUsbSession==s){awaitingUsb=null;awaitingUsbSession=null;}
                     MainActivity.this.disconnect(s);
@@ -1813,6 +1872,16 @@ public final class MainActivity extends Activity {
         }
         @JavascriptInterface public void exportDirectCsv(String radio,String peer) {
             main.post(() -> MainActivity.this.exportDirectCsv(radio,peer));
+        }
+        @JavascriptInterface public void setNewNodeAlerts(boolean enabled) {
+            main.post(()->{
+                getPreferences(0).edit().putBoolean("new_node_alerts",enabled).apply();
+                if(enabled && Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED && !notificationPermissionPending){
+                    notificationPermissionPending=true;
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},INITIAL_NOTIFICATION_PERMISSION);
+                }
+                publish();
+            });
         }
         @JavascriptInterface public void setBackgroundMessageNotifications(boolean enabled) {
             main.post(() -> {
@@ -1983,12 +2052,13 @@ public final class MainActivity extends Activity {
                 && (visible || MessageNotifications.allowed(this));
         return getPreferences(0).getBoolean("message_audio",true) && (visible || backgroundMessagesAllowed());
     }
-    private void enqueueSound(String kind) {
+    private void enqueueSound(String kind) { enqueueSound(kind,false); }
+    private void enqueueSound(String kind,boolean once) {
         if (!soundAllowed(kind)) return;
         String setting=kind;
         if (!"disconnect".equals(kind) && !"geofence".equals(kind)
                 && "shared".equals(getPreferences(0).getString("sound_mode","separate"))) setting="shared";
-        int repeats=getPreferences(0).getInt("sound_repeats_"+setting,1);
+        int repeats=once?1:getPreferences(0).getInt("sound_repeats_"+setting,1);
         boolean idle=activeTone==null && pendingTones.isEmpty();
         for (int i=0;i<Math.max(1,Math.min(3,repeats));i++) pendingTones.addLast(setting);
         if (idle) playNextSound();
@@ -2102,7 +2172,7 @@ public final class MainActivity extends Activity {
                 .setMessage("This removes its saved messages and channel names from this phone.")
                 .setNegativeButton("Cancel",null)
                 .setPositiveButton("Remove",(dialog,which)->{
-                    for(RadioSession s:sessions.values()) if(id.equals(s.ownId) &&
+                    for(RadioSession s:new ArrayList<>(sessions.values())) if(id.equals(s.ownId) &&
                             radio.equals(s.meshcore?"mc":"mt")) disconnect(s);
                     chatStore.deleteRadio(radio,id);
                     publish();
@@ -2913,6 +2983,7 @@ public final class MainActivity extends Activity {
             for(RadioSession s:sessions.values())canDisconnectAll|=s.connected||s.loading||s.scanning;
             data.put("canDisconnectAll",canDisconnectAll);
             data.put("myNodes",myNodes).put("audioEnabled",getPreferences(0).getBoolean("message_audio",true));
+            data.put("newNodeAlerts",getPreferences(0).getBoolean("new_node_alerts",true));
             data.put("backgroundMessageNotifications",getPreferences(0).getBoolean("background_message_notifications",false))
                     .put("messageNotificationsAllowed",MessageNotifications.allowed(this));
             JSONObject sound=new JSONObject().put("mode",getPreferences(0).getString("sound_mode","separate"));
@@ -3181,14 +3252,14 @@ public final class MainActivity extends Activity {
                     session.pendingMtTraces.put(token,id);
                 }
                 int timeout=requestTimeoutSeconds("ping".equals(action)?"ping":"trace");
-                session.pendingTrace=token; session.traceTarget=id;session.pendingTraceKind=action;
+                session.pendingTrace=token; session.traceTarget=id;session.pendingTraceKind=session.meshcore && "tr".equals(action)?"discovery":action;
                 showTracePending(session,token,id);
                 main.postDelayed(() -> {
                     if(session.generation!=generation) return;
                     if(mtTrace?session.pendingMtTraces.remove(token)==null:session.pendingTrace!=token)return;
                     session.protocol.expireRequest(token);if(session.pendingTrace==token)session.pendingTrace=0;
                     showTrace(session,new TraceResult(token,id,new ArrayList<>(),new ArrayList<>(),new ArrayList<>(),new ArrayList<>(),
-                            "ping".equals(action)?"No Ping reply within "+timeout+" seconds. Zero-hop Ping requires a directly reachable repeater or repeating room server.":"No trace reply within "+timeout+" seconds. The route or destination may be unavailable."));
+                            "ping".equals(action)?"No Ping reply within "+timeout+" seconds. Zero-hop Ping requires a directly reachable repeater or repeating room server.":session.meshcore && "tr".equals(action)?"No Path Discovery reply within "+timeout+" seconds. The contact may be unreachable or may restrict telemetry requests.":"No trace reply within "+timeout+" seconds. The route or destination may be unavailable."));
                 },timeout*1000L);
             }
             if ("dm".equals(action)) {
@@ -3215,17 +3286,18 @@ public final class MainActivity extends Activity {
             if(session.meshcore&&!isTrace&&!"dm".equals(action)) {
                 long token=session.protocol.lastRequestId(); int generation=session.generation;
                 main.postDelayed(() -> {if(session.generation==generation&&session.protocol.requestPending(token)) {
-                    session.protocol.expireRequest(token);nodeActionResult("No response from radio to the command");
+                    session.protocol.expireRequest(token);nodeActionResult("reset-path".equals(action)?"Path reset unconfirmed for "+entry.name+": no response from the radio.":"No response from radio to the command",session.key);
                 }},15000);
             }
             publish();
-            if(!isTrace&&!"dm".equals(action)) nodeActionResult(("signal".equals(action) ? "Node statistics request" : action.toUpperCase()) + " sent to radio for " + entry.name);
+            if("reset-path".equals(action))nodeActionResult("Resetting path for "+entry.name+"…",session.key);
+            else if(!isTrace&&!"dm".equals(action)) nodeActionResult(("signal".equals(action) ? "Node statistics request" : action.toUpperCase()) + " sent to radio for " + entry.name);
         } catch (IllegalArgumentException | ActivityNotFoundException error) {
             if(!session.meshcore&&"tr".equals(action)) {
                 long token=session.protocol.lastRequestId();mtTracerouteAllowance.submissionFailed(session.key,token);
                 session.pendingMtTraces.remove(token);session.protocol.expireRequest(token);if(session.pendingTrace==token)session.pendingTrace=0;publish();
             }
-            if("signal".equals(action)){session.pendingSignal=0;session.signalNotice(id,"Error: "+error.getMessage(),false);}nodeActionResult(error.getMessage());
+            if("signal".equals(action)){session.pendingSignal=0;session.signalNotice(id,"Error: "+error.getMessage(),false);}nodeActionResult(error.getMessage(),session.key);
         }
     }
 
@@ -3239,6 +3311,7 @@ public final class MainActivity extends Activity {
     }
     private static final class SplitSend {
         final String peer;final int channel;final long replyId;
+        double[] waypoint;
         int directReplyChannel=-1;
         String radio,nodeId;boolean retryRequested;int problemIndex=-1;String problemReason="";
         final List<ChatEntry> entries=new ArrayList<>();
@@ -3268,10 +3341,18 @@ public final class MainActivity extends Activity {
         history.addAll(job.entries);
     }
     private void queueMemberMessage(String destinations,String rawText){
+        queueMemberMessage(destinations,rawText,null);
+    }
+    private void queueMemberMessage(String destinations,String rawText,double[] location){
+        String event=location==null?"onMemberSendResult":"onMemberLocationResult";
         try {
             JSONObject config=new JSONObject(getPreferences(0).getString("member_config","{}"));
             JSONArray requested=new JSONArray(destinations);
             String text=rawText.trim();
+            if(location!=null){
+                if(!MapData.valid(location[0],location[1]))throw new IllegalArgumentException("Invalid location");
+                text=String.format(java.util.Locale.ROOT,"m:%.6f,%.6f|Location|poi",location[0],location[1]);
+            }
             if(!config.optBoolean("enabled")||requested.length()!=1||text.isEmpty())throw new IllegalArgumentException();
             java.util.Set<String> people=new java.util.HashSet<>(),peers=new java.util.HashSet<>();
             JSONArray allowed=config.getJSONArray("contacts");
@@ -3324,6 +3405,7 @@ public final class MainActivity extends Activity {
             db.beginTransactionNonExclusive();
             try{
                 job=saveQueuedParts(s,peer,channel,replyId,messageParts(text,s.protocol.textLimit(!peer.isEmpty())));
+                job.waypoint=location!=null&&!s.meshcore?location:null;
                 db.setTransactionSuccessful();
             }finally{db.endTransaction();}
             if(original!=null&&!peer.isEmpty()){
@@ -3332,8 +3414,8 @@ public final class MainActivity extends Activity {
             }
             attachQueuedParts(s,job);
             s.splitSends.add(job);
-            contactEvent("onMemberSendResult",true);publish();
-        }catch(Exception failure){debug("Member send rejected: "+failure.getClass().getSimpleName());contactEvent("onMemberSendResult",false);}
+            contactEvent(event,true);publish();
+        }catch(Exception failure){debug("Member send rejected: "+failure.getClass().getSimpleName());contactEvent(event,false);}
     }
     private void stopSplits(RadioSession s,String reason) {
         for(SplitSend job:s.splitSends)for(int i=job.next;i<job.entries.size();i++) {
@@ -3388,7 +3470,11 @@ public final class MainActivity extends Activity {
             NodeEntry contact=job.peer.isEmpty()?null:s.knownNodes.get(job.peer);
             if(!job.peer.isEmpty()&&contact==null&&job.directReplyChannel<0)throw new IllegalArgumentException("Contact is no longer loaded");
             if(job.peer.isEmpty()&&!s.channelNames.containsKey(job.channel))throw new IllegalArgumentException("Channel is no longer available");
-            byte[] payload=job.peer.isEmpty()?s.protocol.sendChannelReply(job.channel,entry.text,job.replyId):s.protocol.nodeCommand("dm",job.peer,entry.text,job.directReplyChannel>=0?job.directReplyChannel:contact.channel);
+            byte[] payload;
+            if(job.waypoint!=null){
+                int channel=job.peer.isEmpty()?job.channel:job.directReplyChannel>=0?job.directReplyChannel:contact.channel;
+                payload=((MeshtasticProtocol)s.protocol).waypointCommand("location-"+entry.id,"Location","",job.waypoint[0],job.waypoint[1],channel,job.peer);
+            }else payload=job.peer.isEmpty()?s.protocol.sendChannelReply(job.channel,entry.text,job.replyId):s.protocol.nodeCommand("dm",job.peer,entry.text,job.directReplyChannel>=0?job.directReplyChannel:contact.channel);
             long token=s.protocol.lastRequestId();entry.packetId=s.meshcore?0:token;
             chatStore.setReferences(entry.id,entry.packetId,job.replyId);
             entry.heardRepeats=s.protocol.tracksRepeats(token)?0:-1;chatStore.setHeardRepeats(entry.id,entry.heardRepeats);
@@ -3961,9 +4047,10 @@ public final class MainActivity extends Activity {
     private void showAdvertResult(RadioSession s,String text,boolean success) {
         if(pageReady&&web!=null) web.evaluateJavascript("window.onAdvertResult("+JSONObject.quote(s.key)+","+JSONObject.quote(text)+","+success+")",null);
     }
-    private void nodeActionResult(String text) {
+    private void nodeActionResult(String text) {nodeActionResult(text,null);}
+    private void nodeActionResult(String text,String key) {
         debug("Operation result: "+text);
-        if (pageReady && web != null) web.evaluateJavascript("window.onNodeActionResult(" + JSONObject.quote(text) + ")", null);
+        if (pageReady && web != null) web.evaluateJavascript("window.onNodeActionResult(" + JSONObject.quote(text) + ","+(key==null?"null":JSONObject.quote(key))+")", null);
     }
 
     private void disconnect(RadioSession session) {

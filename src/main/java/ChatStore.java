@@ -36,13 +36,14 @@ final class ChatStore extends SQLiteOpenHelper {
         final String name;
         SavedChannel(int index, String name) { this.index=index; this.name=name; }
     }
-    ChatStore(Context context) { super(context, "chat-history.db", null, 19); setWriteAheadLoggingEnabled(true); }
+    ChatStore(Context context) { super(context, "chat-history.db", null, 20); setWriteAheadLoggingEnabled(true); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, radio TEXT NOT NULL, " +
                 "node_id TEXT NOT NULL DEFAULT '', channel INTEGER NOT NULL, sender TEXT NOT NULL, " +
                 "body TEXT NOT NULL, time TEXT NOT NULL, received_at INTEGER NOT NULL DEFAULT 0, " +
                 "own INTEGER NOT NULL, delivery TEXT NOT NULL, peer TEXT NOT NULL DEFAULT '', unread INTEGER NOT NULL DEFAULT 0, hops INTEGER NOT NULL DEFAULT -1, heard_repeats INTEGER NOT NULL DEFAULT -1, paths TEXT NOT NULL DEFAULT '[]', packet_id INTEGER NOT NULL DEFAULT 0, reply_id INTEGER NOT NULL DEFAULT 0, reaction INTEGER NOT NULL DEFAULT 0)");
         db.execSQL("CREATE INDEX messages_node ON messages(radio,node_id,channel,id)");
+        createUsageHistory(db);
         createRadioTables(db);
         addHeardSettings(db);
         createHistoryIndex(db);
@@ -52,6 +53,40 @@ final class ChatStore extends SQLiteOpenHelper {
         addMapPositionMetadata(db);
         ContactsStore.create(db);
         createGeofenceAlerts(db);
+    }
+    private void createUsageHistory(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE mt_usage(device TEXT NOT NULL,time INTEGER NOT NULL,air REAL,channel REAL)");
+        db.execSQL("CREATE INDEX mt_usage_time ON mt_usage(device,time)");
+    }
+    void saveUsage(String device,long time,Float air,Float channel) {
+        ContentValues values=new ContentValues();
+        values.put("device",device);values.put("time",time);
+        values.put("air",air);values.put("channel",channel);
+        getWritableDatabase().insertOrThrow("mt_usage",null,values);
+    }
+    org.json.JSONArray usageDevices() {
+        org.json.JSONArray result=new org.json.JSONArray();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT DISTINCT device FROM mt_usage ORDER BY device",null)){
+            while(c.moveToNext())result.put(c.getString(0));
+        }
+        return result;
+    }
+    org.json.JSONArray usageHistory(String device,long start,long end,boolean graph,int page) {
+        org.json.JSONArray result=new org.json.JSONArray();
+        if(start<0 || end<start || page<0)return result;
+        String filter=" FROM mt_usage WHERE device=? AND time BETWEEN ? AND ?";
+        // At most 360 time buckets per device, regardless of the recording duration.
+        long bucket=(end-start)/360+1;
+        String sql=graph ? "SELECT MIN(time),AVG(air),AVG(channel)"+filter+" GROUP BY (time-"+start+")/"+bucket+" ORDER BY MIN(time)"
+                : "SELECT time,air,channel"+filter+" ORDER BY time DESC,rowid DESC LIMIT 101 OFFSET "+(100L*page);
+        try(Cursor c=getReadableDatabase().rawQuery(sql,new String[]{device,String.valueOf(start),String.valueOf(end)})){
+            while(c.moveToNext()) {
+                org.json.JSONArray row=new org.json.JSONArray().put(c.getLong(0));
+                for(int i=1;i<=2;i++)row.put(c.isNull(i)?org.json.JSONObject.NULL:(Object)c.getDouble(i));
+                result.put(row);
+            }
+        }
+        return result;
     }
     private void createHistoryIndex(SQLiteDatabase db) {
         db.execSQL("CREATE INDEX IF NOT EXISTS messages_history ON messages(radio,node_id,peer,channel,received_at,id)");
@@ -65,6 +100,7 @@ final class ChatStore extends SQLiteOpenHelper {
                 "channel INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY(radio,node_id,channel))");
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if(oldVersion<20)createUsageHistory(db);
         if(oldVersion<18)createGeofenceAlerts(db);
         if(oldVersion<17)ContactsStore.create(db);
         if(oldVersion<15)createMapTables(db);

@@ -1,5 +1,8 @@
 'use strict';
 const memberWords={
+  shareLocation:['Send my location','Αποστολή τοποθεσίας μου'],locating:['Getting phone location…','Αναζήτηση τοποθεσίας τηλεφώνου…'],
+  viewLocation:['View on map','Προβολή στον χάρτη'],close:['Close','Κλείσιμο'],location:['Location','Τοποθεσία'],
+  routeChanged:['Destination changed. Choose it again.','Ο προορισμός άλλαξε. Επιλέξτε τον ξανά.'],
   myNodes:['My Nodes','Οι κόμβοι μου'],offline:['Disconnected','Αποσυνδεδεμένη'],online:['Connected','Συνδεδεμένη'],noSaved:['No saved radios.','Δεν υπάρχουν αποθηκευμένοι ασύρματοι.'],
   discovering:['Discovering and connecting available radios…','Αναζήτηση και σύνδεση διαθέσιμων ασυρμάτων…'],
   singleDestination:['Send to one channel or one contact at a time. Choosing another replaces your selection.','Στέλνετε σε ένα κανάλι ή σε μία επαφή κάθε φορά. Κάθε νέα επιλογή αντικαθιστά την προηγούμενη.'],
@@ -169,8 +172,53 @@ function memberBudget(){
   const label=!target?'choose':warning?(max===1?'splitOff':'tooLong'):count===3?'limit':'parts';
   el('member-budget').textContent=mtWord(label)+(label==='parts'?' '+count+' / '+max:'');
   el('member-budget').classList.toggle('warning',warning||count===3);
+  el('member-location').disabled=memberBusy||!target;
   el('member-send').disabled=memberBusy||!text||!target||warning;
 }
+let pendingMemberLocation=null;
+function locationDestination(){
+  const t=memberTarget();
+  if(!t||!memberConfig().enabled)return null;
+  const label=t.peer?(memberReply?.label||contactName(memberPeople().find(c=>c.id===memberContact))||t.peer):t.device.channels.find(c=>c.index===t.channel)?.name;
+  return {radio:t.device.radio,nodeId:t.device.ownId,peer:t.peer,channel:t.channel,sourceId:memberReply?.id||0,label};
+}
+function startMemberLocation(){
+  const dest=locationDestination();
+  if(!dest||memberBusy)return;
+  const token=++markPhoneSequence;
+  pendingMemberLocation={token,dest};
+  el('member-location-target').textContent=[dest.radio.toUpperCase(),dest.label,dest.peer].filter(Boolean).join(' · ');
+  el('member-location-status').textContent=mtWord('locating');
+  el('member-location-confirm').disabled=true;
+  el('member-location-dialog').showModal();
+  AndroidBridge.fetchMarkPosition(token);
+}
+function cancelMemberLocation(){
+  if(pendingMemberLocation)AndroidBridge.cancelMarkPosition(pendingMemberLocation.token);
+  pendingMemberLocation=null;
+}
+function memberLocationFix(token,lat,lon,message){
+  if(pendingMemberLocation?.token!==token)return false;
+  const valid=Number.isFinite(lat)&&Number.isFinite(lon);
+  if(valid)pendingMemberLocation.fix={lat,lon};
+  el('member-location-status').textContent=valid?[lat.toFixed(6),lon.toFixed(6)].join(', ')+' · '+message:message;
+  el('member-location-confirm').disabled=!valid;
+  return true;
+}
+function confirmMemberLocation(){
+  const pending=pendingMemberLocation;
+  if(!pending?.fix||memberBusy)return;
+  if(JSON.stringify(locationDestination())!==JSON.stringify(pending.dest)){
+    el('member-location-status').textContent=mtWord('routeChanged');
+    el('member-location-confirm').disabled=true;return;
+  }
+  memberBusy=true;memberBudget();
+  AndroidBridge.sendMemberLocation(JSON.stringify([pending.dest]),pending.fix.lat,pending.fix.lon);
+  el('member-location-dialog').close();
+}
+window.onMemberLocationResult=ok=>{
+  memberBusy=false;memberResult=ok?'queued':'error';renderMemberChat();
+};
 function sendMember(){
   memberBudget();if(el('member-send').disabled)return;
   const t=memberTarget();
@@ -210,6 +258,7 @@ function renderMemberHistory(){
     const identity=messageIdentity(d.key,msg,d);
     const row=node('article',msg.own?'member-own':''),content=node('div','member-message');
     content.append(node('strong','',msg.own?mtWord('you'):identity.name),node('small','', ' · '+msg.time),node('p','',identity.text));
+    appendLocationPreview(content.lastElementChild,identity);
     row.dataset.messageId=String(msg.id);
     row.append(content);
     if(!msg.own){

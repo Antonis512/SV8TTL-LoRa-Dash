@@ -36,6 +36,13 @@ final class NodePosition {
         if(old==null||!old.valid())return incoming;
         if(incoming==null||!incoming.valid())return old;
         if(old.time()>0&&incoming.time()>0&&incoming.time()<old.time())return old;
+        if(incoming.source.startsWith("mt") && old.latitude==incoming.latitude && old.longitude==incoming.longitude) {
+            // A snapshot may omit precision even when it repeats the exact broadcast point.
+            if(incoming.precisionBits==0 && old.precisionBits>0)
+                return new NodePosition(incoming.latitude,incoming.longitude,Math.max(old.reportTime,incoming.reportTime),
+                        Math.max(old.fixTime,incoming.fixTime),incoming.receivedTime,old.precisionBits,incoming.source);
+            if(old.precisionBits==0 && incoming.precisionBits>0)return incoming;
+        }
         if(incoming.source.startsWith("mt")&&sameCoarseCell(old,incoming))
             return new NodePosition(old.latitude,old.longitude,incoming.reportTime>0?incoming.reportTime:old.reportTime,
                     old.fixTime,Math.max(old.receivedTime,incoming.receivedTime),old.precisionBits,"mt_preserved");

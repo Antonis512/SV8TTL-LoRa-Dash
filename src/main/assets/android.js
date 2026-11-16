@@ -207,7 +207,7 @@ function appendLinkedText(container, text) {
 }
 function switchTab(tab) {
   if(state?.memberConfig?.enabled&&tab!=='settings')tab='chat';
-  if(tab!=='map'&&activeTab==='map')window.cancelMarkPosition?.();
+  if(tab!=='map'&&activeTab==='map'){window.cancelMarkPosition?.();if(el('map-size').getAttribute('aria-pressed')==='true')setMapMaximized(false);}
   if(tab!==activeTab)openHistory=null;
   activeTab=tab;
   AndroidBridge.contactsActive(tab==='contacts');
@@ -328,7 +328,10 @@ let pendingSavedView=null;
 function openSettingsWindow(name) {
   if(state?.memberConfig?.enabled)return;
   const dialog=el('settings-window-'+name);
-  if(dialog&&!dialog.open)dialog.showModal();
+  if(dialog&&!dialog.open){
+    dialog.showModal();
+    if(name==='usage')openUsageHistory();
+  }
 }
 function closeSettingsWindow(name) {
   el('dm-context').hidden=true;
@@ -534,7 +537,9 @@ function renderDmScreen() {
     insertUnreadDivider(history,context.view,entry);
     const bubble=node('div','android-msg'+(entry.own?' own':''));
     appendMessageMeta(bubble,radio,entry); 
-    const body=node('div','body'); appendLinkedText(body,entry.text); bubble.appendChild(body);
+    const body=node('div','body');
+    if(!appendLocationPreview(body,messageIdentity(radio,entry)))appendLinkedText(body,entry.text);
+    bubble.appendChild(body);
     appendMessageDelivery(bubble,radio,entry);
     appendMessageHops(bubble,radio,entry);
     bindMessageActions(bubble,radio,entry,{peer,channel:-1});
@@ -623,18 +628,22 @@ function nodeDetails(radio, entry) {
 
     } else {
       if(['Repeater','Room server'].includes(entry.role))nodeButton(actions,'Ping','ping',radio,entry,()=>showPingOptions(radio,entry));
-      nodeButton(actions, 'TR', 'tr', radio, entry);
-      nodeButton(actions, 'Trace learned repeaters', 'trace-path', radio, entry);
+      if(entry.id!==state[radio].ownId && /^[a-f0-9]{12}$/i.test(entry.id)){
+        nodeButton(actions,'Path Discovery','tr',radio,entry);
+        nodeButton(actions,'Reset Path','reset-path',radio,entry);
+      }
+      if(entry.hops>0)nodeButton(actions, 'Trace learned repeaters', 'trace-path', radio, entry);
       if (entry.role === 'Repeater' || entry.role === 'Sensor')
         nodeButton(actions, 'Req status', 'req', radio, entry);
     }
     nodeButton(actions, 'Share', 'share', radio, entry);
     details.appendChild(actions);
+    if(radioType(radio)==='mc' && entry.hops>0)details.appendChild(node('p','help','Trace learned repeaters tests the saved repeater path for this contact and reports signal quality on the return trip.'));
   }
   if (Number.isFinite(entry.latitude) && Number.isFinite(entry.longitude))
     nodeButton(details,'Map','map',radio,entry,()=>openMapNode(radioType(radio),entry.id,state[radio].ownId));
   if(radioType(radio)==='mt')nodeButton(details,'Signal Quality','',radio,entry,()=>openSignalHistory(state[radio].key,entry.id));
-  if(state[radio].lastTrace?.target===entry.id) nodeButton(details,'Last trace','',radio,entry,()=>onTraceResult(state[radio].lastTrace));
+  if(state[radio].lastTrace?.target===entry.id) nodeButton(details,state[radio].lastTrace.action==='discovery'?'Last path discovery':'Last trace','',radio,entry,()=>onTraceResult(state[radio].lastTrace));
   return details;
 }
 function localNodeName(radio,id) { return state?.nodeNames?.[radioType(radio)+':'+id]||''; }
@@ -804,7 +813,8 @@ function renderChannelsScreen() {
       const original=entries.find(item=>item.packetId===entry.replyId);
       bubble.appendChild(node('div','message-quote',original?'↪ '+messageIdentity(network,original).name+': '+messageIdentity(network,original).text:'↪ Reply to an unavailable message'));
     }
-    appendLinkedText(body, messageIdentity(network,entry).text);
+    const identity=messageIdentity(network,entry);
+    if(!appendLocationPreview(body,identity))appendLinkedText(body,identity.text);
     bubble.appendChild(body);
     appendMessageDelivery(bubble,network,entry,true);
     if(radioType(network)==='mc'&&entry.own) {
@@ -1022,6 +1032,7 @@ function renderNodes() {
 window.onNodeActionResult = function (message,key=null) {
   pendingCompose=null;
   if(/^Direct message sent to radio/.test(message)) return;
+  if(activeTab==='nodes')el('nodes-action-status').textContent=message;
   if(el('dm-context').hidden && /failed|error|first|wait|choose|limit|shorten|remove|permission|unavailable/i.test(message)) onActionNotice('Action result',message);
   const popup=el('dm-context');
   if(!popup.hidden&&key&&popup.firstChild?.dataset.actionKey===key) { let status=el('popup-action-status'); if(!status){status=node('p','','');status.id='popup-action-status';popup.firstChild.appendChild(status);} status.textContent=message; }
@@ -1038,6 +1049,13 @@ function sendMsg() {
   if(reply?.packetId) AndroidBridge.sendChannelReply(state[network].key,channel[network],text,reply.packetId);
   else AndroidBridge.sendMessage(state[network].key, channel[network], text);
 }
+let newNodeTarget=null;
+window.openNewNode=function(device,id){
+  if(state?.memberConfig?.enabled)return;
+  newNodeTarget={device,id};
+  switchTab('nodes');
+  AndroidBridge.selectDevice('mt','saved:'+device);
+};
 window.onRadioState = function (next) {
   next={...next,left:next.left??{...next.mc,radio:'mc'},right:next.right??{...next.mt,radio:'mt'}};
   next.mc.radio='mc';next.mt.radio='mt';
@@ -1055,6 +1073,10 @@ window.onRadioState = function (next) {
   if(state&&['left','right'].some(slot=>state[slot]?.historyRevision!==next[slot]?.historyRevision))historyPages.clear();
   const memberChanged=!!state?.memberConfig?.enabled!==!!next.memberConfig?.enabled;
   state = next;
+  if(newNodeTarget && state.mt.ownId===newNodeTarget.device){
+    const target=newNodeTarget;newNodeTarget=null;
+    showMessageNodeActions('mt',target.id);
+  }
   window.syncMemberMode?.(memberChanged);
   mtTracerouteReadyAt=performance.now()+Math.max(0,Number(next.mtTracerouteCooldownMs)||0);
   updateTracerouteButtons();
@@ -1092,6 +1114,7 @@ window.onRadioState = function (next) {
   el('mc-disconnect').hidden = !next.mc.connected;
   el('mt-disconnect').hidden = !next.mt.connected;
   el('message-audio').checked = next.audioEnabled;
+  el('new-node-alerts').checked=!!next.newNodeAlerts;
   el('background-message-notifications').checked = !!next.backgroundMessageNotifications;
   el('message-notifications-status').textContent = !next.messageNotificationsAllowed
     ? 'Android notifications are blocked. Enable them in Android notification settings to receive background previews.'
@@ -1168,8 +1191,11 @@ function navigateBack() {
   if(!el('dm-context').hidden) { el('dm-context').hidden=true; return; }
   if(el('contacts-dialog')?.open){window.closeContactDialog?.();return;}
   if(activeTab==='contacts'&&window.contactDetailBack?.())return;
+  const locationDialog=document.querySelector('#member-location-dialog[open],#member-map-dialog[open]');
+  if(locationDialog){locationDialog.close();return;}
   const dialog=document.querySelector('dialog.settings-window[open]');
   if(dialog){closeSettingsWindow(dialog.id.replace('settings-window-',''));return;}
+  if(activeTab==='map' && !document.querySelector('dialog[open]') && el('map-size').getAttribute('aria-pressed')==='true'){setMapMaximized(false);return;}
   const focused=document.activeElement;
   if(focused&&focused.matches('input,textarea')) { focused.blur(); return; }
   if(sideZoom) { closeSideZoom(); return; }

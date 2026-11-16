@@ -33,6 +33,8 @@ interface RadioProtocol {
         default void lastHeard(String id,long seconds,boolean viaRadio) {lastHeard(id,seconds);}
         default void radioSettings(String label) {}
         default void ownBattery(String label) {}
+        default void pathReset(String id) {}
+        default void usageSample(Float air,Float channel) {}
         default void ownRadioUsage(String label) {}
         default void channelMessage(int channel,String sender,String text,long receivedAt,int hops,long packetId,long replyId) { message(channel,sender,text,receivedAt,hops); }
         default void advertResult(String text,boolean success) { actionResult(text); }
@@ -110,14 +112,15 @@ final class MeshtasticProtocol implements RadioProtocol {
         Float channel = localStats ? Float.valueOf(0) : channelUtilization;
         Float air = localStats ? Float.valueOf(0) : airUtilTx;
         int channelField = localStats ? 2 : 3;
+        Float reportedChannel=localStats?Float.valueOf(0):null, reportedAir=reportedChannel;
         boolean hasUptime = false;
         ProtoWire.Reader reader = new ProtoWire.Reader(bytes);
         while (reader.next()) {
             if (reader.wire == 5 && (reader.field == channelField || reader.field == channelField + 1)) {
                 float value = Float.intBitsToFloat((int)reader.number());
                 Float percent = Float.isFinite(value) && value >= 0 && value <= 100 ? value : null;
-                if (reader.field == channelField) channel = percent;
-                else air = percent;
+                if (reader.field == channelField) channel = reportedChannel = percent;
+                else air = reportedAir = percent;
             } else if(!localStats && reader.field==1 && reader.wire==0) {
                 long level=reader.number();
                 battery=level>100?"External power":level+"%";
@@ -129,7 +132,9 @@ final class MeshtasticProtocol implements RadioProtocol {
         }
         if(battery!=null)events.ownBattery(battery);
         else if(Float.isFinite(voltage)&&voltage>0)events.ownBattery(String.format(java.util.Locale.ROOT,"%.2f V",voltage));
-        if((!localStats && receivedLocalStats)||(localStats && !hasUptime))return;
+        if(localStats && !hasUptime)return;
+        if(reportedAir!=null || reportedChannel!=null)events.usageSample(reportedAir,reportedChannel);
+        if(!localStats && receivedLocalStats)return;
         receivedLocalStats = localStats;
         channelUtilization = channel;
         airUtilTx = air;
@@ -185,6 +190,7 @@ final class MeshtasticProtocol implements RadioProtocol {
                 .bytes(6,name.getBytes(StandardCharsets.UTF_8)).bytes(7,description.getBytes(StandardCharsets.UTF_8)).build();
         byte[] data=new ProtoWire.Writer().varint(1,8).bytes(2,waypoint).build();
         long packetId=newId();
+        rememberMessage(packetId,destination);
         byte[] packet=new ProtoWire.Writer().fixed32(2,destination).varint(3,channel).bytes(4,data)
                 .fixed32(6,packetId).varint(9,3).varint(10,1).build();
         return new ProtoWire.Writer().bytes(1,packet).build();
@@ -621,8 +627,15 @@ final class MeshtasticProtocol implements RadioProtocol {
                 else waypoint.skip();
             }
             double latitude=lat/1e7,longitude=lon/1e7;
-            if(id!=0&&(expires==1||MapData.valid(latitude,longitude)))
+            if(id!=0&&(expires==1||MapData.valid(latitude,longitude))){
                 events.waypoint(sender,id,name,description,latitude,longitude,expires==1);
+                if(expires!=1&&from!=myNode&&(to==myNode||to==0xffffffffL)){
+                    String title=name.trim().replace('|',' ').replace('\n',' ').replace('\r',' ');
+                    String location=String.format(java.util.Locale.ROOT,"m:%.7f,%.7f|%s|poi",latitude,longitude,title.isEmpty()?"Location":title);
+                    if(to==myNode)events.directPacket(channel,sender,location,receivedAt,hops,packetId,0);
+                    else events.channelMessage(channel,sender,location,receivedAt,hops,packetId,0);
+                }
+            }
         } else if (port == 4 && body != null) {
             ProtoWire.Reader user = new ProtoWire.Reader(body);
             String name = "", shortName = "", role = "Client", model = "";
@@ -821,6 +834,7 @@ final class MeshCoreProtocol implements RadioProtocol {
     private final java.util.Map<String,Integer> contactTypes=new java.util.HashMap<>();
     @Override public long lastRequestId() { return lastId; }
     @Override public boolean requestPending(long id) { return pendingId==id&&!operation.isEmpty(); }
+    boolean manualResetPending(long token){return token==pendingId && operation.equals("reset-path");}
     private void begin(String kind) {
         if(syncStalled)throw new IllegalArgumentException("Reconnect this radio after its loading timeout");
         if(operation.equals("dm-stalled")) throw new IllegalArgumentException("Reconnect this radio after its command-response timeout");
@@ -848,6 +862,7 @@ final class MeshCoreProtocol implements RadioProtocol {
     private final java.util.Map<String, Integer> contactPathWidths = new java.util.concurrent.ConcurrentHashMap<>();
     private final SecureRandom random = new SecureRandom();
     private long lastMessageTimestamp;
+    private String resetTarget;
 
     @Override public byte[] initialCommand() {
         nextUsageAt=nextBatteryAt=0;
@@ -876,6 +891,12 @@ final class MeshCoreProtocol implements RadioProtocol {
     @Override public byte[] nodeCommand(String action, String id, String text, int channel) {
         byte[] key = contactKeys.get(id);
         if (key == null) throw new IllegalArgumentException("Contact is no longer loaded");
+        if ("reset-path".equals(action)) {
+            begin("reset-path");resetTarget=id;
+            byte[] packet=new byte[33];packet[0]=13;
+            System.arraycopy(key,0,packet,1,32);
+            return packet;
+        }
         if ("dm".equals(action)) {
             if(dmSends.size()>=32) throw new IllegalArgumentException("Wait for pending direct messages to finish");
             byte[] body = text.trim().getBytes(StandardCharsets.UTF_8);
@@ -1047,7 +1068,10 @@ final class MeshCoreProtocol implements RadioProtocol {
                 if(job!=null) {job.resetDone=true;job.due=0;knownRoutes.remove(hex(job.key,0,6));contactPaths.remove(hex(job.key,0,6));}
                 operation="";return;
             }
-            if(operation.equals("channel")) events.delivery(pendingId,"sent_radio");
+            if(operation.equals("reset-path")) {
+                knownRoutes.remove(resetTarget);contactPaths.remove(resetTarget);contactPathWidths.remove(resetTarget);
+                events.pathReset(resetTarget);events.actionResult("Outgoing path reset for "+resetTarget);
+            } else if(operation.equals("channel")) events.delivery(pendingId,"sent_radio");
             else if(operation.equals("advert")) events.advertResult("Advert accepted by radio",true);
             else if(!operation.equals("status")) return;
             operation="";
@@ -1088,6 +1112,7 @@ final class MeshCoreProtocol implements RadioProtocol {
                         operation.equals("discovery")?discoveryTarget:traceTarget,new java.util.ArrayList<>(),new java.util.ArrayList<>(),
                         new java.util.ArrayList<>(),new java.util.ArrayList<>(),error)); traceTag=0;discoveryId=0;
             } else if(operation.equals("advert")||operation.equals("export")) events.advertResult(error,false);
+            else if(operation.equals("reset-path"))events.actionResult("Path reset failed for "+resetTarget+": "+error);
             else events.actionResult(error);
             operation="";
         }

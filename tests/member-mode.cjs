@@ -11,6 +11,8 @@ const path=require('node:path');
       window.AndroidBridge=new Proxy({
         connectAllAvailable(){window.connectCalls=(window.connectCalls||0)+1;},
         messagePartCount:(text,limit)=>Math.ceil(new TextEncoder().encode(text).length/limit),
+        fetchMarkPosition(token){window.locationToken=token;},
+        sendMemberLocation(json,lat,lon){window.shared=[JSON.parse(json)[0].peer,lat,lon];onMemberLocationResult(true);},
         sendMemberMessage(json){window.sent=JSON.parse(json);onMemberSendResult(true);},
         disableMemberMode(){fixture.memberConfig.enabled=false;onRadioState(fixture);},
         setMemberLanguage(lang){fixture.memberLanguage=lang;onRadioState(fixture);},
@@ -43,6 +45,15 @@ const path=require('node:path');
     });
     assert.equal(await page.locator('#member-chat').isVisible(),true);
     assert.equal(await page.locator('#chat-header-bar').isVisible(),false);
+    await page.evaluate(()=>{
+      fixture.memberRadios[0].chats[2].push({id:4,sender:'MeshCore',text:'Pat: m:38.123456,24.654321|Location|poi',time:'10:04'});
+      renderMemberChat();
+    });
+    await page.getByRole('button',{name:'View on map'}).click();
+    assert.match(await page.locator('#member-map-label').innerText(),/Pat/);
+    assert(await page.locator('#member-map-body .maplibregl-marker').count()>0);
+    await page.evaluate(()=>navigateBack());
+    await page.waitForSelector('.map-canvas-wrap #offline-map',{state:'attached'});
     await page.locator('#member-radio').selectOption('mt:self1');
     await page.locator('#member-use-dm').check();
     const dialog=page.locator('#member-recipients');
@@ -68,6 +79,19 @@ const path=require('node:path');
     assert(await dialog.getByLabel(/Base/).isDisabled());
     await dialog.getByLabel(/Portable/).check();
     await dialog.getByText('OK',{exact:true}).click();
+    await page.locator('#member-input').fill('Keep my draft');
+    const share=page.locator('#member-location');
+    await share.click();
+    assert(await page.locator('#member-location-confirm').isDisabled());
+    await page.evaluate(()=>navigateBack());
+    await page.evaluate(()=>onMarkPhonePosition(locationToken,38,24,'Phone position'));
+    assert.equal(await page.evaluate(()=>window.shared),undefined);
+    await share.click();
+    await page.evaluate(()=>onMarkPhonePosition(locationToken,38,24,'Phone position'));
+    assert.match(await page.locator('#member-location-target').innerText(),/Pat.*!11111111/);
+    await page.locator('#member-location-confirm').click();
+    assert.deepEqual(await page.evaluate(()=>shared),['!11111111',38,24]);
+    assert.equal(await page.locator('#member-input').inputValue(),'Keep my draft');
     await page.locator('#member-template').selectOption('0');
     await page.locator('#member-send').click();
     assert.deepEqual(await page.evaluate(()=>sent.map(t=>[t.nodeId,t.peer])),[['self1','!11111111']]);

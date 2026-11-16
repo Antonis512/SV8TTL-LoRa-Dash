@@ -20,7 +20,10 @@ const server = http.createServer((request,response) => {
   try {
     const page = await browser.newPage({viewport:{width:390,height:844}});
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
-    await page.addInitScript(() => { window.AndroidBridge = new Proxy({}, {get:() => () => {}}); });
+    await page.addInitScript(() => {
+      localStorage.setItem('map-show-precision','false');
+      window.AndroidBridge = new Proxy({}, {get:() => () => {}});
+    });
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==','base64');
     let onlineRequests=0;
     await page.route('https://tile.openstreetmap.org/**',route=>{onlineRequests++;return route.fulfill({status:200,contentType:'image/png',body:png});});
@@ -50,6 +53,49 @@ const server = http.createServer((request,response) => {
       widths.push(edge.dx);
     }
     assert(Math.abs(widths[1]-2*widths[0])<=2,JSON.stringify(widths));
+    // Legacy MT snapshots can carry the shared cell centre without field 23.
+    const original=await page.evaluate(()=>mapData.nodes);
+    await page.evaluate(()=>{
+      const centre=v=>(Math.floor(v*1e7/524288)*524288+262144)/1e7;
+      const first={...mapData.nodes[0],lat:centre(37.71),lon:centre(23.35),precisionBits:0};
+      onMapData({nodes:[first,{...first,id:'second'},{...first,id:'third',precisionBits:32}]});
+      mapView.jumpTo({center:[first.lon,first.lat],zoom:12});
+    });
+    await page.waitForFunction(()=>mapView.queryRenderedFeatures(mapView.project(mapView.getCenter()),{layers:['map-position-precision-fill']}).length===1);
+    assert.equal(await page.locator('.map-precision-stack').textContent(),'3');
+    const mapBox=()=>page.locator('#offline-map').boundingBox();
+    const before=await mapBox();
+    await page.getByRole('button',{name:'Maximize map'}).click();
+    const expanded=await mapBox();
+    assert(expanded.height>=843 && expanded.width>=389 && expanded.y===0,JSON.stringify(expanded));
+    await page.getByRole('button',{name:'Restore map'}).click();
+    assert.equal((await mapBox()).height,before.height);
+    await page.evaluate(nodes=>onMapData({nodes}),original);
+    // A full-precision stack representative shares coordinates with two MT
+    // nodes whose distinct, smaller rings used to sit under its count badge.
+    await page.evaluate(()=>{
+      window.originalMapRows=mapData.nodes;
+      const first=mapData.nodes[0];
+      onMapData({nodes:[{...first,precisionBits:32},{...first,id:'!33333333',precisionBits:18},{...first,id:'!44444444',precisionBits:19}]});
+      mapView.jumpTo({center:[first.lon,first.lat],zoom:12});
+    });
+    await page.waitForFunction(()=>mapView.queryRenderedFeatures(mapView.project([23.72,37.98]),{layers:['map-position-precision-fill']}).length===2);
+    const stack=page.locator('.map-precision-stack');
+    assert.equal(await stack.textContent(),'3');
+    assert(await stack.evaluate(marker=>{
+      const center=mapView.project([23.72,37.98]);
+      return marker.getBoundingClientRect().bottom<mapView.getContainer().getBoundingClientRect().top+center.y;
+    }));
+    await page.evaluate(()=>el('map-show-precision').click());
+    await page.waitForFunction(()=>mapView.queryRenderedFeatures(mapView.project([23.72,37.98]),{layers:['map-position-precision-fill']}).length===0);
+    await page.evaluate(()=>{switchTab('nodes');switchTab('map');});
+    await page.waitForFunction(()=>mapView.queryRenderedFeatures(mapView.project([23.72,37.98]),{layers:['map-position-precision-fill']}).length===2);
+    await stack.click();
+    const member=page.locator('#map-node-group details').filter({hasText:'!44444444'});
+    await member.locator('summary').click();
+    await member.getByRole('button',{name:'Zoom to proximity circle'}).click();
+    await page.waitForFunction(()=>!el('map-node-dialog').open && mapView.getZoom()>14);
+    await page.evaluate(()=>{mapView.stop();onMapData({nodes:originalMapRows});});
     assert.equal(await page.locator('#map-role optgroup').count(),2);
     assert.equal(await page.locator('#map-role option[value="mc:User"]').innerText(),'MC · Companion');
     await page.locator('#map-role').selectOption('mc:User');

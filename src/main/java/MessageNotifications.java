@@ -14,6 +14,21 @@ final class MessageNotifications {
         channel.setSound(null,null);
         context.getSystemService(NotificationManager.class).createNotificationChannel(channel);
     }
+    private static final String NEW_NODES="mt_new_nodes";
+    static void showNewNode(Context context,String device,String id,String name) {
+        NotificationManager manager=context.getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(new NotificationChannel(NEW_NODES,"New Node Seen",NotificationManager.IMPORTANCE_DEFAULT));
+        if(!manager.areNotificationsEnabled() || manager.getNotificationChannel(NEW_NODES).getImportance()==NotificationManager.IMPORTANCE_NONE)return;
+        Intent open=new Intent(context,MainActivity.class)
+                .setData(new android.net.Uri.Builder().scheme("loradash").authority("node").appendPath(device).appendPath(id).build())
+                .putExtra("newNode",id).putExtra("receivingDevice",device)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent pending=PendingIntent.getActivity(context,0,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        Notification alert=new Notification.Builder(context,NEW_NODES).setSmallIcon(R.drawable.ic_radio)
+                .setContentTitle("New Node Seen").setContentText(name.equals(id)?id:name+" · "+id)
+                .setContentIntent(pending).setAutoCancel(true).setCategory(Notification.CATEGORY_STATUS).build();
+        try{manager.notify("new-node:"+device+":"+id,204,alert);}catch(SecurityException denied){}
+    }
     static boolean allowed(Context context) {
         NotificationManager manager=context.getSystemService(NotificationManager.class);
         NotificationChannel channel=manager.getNotificationChannel(CHANNEL);

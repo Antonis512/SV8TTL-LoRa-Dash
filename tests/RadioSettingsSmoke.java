@@ -7,9 +7,10 @@ public class RadioSettingsSmoke {
     static void check(boolean result,String message){if(!result)throw new AssertionError(message);}
     static void little(byte[] bytes,int offset,int value){for(int i=0;i<4;i++)bytes[offset+i]=(byte)(value>>>(8*i));}
     public static void main(String[] args){
+        List<String> samples=new ArrayList<>();
         List<String> labels=new ArrayList<>(),order=new ArrayList<>(),usage=new ArrayList<>(),battery=new ArrayList<>();
         RadioProtocol.Events events=(RadioProtocol.Events)Proxy.newProxyInstance(RadioProtocol.Events.class.getClassLoader(),new Class[]{RadioProtocol.Events.class},
-                (proxy,method,values)->{if(method.getName().equals("ownBattery"))battery.add((String)values[0]);if(method.getName().equals("radioSettings")){labels.add((String)values[0]);order.add("rf");}if(method.getName().equals("ownNode"))order.add("own");if(method.getName().equals("ownRadioUsage"))usage.add((String)values[0]);return null;});
+                (proxy,method,values)->{if(method.getName().equals("usageSample"))samples.add(values[0]+"/"+values[1]);if(method.getName().equals("ownBattery"))battery.add((String)values[0]);if(method.getName().equals("radioSettings")){labels.add((String)values[0]);order.add("rf");}if(method.getName().equals("ownNode"))order.add("own");if(method.getName().equals("ownRadioUsage"))usage.add((String)values[0]);return null;});
         MeshtasticProtocol mt=new MeshtasticProtocol();
         byte[] preset=new ProtoWire.Writer().varint(1,1).varint(2,0).build();
         mt.receive(new ProtoWire.Writer().bytes(5,new ProtoWire.Writer().bytes(6,preset).build()).build(),events);
@@ -34,9 +35,11 @@ public class RadioSettingsSmoke {
         byte[] packet=new ProtoWire.Writer().fixed32(1,1).bytes(4,data).build();
         mt.receive(new ProtoWire.Writer().bytes(2,packet).build(),events);
         check(usage.get(1).equals("AirUtil TX: 0.00% · ChUtil: 0.00%"),"LocalStats implicit zeros");
+        mt.receive(new ProtoWire.Writer().bytes(2,packet).build(),events);
+        check(samples.equals(List.of("null/3.25","0.0/0.0","0.0/0.0")),"Repeated samples, true zeros and absent metrics");
         byte[] stats=new byte[14];stats[0]=24;stats[1]=1;little(stats,6,-1);little(stats,10,30);
         new MeshCoreProtocol().receive(stats,events);
-        check(usage.get(2).equals("TX airtime: 4294967295 s · RX airtime: 30 s"),"Unsigned MC airtime seconds");
+        check(usage.get(3).equals("TX airtime: 4294967295 s · RX airtime: 30 s"),"Unsigned MC airtime seconds");
         for(int level:new int[]{0,101}){
             byte[] dm=new ProtoWire.Writer().varint(1,level).build();
             byte[] body=new ProtoWire.Writer().bytes(2,dm).build();

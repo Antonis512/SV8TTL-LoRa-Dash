@@ -14,6 +14,9 @@ public final class NodePositionSmoke {
         check(NodePosition.choose(NodePosition.unknown(coarse.latitude,coarse.longitude),coarse)==coarse,"Legacy coordinates with unknown precision adopt newly received sharing precision");
         check(saved.latitude==precise.latitude&&saved.longitude==precise.longitude&&saved.precisionBits==32,"Same-cell coarse report preserves the known precise coordinate");
         check(saved.source.equals("mt_preserved")&&saved.fixTime==precise.fixTime&&saved.reportTime==coarse.reportTime,"Preserved coordinates retain their fix time and the new report provenance");
+        NodePosition bare=new NodePosition(coarse.latitude,coarse.longitude,0,0,0,0,"mt_snapshot");
+        check(NodePosition.choose(bare,coarse).precisionBits==13,"A cached cell centre must adopt explicit sharing precision");
+        check(NodePosition.choose(coarse,bare).precisionBits==13,"A bare snapshot must preserve the known radius at that point");
         NodePosition moved=position(coarse(38.2,13),coarse(23.9,13),1700000020000L,13);
         check(NodePosition.choose(saved,moved)==moved,"A different coarse cell indicates movement");
         check(NodePosition.choose(moved,precise)==moved,"Older replay cannot move a node backwards");

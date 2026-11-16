@@ -4,7 +4,7 @@ Standalone Android app for MeshCore and Meshtastic radios over Bluetooth or USB 
 
 User manuals: [English](USER-MANUAL.md) · [Ελληνικά](USER-MANUAL-el.md). Covers setup, Chat, presets, Map, sending options, backups and troubleshooting. The illustrated guides use fictional devices, users and nodes.
 
-Current version **0.10.31 (58)** adds English and Greek Untrained Member Mode with prepared channels, contact-device selection, and a scrollable Chat history above the composer. In member mode, Config offers Connect All Available and the option to disable member mode. This build also includes editable geofence corners, grouped-node map dialogs, connected-radio battery readings, notification sound queuing, and corrected Meshtastic hop counts. Physical phone and radio validation is pending.
+Current version **0.10.32 (59)** adds phone location sharing in member Chat. Choose a channel or contact, check the destination and coordinates, and send a Meshtastic waypoint or a MeshCore marker. Open a shared location directly from the conversation with **View on map**. Physical phone and radio validation is pending.
 
 Version **0.10.29 (56)** shows Meshtastic AirUtil TX and ChUtil percentages and MeshCore TX and RX airtime counters in Config → My Nodes. Chat shows Send to multiple between the Users buttons. Tapping it opens the enable setting or the destination picker. Physical-radio validation remains pending.
 

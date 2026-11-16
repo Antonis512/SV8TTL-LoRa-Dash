@@ -1,5 +1,7 @@
 # SV8TTL LoRa Dash
 
+In Untrained Member Mode, choose a channel or contact in Chat, then tap **Send my location** above the message box. Confirm the destination after the phone obtains a location. Received shared locations have a **View on map** button beside the message.
+
 **Beta · User manual**  
 For version **0.10.29 (56)** · 11 November 2026
 

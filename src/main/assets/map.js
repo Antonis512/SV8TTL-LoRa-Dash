@@ -59,7 +59,24 @@ function initMap(){
     mapNotice(mapDrawing==='geofence'?'Tap another corner or tap the first circle to close the fence.':mapDraft.length+' points chosen.');
   });
 }
-window.mapShown=()=>{initMap();setTimeout(()=>mapView?.resize(),40);};
+window.mapShown=()=>{
+  initMap();
+  const circles=el('map-show-precision');
+  if(!circles.checked){circles.checked=true;renderMap();}
+  setTimeout(()=>mapView?.resize(),40);
+};
+let mapScrollBeforeMaximize=0;
+function setMapMaximized(expanded){
+  const button=el('map-size');
+  const tab=el('tab-map');
+  if(expanded)mapScrollBeforeMaximize=tab.scrollTop;
+  tab.classList.toggle('expanded-map-tab',expanded);
+  button.parentElement.classList.toggle('map-maximized',expanded);
+  button.setAttribute('aria-pressed',String(expanded));
+  button.textContent=expanded?'Restore map':'Maximize map';
+  if(!expanded)tab.scrollTop=mapScrollBeforeMaximize;
+  requestAnimationFrame(()=>mapView?.resize());
+}
 function activePack(){return mapData.packs.find(p=>p.id===mapPackId&&p.kind===mapLayerKind)||mapData.packs.find(p=>p.kind===mapLayerKind)||null;}
 function setMapMode(mode){
   if(mode!=='online'&&mode!=='offline')return;
@@ -142,8 +159,19 @@ function mapFilterRows(){
   return [...byNode.values()];
 }
 const mapPositionTime=n=>Number(n.fixTime)||Number(n.positionTime)||0;
+function mapCellPrecision(n){
+  if(n.radio!=='mt'||!mapHasPosition(n)||Number(n.precisionBits)>0)return 0;
+  // A firmware cell centre has exactly one half-cell bit followed by zeroes
+  // on BOTH signed fixed-point axes. Recover only that unambiguous grid size.
+  const lat=Math.round(n.lat*1e7),lon=Math.round(n.lon*1e7);
+  for(let bits=10;bits<=19;bits++){
+    const width=2**(32-bits),mask=width-1;
+    if((lat&mask)===width/2 && (lon&mask)===width/2)return bits;
+  }
+  return 0;
+}
 function mapPrecisionRadius(n){
-  const bits=Number(n.precisionBits);
+  const bits=Number(n.precisionBits)||mapCellPrecision(n);
   return n.radio==='mt'&&bits>=10&&bits<=19?23905787.925008/2**bits:0;
 }
 function mapSameCoarseCell(precise,coarse){
@@ -155,6 +183,7 @@ function mapSameCoarseCell(precise,coarse){
 }
 function mapPreferredObservation(a,b){
   if(mapHasPosition(a)!==mapHasPosition(b))return mapHasPosition(b)?b:a;
+  if(a.radio==='mt'&&a.lat===b.lat&&a.lon===b.lon&&Boolean(a.precisionBits)!==Boolean(b.precisionBits))return a.precisionBits?a:b;
   if(mapSameCoarseCell(a,b))return a;
   if(mapSameCoarseCell(b,a))return b;
   const at=mapPositionTime(a),bt=mapPositionTime(b);
@@ -197,7 +226,7 @@ function mapPositionGroups(rows){
   return groups;
 }
 function mapPrecisionFeatures(rows){
-  const unique=new Map();for(const n of rows)if(mapPrecisionRadius(n)>0)unique.set(n.lat+':'+n.lon+':'+n.precisionBits,n);
+  const unique=new Map();for(const n of rows)if(mapPrecisionRadius(n)>0)unique.set(n.lat+':'+n.lon+':'+mapPrecisionRadius(n),n);
   return [...unique.values()].map(n=>{
     const angular=mapPrecisionRadius(n)/6371000,lat=n.lat*Math.PI/180,lon=n.lon*Math.PI/180,ring=[];
     for(let step=0;step<=64;step++){
@@ -216,9 +245,9 @@ function drawMapPrecision(rows){
   if(!mapView||(!mapStyleReady&&!mapView.isStyleLoaded()))return;
   const data={type:'FeatureCollection',features:el('map-show-precision')?.checked===false?[]:mapPrecisionFeatures(rows)};
   const source=mapView.getSource('map-position-precision');
-  if(source)source.setData(data);else mapView.addSource('map-position-precision',{type:'geojson',data});
-  if(!mapView.getLayer('map-position-precision-fill'))mapView.addLayer({id:'map-position-precision-fill',type:'fill',source:'map-position-precision',paint:{'fill-color':'#36c5f0','fill-opacity':0.12}});
-  if(!mapView.getLayer('map-position-precision-line'))mapView.addLayer({id:'map-position-precision-line',type:'line',source:'map-position-precision',paint:{'line-color':'#36c5f0','line-width':1.5}});
+  if(source)source.setData(data);else mapView.addSource('map-position-precision',{type:'geojson',data,tolerance:0});
+  if(!mapView.getLayer('map-position-precision-fill'))mapView.addLayer({id:'map-position-precision-fill',type:'fill',source:'map-position-precision',paint:{'fill-color':'#dfb82d','fill-opacity':0.20}});
+  if(!mapView.getLayer('map-position-precision-line'))mapView.addLayer({id:'map-position-precision-line',type:'line',source:'map-position-precision',paint:{'line-color':'#876700','line-width':2}});
 }
 function renderMap(){
   if(!mapView)return;renderMapFilters();
@@ -229,7 +258,11 @@ function renderMap(){
     const n=members.find(item=>mapSelected&&sameMapNode(item,mapSelected))||members.find(item=>item.id===item.device)||members[0];
     const dot=mapText('span',members.length>1?String(members.length):'',`map-node-dot ${n.radio}${members.length>1?' map-node-stack':''}${!mapPositionTime(n)?' undated':Date.now()-mapPositionTime(n)>86400000?' old':''}`);
     dot.setAttribute('aria-label',members.length>1?members.length+' nodes at this location':n.name||n.id);
-    const marker=new maplibregl.Marker({element:dot}).setLngLat([n.lon,n.lat]).addTo(mapView);
+    // Keep the count badge clear of small geographic rings, including rings
+    // belonging to a member other than the node used to anchor the stack.
+    const precisionStack=members.length>1 && el('map-show-precision').checked && members.some(item=>mapPrecisionRadius(item)>0);
+    if(precisionStack)dot.classList.add('map-precision-stack');
+    const marker=new maplibregl.Marker({element:dot,anchor:precisionStack?'bottom':'center',offset:precisionStack?[0,-5]:[0,0]}).setLngLat([n.lon,n.lat]).addTo(mapView);
     mapMarkers.push(marker);
     dot.tabIndex=0;dot.setAttribute('role','button');
     dot.onclick=event=>{
@@ -417,6 +450,20 @@ function setFenceVisible(id,visible){
   try{localStorage.setItem('map-hidden-fences',JSON.stringify([...hiddenFences]));}catch(unavailable){}
   drawMapItems();renderMapItems();
 }
+function showMemberMap(coordinates,title){
+  const dialog=el('member-map-dialog'),canvas=el('offline-map'),parent=canvas.parentElement;
+  el('member-map-label').textContent=title;
+  el('member-map-body').append(canvas);
+  dialog.showModal();
+  initMap();
+  const previous={center:mapView.getCenter(),zoom:mapView.getZoom()};
+  setMapStyle(true);
+  mapView.resize();mapView.jumpTo({center:coordinates,zoom:14});
+  const marker=new maplibregl.Marker().setLngLat(coordinates).addTo(mapView);
+  dialog.addEventListener('close',()=>{
+    marker.remove();parent.prepend(canvas);mapView.jumpTo(previous);mapView.resize();
+  },{once:true});
+}
 function viewMapItem(item){
   if(!mapView)return;
   el('offline-map').scrollIntoView({block:'center'});
@@ -471,6 +518,7 @@ function cancelMarkPosition(){
   if(markMapClick){mapView?.off('click',markMapClick);markMapClick=null;}
 }
 window.onMarkPhonePosition=(token,latitude,longitude,message)=>{
+  if(typeof memberLocationFix==='function'&&memberLocationFix(token,latitude,longitude,message))return;
   if(token!==markPhonePending)return;
   markPhonePending=0;
   const form=el('map-mark-position');
@@ -611,7 +659,6 @@ function mapTool(name){
   }
 }
 mapTool('passive');
-try{el('map-show-precision').checked=localStorage.getItem('map-show-precision')!=='false';}catch(unavailable){}
 
 function sameMapNode(a,b){return a.radio===b.radio&&a.id===b.id&&(!b.device||a.device===b.device);}
 function nearbyMapNodes(node,placed){
@@ -635,6 +682,15 @@ function showMapNodeGroup(nodes,selected){
     const details=document.createElement('details'),summary=document.createElement('summary');
     summary.append(mapText('strong',n.name||n.id),mapText('small',n.radio.toUpperCase()+' · '+n.id));
     details.append(summary,mapNodePopup(n));details.open=!!selected&&sameMapNode(n,selected);
+    if(el('map-show-precision').checked && mapPrecisionRadius(n)>0){
+      mapButton(details,'Zoom to proximity circle',()=>{
+        dialog.close();
+        const ring=mapPrecisionFeatures([n])[0].geometry.coordinates[0];
+        const bounds=new maplibregl.LngLatBounds();
+        for(const point of ring)bounds.extend(point);
+        mapView.fitBounds(bounds,{padding:40});
+      });
+    }
     list.appendChild(details);
   }
   if(!dialog.open)dialog.showModal();
@@ -656,7 +712,7 @@ function mapNodePopup(n){
   if(received)popup.appendChild(mapText('div','Received by this phone: '+mapDate(received)));
   popup.appendChild(mapText('div','Position source: '+({mt_live:'live position packet',mt_snapshot:'radio node list',mt_preserved:'previously known precise position',mc_advert:'received advertisement',mc_snapshot:'radio contact list',mc_self:'connected radio configuration',legacy:'saved coordinates'}[n.positionSource]||'saved coordinates')));
   const radius=mapPrecisionRadius(n);
-  popup.appendChild(mapText('div',radius?'Shared position precision: ± '+(radius>=1000?(radius/1000).toFixed(2)+' km':Math.round(radius)+' m'):
+  popup.appendChild(mapText('div',radius?(mapCellPrecision(n)?'Estimated from the shared coordinate grid: ± ':'Shared position precision: ± ')+(radius>=1000?(radius/1000).toFixed(2)+' km':Math.round(radius)+' m'):
     n.radio==='mc'?'Advertised location (may be manually configured)':n.precisionBits===32?'Full shared precision':n.precisionBits>0?'Reported sharing precision: '+n.precisionBits+' bits':'Position precision not reported'));
   if(n.positionSource==='mt_preserved')popup.appendChild(mapText('div','Previously known precise position retained within the newly reported approximate area.'));
   if(!time)popup.appendChild(mapText('div','The age of these coordinates is unknown.'));

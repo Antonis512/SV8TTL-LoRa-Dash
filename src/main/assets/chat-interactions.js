@@ -66,6 +66,19 @@ function dialogAction(card,label,action) {
 }
 function cancelDialog(card) {dialogAction(card,'Cancel',()=>el('dm-context').hidden=true);}
 
+function appendLocationPreview(body,identity){
+  const marker=/^m:(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)\|([^|\r\n]+)\|poi$/u.exec(identity.text);
+  if(!marker||Math.abs(Number(marker[1]))>90||Math.abs(Number(marker[2]))>180)return false;
+  body.textContent=marker[3]+' · '+marker[1]+', '+marker[2]+' ';
+  const view=node('button','',state?.memberConfig?.enabled?mtWord('viewLocation'):'View on map');
+  view.type='button';
+  view.onclick=event=>{
+    event.stopPropagation();
+    showMemberMap([Number(marker[2]),Number(marker[1])],identity.name+' · '+marker[3]);
+  };
+  body.append(view);
+  return true;
+}
 function messageIdentity(radio,message,device=state[radio]) {
   if(message.own) return {name:device.ownName||'You',id:null,text:message.text};
   const exact=device.nodes.find(item=>item.id===message.sender);
@@ -229,16 +242,17 @@ window.onAdvertResult=function(key,message,success) {
 window.onTraceResult=function(result) {
   // A response is bound to the originating radio and request even if selectors change.
   activeTrace=result;
-  const card=dialogCard((result.action==='ping'?'Ping':'TR')+' · '+result.radio.toUpperCase()+' · '+result.name);
+  const discovery=result.action==='discovery';
+  const card=dialogCard((discovery?'Path Discovery':result.action==='ping'?'Ping':'TR')+' · '+result.radio.toUpperCase()+' · '+result.name);
   card.classList.add('trace-card');card.dataset.requestId=result.requestId;
-  if(result.pending) card.appendChild(node('p','',result.action==='ping'?'Pinging… waiting for the radio’s reply.':'Tracing… waiting for the radio’s reply.'));
+  if(result.pending) card.appendChild(node('p','',discovery?'Discovering paths… waiting for the contact to reply.':result.action==='ping'?'Pinging… waiting for the radio’s reply.':'Tracing… waiting for the radio’s reply.'));
   else {
     if(result.note) card.appendChild(node('p','help',result.note));
     for(const [label,hops] of [['Outward route',result.forward||[]],['Return route',result.backward||[]]]) {
       const group=node('section','trace-direction');group.appendChild(node('h3','',label));
       if(!hops.length) group.appendChild(node('p','','Not reported'));
       hops.forEach((hop,index)=>{
-        if(index) group.appendChild(node('div','trace-link','↓ '+(Number.isFinite(hop.snr)?hop.snr+' dB':'SNR unavailable')));
+        if(index) group.appendChild(node('div','trace-link',discovery?'↓':'↓ '+(Number.isFinite(hop.snr)?hop.snr+' dB':'SNR unavailable')));
         const row=node('div','trace-hop');row.append(node('strong','',hop.name),node('small','',hop.id));group.appendChild(row);
       });
       card.appendChild(group);

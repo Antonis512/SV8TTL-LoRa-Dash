@@ -88,6 +88,13 @@ public final class RadioActionsSmoke {
         byte[] self=new byte[60];self[0]=5;Arrays.fill(self,4,36,(byte)0x99);mc.receive(self,events);
         byte[] contact=new byte[148];contact[0]=3;Arrays.fill(contact,1,33,(byte)0xbb);contact[33]=2;contact[35]=1;contact[36]=(byte)0xaa;
         mc.receive(contact,events);
+        byte[] reset=mc.nodeCommand("reset-path","bbbbbbbbbbbb","",0);
+        check(reset.length==33 && reset[0]==13 && Arrays.equals(Arrays.copyOfRange(reset,1,33),Arrays.copyOfRange(contact,1,33)),"Reset uses full contact key");
+        mc.receive(new byte[]{0},events);
+        rejects(()->mc.nodeCommand("trace-path","bbbbbbbbbbbb","",0),"Confirmed reset drops learned route");
+        mc.receive(contact,events);
+        mc.nodeCommand("reset-path","bbbbbbbbbbbb","",0);
+        mc.receive(new byte[]{1,2},events); // A failed reset must preserve the learned route.
         byte[] trace=mc.nodeCommand("trace-path","bbbbbbbbbbbb","",0);traceId=mc.lastRequestId();
         check(Arrays.equals(Arrays.copyOfRange(trace,10,trace.length),new byte[]{(byte)0xaa,(byte)0xbb,(byte)0xaa}),"MC round-trip path includes destination repeater and return");
         byte[] accepted=new byte[10];accepted[0]=6;le(accepted,2,traceId);mc.receive(accepted,events);

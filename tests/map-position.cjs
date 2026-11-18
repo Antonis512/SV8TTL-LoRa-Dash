@@ -58,6 +58,14 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
    };
   });
   assert.deepEqual(policy,{newer:'active',active:'active',precise:'old',moved:'active',missing:'old',mcRadius:0,fullRadius:0,near:1,separate:2,dateline:true});
+  const inferred=await page.evaluate(()=>{
+   const center=(value,bits)=>{const width=2**(32-bits);return (Math.floor(Math.round(value*1e7)/width)*width+width/2)/1e7;};
+   return Array.from({length:10},(_,i)=>i+10).every(bits=>[38,-33.8688].every(lat=>{
+    const n={radio:'mt',lat:center(lat,bits),lon:center(23.74,bits),precisionBits:0};
+    return mapCellPrecision(n)===bits&&mapPrecisionRadius(n)>0&&mapPrecisionRadius({...n,precisionBits:32})===0&&mapPrecisionRadius({...n,radio:'mc'})===0;
+   }));
+  });
+  assert.equal(inferred,true,'Missing-metadata cell centres use the same radius as native possible-entrance checks');
   await page.evaluate(()=>{onMapData({nodes:[...rows,{...rows[0],device:'other',lat:39,lon:24,fixTime:1700000030000}]});document.getElementById('map-device').value='mt:active';renderMap();});
   assert(await page.evaluate(()=>mapFilterRows().every(row=>row.device==='active')));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);

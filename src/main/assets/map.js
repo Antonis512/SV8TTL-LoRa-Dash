@@ -737,6 +737,7 @@ function renderGeofenceHistory(){
     row.appendChild(mapText('div',mapDate(a.time)));
     row.appendChild(mapText('div',a.radio.toUpperCase()+' · '+a.node+' · Receiver: '+a.device));
     row.appendChild(mapText('div','Reported location: '+a.lat+', '+a.lon));
+    if(a.uncertaintyRadius>0)row.appendChild(mapText('div','Uncertainty radius: '+Math.round(a.uncertaintyRadius)+' m · possible location, not confirmed entry'));
     mapButton(row,'Alert location',()=>{
       el('map-alerts-dialog').close();mapFocus=null;mapFocusWaiting=false;mapSelected=null;initMap();
       if(!mapView){mapNotice('Map is unavailable. The reported coordinates are saved in the alert.',true);return;}

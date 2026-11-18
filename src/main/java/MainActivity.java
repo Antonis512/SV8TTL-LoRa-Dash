@@ -558,6 +558,7 @@ public final class MainActivity extends Activity {
         final Map<String,Long> earlyHeardTimes=new LinkedHashMap<>();
         final Map<String,String> earlyHeardSettings=new LinkedHashMap<>();
         final Map<String,NodePosition> nodePositions=new LinkedHashMap<>();
+        final Map<String,NodePosition> latestPositionReports=new LinkedHashMap<>();
         final java.util.Set<String> ignoredPositionReports=new java.util.HashSet<>();
         void storeUpdate(Runnable work) {
             int attempt=generation;
@@ -635,7 +636,7 @@ public final class MainActivity extends Activity {
             configureAttempts(this);
             markPendingUnconfirmed();
             knownNodes.clear(); pendingSends.clear(); connected = false;
-            nodePositions.clear();ignoredPositionReports.clear();
+            nodePositions.clear();latestPositionReports.clear();ignoredPositionReports.clear();
             ownLatitude = Double.NaN; ownLongitude = Double.NaN;
             channelNames.clear();
             if(!ownId.isEmpty()) loadSessionHistory(this);
@@ -658,6 +659,8 @@ public final class MainActivity extends Activity {
         }
 
         void close() {
+            if(protocol!=null && protocol.channelAdmin().active())channelSetupMessage="Disconnected during channel setup. Reconnect to check the radio.";
+            usageGeneration=-1;
             ownRadioUsage="";ownBattery="";
             loadingStorage.clear();
             loadingContactNames.clear();
@@ -682,6 +685,7 @@ public final class MainActivity extends Activity {
         }
 
         void markPendingUnconfirmed() {
+            if(protocol!=null && protocol.channelAdmin().active())channelSetupMessage="Channel setup interrupted. Reconnect to check the radio before trying again.";
             if(pendingSignal!=0){protocol.expireRequest(pendingSignal);pendingSignal=0;signalNotice(signalTarget,"Request interrupted: radio disconnected.",false);}
             pendingPaths.clear();
             if(protocol!=null) protocol.cancelAll();
@@ -754,6 +758,7 @@ public final class MainActivity extends Activity {
                 if (generation != currentGeneration) return;
                 if (text.startsWith("BLE disconnected") || text.startsWith("USB disconnected") || text.startsWith("USB read failed")) {
                     boolean wasConnected=connected;
+                    usageGeneration=-1;
                     markPendingUnconfirmed(); connected = false; loading = false;
                     if(wasConnected) showDisconnectWarning(ownName.isEmpty()?name:ownName);
                 }
@@ -791,12 +796,23 @@ public final class MainActivity extends Activity {
             int attempt=generation;
             long timestamp=System.currentTimeMillis();
             main.post(()->{
-                if(generation!=attempt || !connected || meshcore || ownId.isEmpty() ||
+                if(generation!=attempt || !connected || ownId.isEmpty() ||
                         !getPreferences(0).getBoolean("record_mt_usage",false))return;
-                String device=ownId;
-                storeRadioUpdate(()->chatStore.saveUsage(device,timestamp,air,channel));
+                String device=meshcore?"mc:"+ownId:ownId;
+                long recordingEpoch=getPreferences(0).getLong("usage_recording_epoch",0);
+                if(usageGeneration!=generation || usageRecordingEpoch!=recordingEpoch ||
+                        timestamp-lastUsageSample>900000 || timestamp<lastUsageSample) {
+                    usageSegment=java.util.UUID.randomUUID().toString();
+                }
+                usageGeneration=generation;usageRecordingEpoch=recordingEpoch;lastUsageSample=timestamp;
+                String segment=(air==null && channel==null)?java.util.UUID.randomUUID().toString():usageSegment;
+                if(air==null && channel==null)usageSegment=java.util.UUID.randomUUID().toString();
+                storeRadioUpdate(()->chatStore.saveUsage(device,timestamp,air,channel,segment));
             });
         }
+        private String usageSegment=java.util.UUID.randomUUID().toString();
+        private int usageGeneration=-1;
+        private long usageRecordingEpoch=-1,lastUsageSample;
         @Override public void pathReset(String id) {
             int attempt=generation;
             main.post(()->{
@@ -1057,6 +1073,7 @@ public final class MainActivity extends Activity {
             main.post(()->{
                 if(generation!=attempt)return;
                 NodePosition old=nodePositions.get(id),chosen=NodePosition.choose(old,incoming);
+                latestPositionReports.put(id,incoming);
                 if(chosen==old)ignoredPositionReports.add(id);else ignoredPositionReports.remove(id);
                 if(chosen!=null&&chosen.valid())nodePositions.put(id,chosen);
             });
@@ -1090,7 +1107,7 @@ public final class MainActivity extends Activity {
                             &&(lat!=old.latitude||lon!=old.longitude)&&!ignoredPositionReports.contains(id);
                     String radio=meshcore?"mc":"mt",device=ownId;
                     if(meshcore||!loading||installingNodes)storeUpdate(()->{NodePosition saved=persistPosition(radio,device,id,name,role,position,changedPosition,currentGeneration);
-                            if(changedPosition&&saved==position&&saved.valid())showMapGeofenceAlerts("mc",device,id,name,saved.latitude,saved.longitude);
+                            if(changedPosition&&saved==position&&saved.valid())showMapGeofenceAlerts("mc",device,id,name,saved);
                         });
                 }
                 if (id.equals(ownId) && !name.isEmpty()) {
@@ -1114,6 +1131,7 @@ public final class MainActivity extends Activity {
                 if (generation != currentGeneration) return;
                 if(ignoredPositionReports.contains(id))return;
                 NodePosition position=nodePositions.getOrDefault(id,NodePosition.unknown(latitude,longitude));
+                NodePosition report=latestPositionReports.getOrDefault(id,position);
                 if(!position.valid())return;
                 if(id.equals(ownId)){ownLatitude=position.latitude;ownLongitude=position.longitude;}
                 NodeEntry old = knownNodes.get(id);
@@ -1123,8 +1141,9 @@ public final class MainActivity extends Activity {
                     String radio=meshcore?"mc":"mt",device=ownId;
                     String name=old==null?"":old.name,role=old==null?"":old.role;
                     storeUpdate(()->{NodePosition saved=persistPosition(radio,device,id,name,role,position,true,currentGeneration);
-                        if(saved==position&&saved.valid()&&!saved.source.equals("mt_preserved")&&!(saved.precisionBits>0&&saved.precisionBits<32))
-                            showMapGeofenceAlerts(radio,device,id,name.isEmpty()?id:name,saved.latitude,saved.longitude);
+                        // Evaluate the current report's circle even when the map retains an older precise fix.
+                        if(report.canTriggerGeofence(radio)&&(saved==report||NodePosition.choose(saved,report)!=saved))
+                            showMapGeofenceAlerts(radio,device,id,name.isEmpty()?id:name,report);
                     });
                 }
                 publishRadioUpdate();
@@ -1218,6 +1237,11 @@ public final class MainActivity extends Activity {
                 if (selected == this) refreshChannels(index);
                 publishRadioUpdate();
             });
+        }
+        String channelSetupMessage="";
+        @Override public void channelSetupResult(String message) {
+            int attempt=generation;
+            main.post(()->{if(generation!=attempt)return;channelSetupMessage=message;sendNodeManagement(meshcore?"mc":"mt",ownId,"");});
         }
     }
 
@@ -1415,7 +1439,7 @@ public final class MainActivity extends Activity {
 
     private final class Bridge {
         @JavascriptInterface public boolean usageRecording() {return getPreferences(0).getBoolean("record_mt_usage",false);}
-        @JavascriptInterface public void recordUsage(boolean enabled) {getPreferences(0).edit().putBoolean("record_mt_usage",enabled).apply();}
+        @JavascriptInterface public void recordUsage(boolean enabled) {getPreferences(0).edit().putBoolean("record_mt_usage",enabled).putLong("usage_recording_epoch",System.currentTimeMillis()).apply();}
         @JavascriptInterface public String usageDevices() {return chatStore.usageDevices().toString();}
         @JavascriptInterface public String usageHistory(String device,long start,long end,boolean graph,int page) {
             return chatStore.usageHistory(device,start,end,graph,page).toString();
@@ -1722,6 +1746,24 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void nodeAction(String radio, String id, String action, String text) {
             main.post(() -> MainActivity.this.nodeAction(session(radio), id, action, text));
         }
+        @JavascriptInterface public void getNodeManagement(String radio,String id){main.post(()->sendNodeManagement(radio,id,""));}
+        @JavascriptInterface public String generateChannelKey(boolean meshcore){
+            byte[] key=new byte[meshcore?16:32];new java.security.SecureRandom().nextBytes(key);
+            if(!meshcore)return java.util.Base64.getEncoder().encodeToString(key);
+            StringBuilder result=new StringBuilder();for(byte b:key)result.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return result.toString();
+        }
+        @JavascriptInterface public void addRadioChannel(String radio,String id,String name,String mode,String secret){
+            main.post(()->{
+                RadioSession s=managedRadio(radio,id);
+                try {
+                    if(new JSONObject(getPreferences(0).getString("member_config","{}")).optBoolean("enabled"))throw new IllegalArgumentException("Node management is unavailable in member mode");
+                    if(s==null||!s.connected||s.loading||s.protocol==null)throw new IllegalArgumentException("Connect this radio and wait for its channels to finish loading");
+                    byte[] frame=s.protocol.addChannel(name.trim(),mode,secret.trim());
+                    s.channelSetupMessage="Adding channel… waiting for radio verification.";s.send(frame);
+                    sendNodeManagement(radio,id,"");
+                }catch(IllegalArgumentException|JSONException error){if(s!=null)s.channelSetupMessage=error.getMessage();sendNodeManagement(radio,id,error.getMessage());}
+            });
+        }
         @JavascriptInterface public void forgetNode(String key,String id,String name) {
             main.post(()->flushRadioStorage(()->{
                 if(closing)return;
@@ -2019,6 +2061,24 @@ public final class MainActivity extends Activity {
         if ("mt".equals(id)) return selectedMt;
         if ("mc".equals(id)) return selectedMc;
         return sessions.get(id);
+    }
+    private RadioSession managedRadio(String radio,String id){
+        for(RadioSession s:sessions.values())if(s.connected&&s.ownId.equals(id)&&radio.equals(s.meshcore?"mc":"mt"))return s;
+        return null;
+    }
+    private void sendNodeManagement(String radio,String id,String error){
+        if(!pageReady||closing)return;
+        try {
+            RadioSession s=managedRadio(radio,id);
+            boolean ready=s!=null&&!s.loading&&s.protocol!=null;
+            ChannelAdmin admin=ready?s.protocol.channelAdmin():null;
+            JSONArray channels=new JSONArray();
+            if(ready)for(Map.Entry<Integer,String> channel:s.channelNames.entrySet())channels.put(new JSONObject().put("index",channel.getKey()).put("name",channel.getValue()));
+            JSONObject data=new JSONObject().put("radio",radio).put("id",id).put("ready",ready)
+                .put("channels",channels).put("freeSlot",admin==null?-1:admin.freeSlot()).put("busy",admin!=null&&admin.active())
+                .put("blocked",admin!=null&&admin.blocked()).put("message",!error.isEmpty()?error:s==null?"Connect this radio to manage its channels.":s.loading?"Wait for radio loading to finish.":s.channelSetupMessage);
+            web.evaluateJavascript("window.onNodeManagement("+data+")",null);
+        }catch(JSONException ignored){nodeActionResult("Could not load node management");}
     }
     private RadioSession newConnectionSession(String radio) {
         if(!"mt".equals(radio) && !"mc".equals(radio)) return null;
@@ -2717,8 +2777,8 @@ public final class MainActivity extends Activity {
         mapSensePacket=null;
         showMapSenseResult(title,mapSenseDestination,detail);
     }
-    private void showMapGeofenceAlerts(String radio,String device,String id,String name,double latitude,double longitude){
-        try{JSONArray alerts=mapData.geofenceChanges(radio,device,id,latitude,longitude);
+    private void showMapGeofenceAlerts(String radio,String device,String id,String name,NodePosition position){
+        try{JSONArray alerts=mapData.geofenceChanges(radio,device,id,position);
             for(int i=0;i<alerts.length();i++){JSONObject alert=alerts.getJSONObject(i);String message=(name.isEmpty()?id:name)+" "+alert.getString("event")+" "+alert.getString("title");
                 Runnable notify=()->{if(closing)return;
                     if(pageReady&&visible)web.evaluateJavascript("window.onMapAlert("+JSONObject.quote(message)+")",null);

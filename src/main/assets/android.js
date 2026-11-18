@@ -796,8 +796,11 @@ function renderChannelsScreen() {
   renderChannelSide('left'); renderChannelSide('right');
   const radio=state[network], available=radio.channels;
   const selectedChannel=radio.channels.find(c=>c.index===channel[network]);
-  el('channel-chat-title').textContent=(selectedChannel?selectedChannel.name:'Choose a channel')+
-    ' · '+radioLabel(network)+(radio.ownName?' · '+radio.ownName:'');
+  const chatTitle=el('channel-chat-title');
+  chatTitle.textContent='';
+  if(selectedChannel) chatTitle.appendChild(node('span','channel-name',selectedChannel.name));
+  else chatTitle.appendChild(document.createTextNode('Choose a channel'));
+  chatTitle.appendChild(document.createTextNode(' · '+radioLabel(network)+(radio.ownName?' · '+radio.ownName:'')));
   const messages = el('chat-messages');
   const entries=selectedChannel?chronologicalHistory(radio.chats[String(channel[network])]||[]):[];
   if(selectedChannel)ensureMessageSearch('channel',radioType(network),radio.ownId,'',channel[network],entries.length);
@@ -885,7 +888,9 @@ function renderMyNodes() {
     remove.onclick = () => AndroidBridge.removeKnown(item.radio,item.id);
     const connect=node('button','',item.connected||item.connecting?'Disconnect':'Connect');
     connect.onclick=()=>item.connected||item.connecting?AndroidBridge.disconnectKnown(item.radio,item.id):AndroidBridge.connectKnown(item.radio,item.id);
-    actions.append(connect,view,remove); card.appendChild(actions); list.appendChild(card);
+    const manage=node('button','','Manage');
+    manage.onclick=()=>openNodeManagement(item);
+    actions.append(connect,manage,view,remove); card.appendChild(actions); list.appendChild(card);
   }
   updateConnectSelected();
 }

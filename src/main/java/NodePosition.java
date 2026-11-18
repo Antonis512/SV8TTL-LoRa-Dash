@@ -18,6 +18,23 @@ final class NodePosition {
         return Double.isFinite(lat)&&Double.isFinite(lon)&&Math.abs(lat)<=90&&Math.abs(lon)<=180&&!(lat==0&&lon==0);
     }
     boolean valid(){return valid(latitude,longitude);}
+    boolean canTriggerGeofence(String radio) {
+        return valid()&&!source.equals("mt_preserved")&&
+                (!(precisionBits>0&&precisionBits<32)||uncertaintyRadius(radio)>0);
+    }
+    double uncertaintyRadius(String radio) {
+        if(!"mt".equals(radio)||!valid())return 0;
+        int precision=precisionBits;
+        if("mt".equals(radio)&&precisionBits==0) {
+            // Match the visible map circle without rewriting reported precision metadata.
+            long lat=Math.round(latitude*10000000),lon=Math.round(longitude*10000000);
+            for(int bits=10;bits<=19;bits++) {
+                long width=1L<<(32-bits),mask=width-1;
+                if((lat&mask)==width/2&&(lon&mask)==width/2){precision=bits;break;}
+            }
+        }
+        return precision>=10&&precision<=19?23905787.925008/Math.pow(2,precision):0;
+    }
     long time(){return fixTime>0?fixTime:reportTime;}
     static NodePosition unknown(double lat,double lon){return new NodePosition(lat,lon,0,0,0,0,"legacy");}
     private static long cellCenter(double value,int bits) {

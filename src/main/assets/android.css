@@ -66,6 +66,17 @@
 #channels-center { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .chat-title-row { display:flex; align-items:center; border-bottom:1px solid var(--border); }
 #channel-chat-title,#dm-chat-title { flex:1; min-width:0; padding:8px 5px; color:var(--text); font-size:11px; font-weight:700; overflow-wrap:anywhere; }
+#channel-chat-title .channel-name { color:#49ff79; font-weight:400; text-shadow:0 0 4px #49ff7999,0 0 10px #49ff7966; }
+#node-management-identity { overflow-wrap:anywhere; color:var(--accent); margin-bottom:14px; }
+#node-management-menu button { display:block; width:100%; text-align:left; min-height:56px; margin:8px 0; }
+#node-management-menu button span { display:block; color:var(--muted); font-size:12px; }
+#node-management-channels h3 { margin:16px 0 8px; }
+#node-channel-form > label,#node-channel-key-fields > label { display:block; margin:12px 0; }
+#node-channel-form .form-input,#node-channel-form select { display:block; width:100%; margin-top:5px; box-sizing:border-box; }
+#node-channel-form .node-key-show { display:flex; align-items:center; gap:8px; }
+#node-channel-form button { min-height:44px; margin:8px 0; }
+#node-channel-status { margin-top:12px; overflow-wrap:anywhere; }
+.node-channel-row { padding:8px 0; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
 .chat-search-toggle { flex:none; width:36px; min-height:36px; border:0; border-left:1px solid var(--border); background:var(--bg2); color:var(--accent); font-size:18px; cursor:pointer; }
 .chat-search-toggle:disabled { opacity:.45; cursor:default; }
 .chat-search-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }

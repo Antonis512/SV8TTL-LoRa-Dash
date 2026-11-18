@@ -15,7 +15,7 @@ function openUsageHistory() {
   }
   el('usage-record').checked=AndroidBridge.usageRecording();
   const devices=new Map();
-  for(const d of state?.myNodes||[])if(d.radio==='mt')devices.set(d.id,(d.name && d.name!==d.id)?d.name+' · '+d.id:d.id);
+  for(const d of state?.myNodes||[])if(d.radio==='mt'||d.radio==='mc')devices.set(d.radio==='mc'?'mc:'+d.id:d.id,d.radio.toUpperCase()+' · '+((d.name && d.name!==d.id)?d.name+' · '+d.id:d.id));
   for(const id of JSON.parse(AndroidBridge.usageDevices()))if(!devices.has(id))devices.set(id,id);
   const list=el('usage-devices'),target=el('usage-delete-device');
   const selected=new Set([...list.querySelectorAll('input:checked')].map(input=>input.value));
@@ -29,7 +29,7 @@ function openUsageHistory() {
     target.add(new Option(name,id));
   }
   if(devices.has(previousTarget))target.value=previousTarget;
-  if(!devices.size)list.textContent='Connect a Meshtastic radio to start recording.';
+  if(!devices.size)list.textContent='Connect a Meshtastic or MeshCore radio to start recording.';
   usageInitialized=true;refreshUsage();
 }
 function usageRange() {
@@ -53,7 +53,7 @@ function drawUsageTable(section,input,range,page) {
   section.replaceChildren(node('h3','',input.parentElement.textContent));
   if(!rows.length){section.append('No records in this period.');return;}
   const table=document.createElement('table'),header=table.createTHead().insertRow();
-  for(const title of ['Recorded','AirUtil TX','ChUtil'])header.append(node('th','',title));
+  for(const title of (input.value.startsWith('mc:')?['Recorded','TX utilization','RX utilization']:['Recorded','AirUtil TX','ChUtil']))header.append(node('th','',title));
   const body=table.createTBody();
   for(const [time,air,channel] of rows.slice(0,100)){
     const row=body.insertRow();
@@ -69,14 +69,14 @@ function drawUsageTable(section,input,range,page) {
 function drawUsageGraph(result,inputs,[start,end]) {
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.setAttribute('viewBox','0 0 480 185');svg.setAttribute('role','img');
-  svg.setAttribute('aria-label','Meshtastic utilization by time, from 0 to 100 percent');
+  svg.setAttribute('aria-label','Radio utilization by time, from 0 to 100 percent; gaps indicate missing data');
   const add=(tag,attrs,label)=>{
     const item=document.createElementNS(svg.namespaceURI,tag);
     for(const [key,value] of Object.entries(attrs))item.setAttribute(key,value);
     if(label)item.textContent=label;
     svg.append(item);
   };
-  result.append(svg,node('p','help','Solid line: AirUtil TX · Dashed line: ChUtil. Points show averages within each time interval.'));
+  result.append(svg,node('p','help','MT: solid AirUtil TX, dashed ChUtil. MC: solid TX, dashed RX utilization, calculated between airtime reports. Points show interval averages; gaps indicate missing data. MC needs two consecutive reports; older firmware may not provide airtime.'));
   const x=time=>40+430*(time-start)/(end-start),y=value=>145-1.35*value;
   for(const level of [0,25,50,75,100]){
     add('line',{x1:40,x2:470,y1:y(level),y2:y(level),stroke:'currentColor',opacity:.2});
@@ -90,11 +90,12 @@ function drawUsageGraph(result,inputs,[start,end]) {
     const legend=node('div','',input.parentElement.textContent+(rows.length?'':' · No records'));
     legend.style.borderLeft='5px solid '+color;legend.style.paddingLeft='0.5em';result.append(legend);
     for(const metric of [1,2]){
-      let path='',previous=false;
+      let path='',previous=null;
       for(const row of rows){
-        if(row[metric]===null){previous=false;continue;}
+        if(row[metric]===null){previous=null;continue;}
         const cx=x(row[0]),cy=y(row[metric]);
-        path+=(previous?' L':' M')+cx+' '+cy;previous=true;
+        const continuous=previous && row[3]===previous[3] && row[0]-(previous[4]??previous[0])<=900000;
+        path+=(continuous?' L':' M')+cx+' '+cy;previous=row;
         add('circle',{cx,cy,r:metric===1?2:1.3,fill:color});
       }
       add('path',{d:path,stroke:color,fill:'none','stroke-width':2,'stroke-dasharray':metric===2?'5 4':'none'});

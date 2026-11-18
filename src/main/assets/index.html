@@ -224,7 +224,7 @@
       <button type="button" onclick="showSettingsPage('nodes')"><strong>My Nodes</strong><span>Connect and manage known radios</span></button>
       <button type="button" onclick="showSettingsPage('connections')"><strong>Add Radio Connections</strong><span>Add a radio using Bluetooth or USB</span></button>
       <button type="button" onclick="showSettingsPage('timeouts')"><strong>Request timeouts</strong><span>Signal Quality, Ping and traceroute</span></button>
-      <button type="button" onclick="openSettingsWindow('usage')"><strong>MT utilization history</strong><span>Record and compare AirUtil TX and ChUtil</span></button>
+      <button type="button" onclick="openSettingsWindow('usage')"><strong>MT / MC utilization history</strong><span>Record and compare radio airtime utilization</span></button>
       <h2>Messaging</h2>
       <button type="button" onclick="showSettingsPage('presets')"><strong>Message Templates</strong><span>Save messages for Chat and replies</span></button>
       <button type="button" onclick="showSettingsPage('sending')"><strong>Sending options</strong><span>Send to multiple · pause or continue a saved chain</span></button>
@@ -333,9 +333,9 @@
 </main>
 
 <dialog id="settings-window-usage" class="settings-window" aria-labelledby="usage-title">
-  <div class="settings-window-header"><h2 id="usage-title">MT utilization history</h2><button type="button" class="window-x" aria-label="Close MT utilization history" onclick="closeSettingsWindow('usage')">×</button></div>
+  <div class="settings-window-header"><h2 id="usage-title">MT / MC utilization history</h2><button type="button" class="window-x" aria-label="Close utilization history" onclick="closeSettingsWindow('usage')">×</button></div>
   <div class="settings-window-body">
-      <label class="config-switch"><input type="checkbox" id="usage-record" onchange="AndroidBridge.recordUsage(this.checked)"> Record utilization from all connected Meshtastic radios</label>
+      <label class="config-switch"><input type="checkbox" id="usage-record" onchange="AndroidBridge.recordUsage(this.checked)"> Record utilization from all connected Meshtastic and MeshCore radios</label>
       <fieldset><legend>Devices</legend><div id="usage-devices"></div></fieldset>
       <label>From <input class="form-input" type="datetime-local" id="usage-start" onchange="refreshUsage()"></label>
       <label>Through <input class="form-input" type="datetime-local" id="usage-end" onchange="refreshUsage()"></label>
@@ -402,6 +402,32 @@
   <div class="settings-window-body"><div id="my-node-history"></div></div>
 </dialog>
 <div id="dm-context" class="dm-context-overlay" role="dialog" aria-modal="true" hidden></div>
+<dialog id="settings-window-node-management" class="settings-window" aria-labelledby="node-management-title">
+  <div class="settings-window-header"><h2 id="node-management-title">Manage node</h2><button type="button" class="window-x" aria-label="Close node management" onclick="closeSettingsWindow('node-management')">×</button></div>
+  <div class="settings-window-body">
+    <p id="node-management-identity"></p>
+    <div id="node-management-menu" class="settings-menu"></div>
+    <section id="node-management-channels" hidden>
+      <button type="button" onclick="showNodeManagementSection('home')">← Manage node</button>
+      <h3>Channels</h3><div id="node-channel-list"></div>
+      <h3>Add channel</h3><p id="node-channel-help" class="help"></p><p id="node-channel-slot" class="help"></p>
+      <form id="node-channel-form" onsubmit="addNodeChannel(event)">
+        <label>Name <input id="node-channel-name" class="form-input" required autocomplete="off"></label>
+        <label>Key type <select id="node-channel-mode" class="form-select" onchange="changeNodeChannelMode()"></select></label>
+        <div id="node-channel-key-fields">
+          <label><span id="node-channel-key-label">Key</span><input id="node-channel-key" class="form-input" type="password" autocomplete="off" spellcheck="false"></label>
+          <label class="node-key-show"><input id="node-key-show" type="checkbox" onchange="el('node-channel-key').type=this.checked?'text':'password'"> Show key</label>
+          <button type="button" onclick="generateNodeChannelKey()">Generate key</button>
+          <p class="help">Keep a copy of a generated key to add this channel on your other radios.</p>
+        </div>
+        <button id="node-channel-add" type="submit" disabled>Add to this radio</button>
+      </form>
+      <p id="node-channel-status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+  <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('node-management')">Close</button></div>
+</dialog>
+<script src="node-management.js" defer></script>
 <nav id="bottom-nav">
   <button class="nav-btn" data-tab="map" onclick="switchTab('map')"><span class="nav-icon">◎</span><span>Map</span></button>
   <button class="nav-btn" data-tab="nodes" onclick="switchTab('nodes')"><span class="nav-icon">⬡</span><span>Nodes</span></button>

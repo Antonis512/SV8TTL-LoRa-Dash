@@ -36,7 +36,7 @@ final class ChatStore extends SQLiteOpenHelper {
         final String name;
         SavedChannel(int index, String name) { this.index=index; this.name=name; }
     }
-    ChatStore(Context context) { super(context, "chat-history.db", null, 20); setWriteAheadLoggingEnabled(true); }
+    ChatStore(Context context) { super(context, "chat-history.db", null, 21); setWriteAheadLoggingEnabled(true); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, radio TEXT NOT NULL, " +
                 "node_id TEXT NOT NULL DEFAULT '', channel INTEGER NOT NULL, sender TEXT NOT NULL, " +
@@ -44,6 +44,7 @@ final class ChatStore extends SQLiteOpenHelper {
                 "own INTEGER NOT NULL, delivery TEXT NOT NULL, peer TEXT NOT NULL DEFAULT '', unread INTEGER NOT NULL DEFAULT 0, hops INTEGER NOT NULL DEFAULT -1, heard_repeats INTEGER NOT NULL DEFAULT -1, paths TEXT NOT NULL DEFAULT '[]', packet_id INTEGER NOT NULL DEFAULT 0, reply_id INTEGER NOT NULL DEFAULT 0, reaction INTEGER NOT NULL DEFAULT 0)");
         db.execSQL("CREATE INDEX messages_node ON messages(radio,node_id,channel,id)");
         createUsageHistory(db);
+        addUsageSegments(db);
         createRadioTables(db);
         addHeardSettings(db);
         createHistoryIndex(db);
@@ -58,10 +59,14 @@ final class ChatStore extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE mt_usage(device TEXT NOT NULL,time INTEGER NOT NULL,air REAL,channel REAL)");
         db.execSQL("CREATE INDEX mt_usage_time ON mt_usage(device,time)");
     }
-    void saveUsage(String device,long time,Float air,Float channel) {
+    private void addUsageSegments(SQLiteDatabase db) {
+        db.execSQL("ALTER TABLE mt_usage ADD COLUMN segment TEXT NOT NULL DEFAULT ''");
+    }
+    void saveUsage(String device,long time,Float air,Float channel,String segment) {
         ContentValues values=new ContentValues();
         values.put("device",device);values.put("time",time);
         values.put("air",air);values.put("channel",channel);
+        values.put("segment",segment);
         getWritableDatabase().insertOrThrow("mt_usage",null,values);
     }
     org.json.JSONArray usageDevices() {
@@ -75,18 +80,44 @@ final class ChatStore extends SQLiteOpenHelper {
         org.json.JSONArray result=new org.json.JSONArray();
         if(start<0 || end<start || page<0)return result;
         String filter=" FROM mt_usage WHERE device=? AND time BETWEEN ? AND ?";
-        // At most 360 time buckets per device, regardless of the recording duration.
+        // Bucket within continuous runs, never across reconnects or missing samples.
         long bucket=(end-start)/360+1;
-        String sql=graph ? "SELECT MIN(time),AVG(air),AVG(channel)"+filter+" GROUP BY (time-"+start+")/"+bucket+" ORDER BY MIN(time)"
+        String sql=graph ? "SELECT time,air,channel,segment"+filter+" ORDER BY time,rowid"
                 : "SELECT time,air,channel"+filter+" ORDER BY time DESC,rowid DESC LIMIT 101 OFFSET "+(100L*page);
         try(Cursor c=getReadableDatabase().rawQuery(sql,new String[]{device,String.valueOf(start),String.valueOf(end)})){
+            long first=0,last=0,bin=-1,run=0;
+            String segment=null;
+            double airSum=0,channelSum=0;
+            int airCount=0,channelCount=0;
+            boolean pending=false,airMissing=false,channelMissing=false;
             while(c.moveToNext()) {
+                if(graph) {
+                    long time=c.getLong(0),nextBin=(time-start)/bucket;
+                    boolean gap=pending && (!c.getString(3).equals(segment) || time-last>900000 ||
+                            airMissing!=c.isNull(1) || channelMissing!=c.isNull(2));
+                    if(pending && (gap || nextBin!=bin)) {
+                        result.put(usageBucket(first,last,airSum,airCount,channelSum,channelCount,run));
+                        airSum=channelSum=0;airCount=channelCount=0;pending=false;
+                    }
+                    if(gap)run++;
+                    if(!pending){first=time;bin=nextBin;pending=true;}
+                    last=time;segment=c.getString(3);airMissing=c.isNull(1);channelMissing=c.isNull(2);
+                    if(!airMissing){airSum+=c.getDouble(1);airCount++;}
+                    if(!channelMissing){channelSum+=c.getDouble(2);channelCount++;}
+                    continue;
+                }
                 org.json.JSONArray row=new org.json.JSONArray().put(c.getLong(0));
                 for(int i=1;i<=2;i++)row.put(c.isNull(i)?org.json.JSONObject.NULL:(Object)c.getDouble(i));
                 result.put(row);
             }
+            if(graph && pending)result.put(usageBucket(first,last,airSum,airCount,channelSum,channelCount,run));
         }
         return result;
+    }
+    private org.json.JSONArray usageBucket(long first,long last,double air,int airCount,double channel,int channelCount,long run) {
+        return new org.json.JSONArray().put(first)
+                .put(airCount==0?org.json.JSONObject.NULL:(Object)(air/airCount))
+                .put(channelCount==0?org.json.JSONObject.NULL:(Object)(channel/channelCount)).put(run).put(last);
     }
     private void createHistoryIndex(SQLiteDatabase db) {
         db.execSQL("CREATE INDEX IF NOT EXISTS messages_history ON messages(radio,node_id,peer,channel,received_at,id)");
@@ -101,6 +132,7 @@ final class ChatStore extends SQLiteOpenHelper {
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         if(oldVersion<20)createUsageHistory(db);
+        if(oldVersion<21)addUsageSegments(db);
         if(oldVersion<18)createGeofenceAlerts(db);
         if(oldVersion<17)ContactsStore.create(db);
         if(oldVersion<15)createMapTables(db);

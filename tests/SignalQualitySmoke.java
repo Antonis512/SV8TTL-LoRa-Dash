@@ -43,6 +43,12 @@ public class SignalQualitySmoke {
   samples.clear();
   byte[] encrypted=new ProtoWire.Writer().fixed32(1,0x12345678).bytes(5,new byte[]{1,2,3}).varint(15,3).varint(9,3).varint(12,-99).build();
   p.receive(new ProtoWire.Writer().bytes(2,encrypted).build(),events);check(samples.size()==1&&(Integer)samples.get(0)[4]==0,"Direct encrypted packets also supply reception history");
-  System.out.println("Signal Quality request, correlation, measurements and expiry passed");
+  samples.clear();
+  byte[] mc=new byte[18];mc[0]=16;mc[1]=(byte)-28;for(int i=4;i<10;i++)mc[i]=(byte)0xab;mc[10]=0;mc[16]='H';mc[17]='i';
+  new MeshCoreProtocol().receive(mc,events);
+  check(samples.size()==1&&samples.get(0)[0].equals("abababababab")&&(Float)samples.get(0)[2]==-7f&&samples.get(0)[3]==null&&(Integer)samples.get(0)[4]==0,"MC V3 supplies signed quarter-dB SNR and incoming flood hops, never invented RSSI");
+  samples.clear();mc[10]=(byte)255;new MeshCoreProtocol().receive(mc,events);
+  check((Integer)samples.get(0)[4]==-1,"MC direct-route flag does not establish zero incoming hops");
+  System.out.println("Signal Quality request, correlation, measurements, MC reception and expiry passed");
  }
 }

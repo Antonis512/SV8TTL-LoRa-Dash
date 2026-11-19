@@ -220,8 +220,9 @@ function switchTab(tab) {
   if (tab === 'chat'&&!state?.memberConfig?.enabled) AndroidBridge.markRead(network);
   if (tab === 'log') loadLog();
   if (tab === 'contacts') {AndroidBridge.loadContacts();window.renderContacts?.();}
+  if (tab === 'nodes') AndroidBridge.loadContacts();
   document.querySelector('.nav-btn.active')?.scrollIntoView({block:'nearest',inline:'nearest'});
-  if (tab === 'map') { AndroidBridge.loadMap(); if(window.mapShown)window.mapShown(); }
+  if (tab === 'map') { AndroidBridge.loadContacts(); AndroidBridge.loadMap(); if(window.mapShown)window.mapShown(); }
   renderActiveRadioViews();
 }
 function renderActiveRadioViews(){
@@ -608,11 +609,13 @@ function nodeButton(parent, label, action, radio, entry, handler) {
   button.onclick = handler || (() => AndroidBridge.nodeAction(state[radio]?.key||radio, entry.id, action, ''));
   parent.appendChild(button);
   if(action==='tr'&&radioType(radio)==='mt'){button.dataset.mtTraceroute=label;updateTracerouteButton(button);}
+  return button;
 }
 function nodeDetails(radio, entry) {
   const details = node('div', 'node-details');
   details.appendChild(node('div', 'node-facts', displayRole(radio,entry.role) + (entry.model ? ' · ' + entry.model : '') + ' · ' + entry.id));
   details.appendChild(node('div','node-facts',heardDescription(radioType(radio),entry.heardSettings)));
+  details.appendChild(nodeSignalReport(radioType(radio),entry));
   nodeButton(details,'Enter Name','',radio,entry,()=>enterNodeName(radio,entry));
   nodeButton(details,'Assign to Contact','',radio,entry,()=>assignNodeToContact(radio,entry));
   if(entry.id!==state[radio].ownId) nodeButton(details,'Forget Node','',radio,entry,()=>forgetNode(radio,entry));
@@ -640,8 +643,9 @@ function nodeDetails(radio, entry) {
     details.appendChild(actions);
     if(radioType(radio)==='mc' && entry.hops>0)details.appendChild(node('p','help','Trace learned repeaters tests the saved repeater path for this contact and reports signal quality on the return trip.'));
   }
-  if (Number.isFinite(entry.latitude) && Number.isFinite(entry.longitude))
-    nodeButton(details,'Map','map',radio,entry,()=>openMapNode(radioType(radio),entry.id,state[radio].ownId));
+  const mapButton=nodeButton(details,'Show on map','map',radio,entry,()=>openMapNode(radioType(radio),entry.id,state[radio].ownId));
+  mapButton.disabled=!mapHasPosition({lat:entry.latitude,lon:entry.longitude});
+  if(mapButton.disabled)mapButton.title='Position unavailable';
   if(radioType(radio)==='mt')nodeButton(details,'Signal Quality','',radio,entry,()=>openSignalHistory(state[radio].key,entry.id));
   if(state[radio].lastTrace?.target===entry.id) nodeButton(details,state[radio].lastTrace.action==='discovery'?'Last path discovery':'Last trace','',radio,entry,()=>onTraceResult(state[radio].lastTrace));
   return details;
@@ -1000,7 +1004,9 @@ function renderNodes() {
       if(nodeRole!=='all'&&id+':'+entry.role!==nodeRole) continue;
       if(rfMenu.value!=='all'&&heardProfile(id,entry.heardSettings)!==rfMenu.value) continue;
       if(el('nodes-hide-unmessageable').checked&&!nodeMessageable(id,entry)) continue;
-      if (!(entry.name + ' ' + localNodeName(id,entry.id) + ' ' + entry.id + ' ' + displayRole(id,entry.role)).toLowerCase().includes(search)) continue;
+      if(el('nodes-direct-only').checked&&!nodeHeardDirectly(entry))continue;
+      const contactNames=window.contactNamesForNode?.(id,entry.id)||[];
+      if (!(entry.name + ' ' + localNodeName(id,entry.id) + ' ' + entry.id + ' ' + displayRole(id,entry.role)+' '+contactNames.join(' ')).toLowerCase().includes(search)) continue;
       const row = node('div', 'android-node');
       row.dataset.nodeKey=id+':'+entry.id;
       const heading = node('button', 'node-heading');
@@ -1008,13 +1014,13 @@ function renderNodes() {
       heading.appendChild(node('span', 'node-star', entry.favorite ? '★' : '☆'));
       heading.appendChild(node('small', '', id.toUpperCase()));
       heading.appendChild(node('span', 'node-name', namedNode(id,entry.id,entry.name)));
+      if(contactNames.length)heading.appendChild(node('span','node-contact-name','· '+contactNames.join(' / ')));
       const toggle=()=>{ navigationStack.push(navigationState()); openedNode = openedNode === id + ':' + entry.id ? null : id + ':' + entry.id; scrollToOpenedNode=!!openedNode; renderNodes(); };
       heading.onclick=event=>{event.stopPropagation();toggle();};
       row.onclick=event=>{if(event.target.closest('button,input,select,textarea,a,.node-details'))return;toggle();};
       row.appendChild(heading);
       row.appendChild(node('div', 'node-subtitle', (entry.model || displayRole(id,entry.role)) + (entry.model ? ' · ' + displayRole(id,entry.role) : '')));
       const facts = [heard?'Last heard '+new Date(heard*1000).toLocaleString(undefined,{hourCycle:'h23'}):'Last heard unknown',heardDescription(id,entry.heardSettings)];
-      if(!state[id].connected||entry.savedOnly)facts.push('Saved node · availability unknown');
       if (entry.hops >= 0) facts.push((id === 'mc' ? 'Route hops ' : 'Hops ') + entry.hops);
       if (Number.isFinite(entry.latitude) && Number.isFinite(entry.longitude)) {
         if (Number.isFinite(state[id].ownLatitude) && Number.isFinite(state[id].ownLongitude))

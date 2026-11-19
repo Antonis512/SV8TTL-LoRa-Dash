@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** Phone-local history partitioned by the radio's own stable identity. */
 final class ChatStore extends SQLiteOpenHelper {
@@ -260,7 +261,7 @@ final class ChatStore extends SQLiteOpenHelper {
             db.delete("map_nodes","radio=? AND id=?",new String[]{radio,peer});
             for(String table:new String[]{"map_positions","map_heard","map_geofence_state"})
                 db.delete(table,"radio=? AND node=?",new String[]{radio,peer});
-            if("mt".equals(radio))db.delete("signal_history","peer=?",new String[]{peer});
+            db.delete("signal_history","peer=? AND "+("mc".equals(radio)?"node_id LIKE 'mc:%'":"node_id NOT LIKE 'mc:%'"),new String[]{peer});
             db.setTransactionSuccessful();
         } finally {db.endTransaction();}
     }
@@ -282,6 +283,13 @@ final class ChatStore extends SQLiteOpenHelper {
         org.json.JSONArray rows=new org.json.JSONArray();
         try(Cursor c=getReadableDatabase().rawQuery("SELECT body FROM signal_history WHERE node_id=? AND peer=? ORDER BY id DESC LIMIT 1000",new String[]{ownId,peer})) {
             while(c.moveToNext())try{rows.put(new org.json.JSONObject(c.getString(0)));}catch(org.json.JSONException ignored){}
+        }
+        return rows;
+    }
+    Map<String,org.json.JSONObject> latestSignals(String ownId) {
+        Map<String,org.json.JSONObject> rows=new java.util.HashMap<>();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT peer,body FROM signal_history WHERE id IN (SELECT MAX(id) FROM signal_history WHERE node_id=? GROUP BY peer)",new String[]{ownId})) {
+            while(c.moveToNext())try{rows.put(c.getString(0),new org.json.JSONObject(c.getString(1)));}catch(org.json.JSONException ignored){}
         }
         return rows;
     }
@@ -540,7 +548,7 @@ final class ChatStore extends SQLiteOpenHelper {
             db.delete("messages","radio=? AND node_id=?",args);
             db.delete("channel_names","radio=? AND node_id=?",args);
             db.delete("node_heard","radio=? AND node_id=?",args);
-            if("mt".equals(radio))db.delete("signal_history","node_id=?",new String[]{id});
+            db.delete("signal_history","node_id=?",new String[]{("mc".equals(radio)?"mc:":"")+id});
             db.delete("known_radios","radio=? AND id=?",args);
             db.setTransactionSuccessful();
         } finally { db.endTransaction(); }

@@ -27,7 +27,7 @@ await modal.getByRole('button',{name:'Add phone numbers',exact:true}).click();aw
 await modal.getByRole('button',{name:'Add email addresses',exact:true}).click();await modal.getByLabel('Email addresses value',{exact:true}).fill('nikos@example.com');
 await modal.getByRole('button',{name:'Add custom fields',exact:true}).click();await modal.getByLabel('Custom fields label',{exact:true}).fill('Workshop');await modal.getByLabel('Custom fields value',{exact:true}).fill('Mountain station');
 await modal.getByRole('button',{name:'Add note',exact:true}).click();await modal.getByLabel('Note',{exact:true}).fill('Repairs repeaters near Volos');
-await modal.getByLabel('New category',{exact:true}).fill('Club');await modal.getByRole('button',{name:'Add category',exact:true}).click();
+await modal.getByLabel('New group',{exact:true}).fill('Club');await modal.getByRole('button',{name:'Add group',exact:true}).click();
 await modal.getByRole('button',{name:'Assign Nodes',exact:true}).click();await modal.getByLabel('Portable · MC · aabbccddeeff',{exact:true}).check();await modal.getByLabel('Base · MT · !12345678',{exact:true}).check();await modal.getByRole('button',{name:'Done',exact:true}).click();
 await page.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=2;onContactPhoto({token:contactEdit.token,photo:c.toDataURL('image/jpeg')});});
 await page.evaluate(()=>{window.failSave=true;});await modal.getByRole('button',{name:'Save Contact',exact:true}).click();assert.equal(await modal.isVisible(),true);assert.match(await modal.innerText(),/Test storage failure/);
@@ -57,6 +57,31 @@ await modal.getByLabel('Field work',{exact:true}).check();await modal.getByRole(
 await page.evaluate(()=>openContact(contactPeople().find(c=>c.id!=='imported-person').id));await page.locator('#contact-detail summary').click();await page.locator('#contact-detail').getByLabel('Network',{exact:true}).selectOption('mt');assert.equal(await page.locator('#contact-detail .contact-node').count(),1);assert.match(await page.locator('#contact-detail .contact-node').innerText(),/Base/);await page.locator('#contact-detail').getByLabel('Network',{exact:true}).selectOption('all');
 await page.evaluate(()=>deleteContact(contactById('imported-person')));await modal.getByRole('button',{name:'Delete Contact',exact:true}).click();await page.evaluate(()=>contactTrash());
 await modal.locator('.contact-toolbar').filter({hasText:'Imported'}).getByRole('button',{name:'Delete permanently',exact:true}).click();assert.equal(await page.evaluate(()=>contactById('imported-person').purged),true);assert.equal(await page.evaluate(()=>contactById('imported-person').photo),undefined);assert.equal(await page.evaluate(()=>contactById('imported-person').nodes),undefined);await modal.getByRole('button',{name:'Close',exact:true}).click();
+// Existing category records become groups without migrating or losing memberships.
+await page.evaluate(()=>{people.push({id:'g2',kind:'category',title:'Rescue'});onContactsData({items:people});editContact(contactPeople()[0]);});
+await modal.getByLabel('Add to group',{exact:true}).selectOption('g2');
+assert.equal(await modal.getByRole('button',{name:'Remove from Rescue',exact:true}).count(),1);
+await modal.getByRole('button',{name:'Remove from Rescue',exact:true}).click();
+assert.equal(await modal.getByLabel('Add to group',{exact:true}).locator('option[value="g2"]').count(),1);
+await modal.getByLabel('Add to group',{exact:true}).selectOption('g2');
+await modal.getByRole('button',{name:'Save Contact',exact:true}).click();
+assert.equal(await page.evaluate(()=>contactPeople()[0].categories.length),2);
+assert.equal(await page.locator('#contact-detail .contact-group-list small').count(),2);
+await page.evaluate(()=>{
+  const a=contactPeople()[0];window.groupA=a.categories[0];
+  people.push({id:'other',kind:'contact',alias:'Other',categories:['g2'],nodes:[{radio:'mt',id:'!other'}]});onContactsData({items:people});
+  mapData.nodes=[{radio:'mt',id:'!12345678',device:'r1',lat:38,lon:23},{radio:'mt',id:'!other',device:'r2',lat:38,lon:24},{radio:'mc',id:'!other',device:'r2',lat:38,lon:25}];renderMapFilters();
+});
+assert.equal(await page.evaluate(()=>mapFilterRows().length),3);
+await page.selectOption('#map-group',await page.evaluate(()=>groupA),{force:true});
+assert.deepEqual(await page.evaluate(()=>mapFilterRows().map(n=>n.id)),['!12345678']);
+await page.selectOption('#map-group','g2',{force:true});assert.equal(await page.evaluate(()=>mapFilterRows().length),2);
+await page.selectOption('#map-device','mt:r2',{force:true});assert.deepEqual(await page.evaluate(()=>mapFilterRows().map(n=>n.id)),['!other']);
+await page.selectOption('#map-device','all',{force:true});await page.selectOption('#map-contact','other',{force:true});assert.equal(await page.evaluate(()=>mapFilterRows().length),1);
+assert.equal(await page.evaluate(()=>mapNodePopup(mapData.nodes[1]).firstElementChild.textContent),'Other');
+await page.evaluate(()=>clearMapFilters());assert.equal(await page.evaluate(()=>mapFilterRows().length),3);
+await page.evaluate(()=>{people.find(c=>c.id==='other').deletedAt=Date.now();onContactsData({items:people});});
+assert.equal(await page.locator('#map-contact option[value="other"]').count(),0);
 // Back and bottom-bar overflow at phone sizes, with reduced space for system bars/keyboard.
 for(const [width,height] of [[320,640],[390,756],[390,732],[390,430],[780,640]]){await page.setViewportSize({width,height});await page.evaluate(()=>switchTab('contacts'));assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.ok(await page.locator('#bottom-nav').evaluate(e=>e.getBoundingClientRect().bottom<=innerHeight));}
 await page.setViewportSize({width:390,height:780});await page.locator('#contacts-tools').evaluate(e=>e.open=false);await page.screenshot({path:'build/contacts-list.png'});

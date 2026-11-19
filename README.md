@@ -4,7 +4,9 @@ Standalone Android app for MeshCore and Meshtastic radios over Bluetooth or USB 
 
 User manuals: [English](USER-MANUAL.md) · [Ελληνικά](USER-MANUAL-el.md). Covers setup, Chat, presets, Map, sending options, backups and troubleshooting. The illustrated guides use fictional devices, users and nodes.
 
-Current version **0.10.33 (60)** adds per-radio channel management, MeshCore utilization history, a highlighted Chat channel name, and possible-entrance geofence alerts when any part of a Meshtastic uncertainty circle overlaps the fence. Repeated overlap does not repeat the alert. See [build notes](BUILD-0.10.33.md). Physical phone and radio validation is pending.
+Current version **0.10.34 (61)** adds contact Groups, group/contact Map filters, node search and Show on map, contact names on nodes and popups, latest reception reports and direct-heard filtering, and clearer Chat channel selectors. The availability field is removed. Both user manuals are updated. Physical phone/radio validation remains pending. See [build notes](BUILD-0.10.34.md).
+
+Version **0.10.33 (60)** adds per-radio channel management, MeshCore utilization history, a highlighted Chat channel name, and possible-entrance geofence alerts when any part of a Meshtastic uncertainty circle overlaps the fence. Repeated overlap does not repeat the alert. See [build notes](BUILD-0.10.33.md). Physical phone and radio validation is pending.
 
 Version **0.10.32 (59)** adds manual phone location sharing in member Chat. Choose a channel or contact, check the destination and coordinates, and send a Meshtastic waypoint or a MeshCore marker. Open a shared location directly from the conversation with **View on map**. Automatic location sharing is not implemented.
 

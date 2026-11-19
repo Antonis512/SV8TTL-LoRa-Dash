@@ -51,7 +51,9 @@ const path=require('node:path');
   const before=await page.evaluate(()=>calls.filter(c=>c[0]==='setRequestTimeout'&&c[1]==='trace').length);
   await page.locator('#timeout-trace').fill('0');await page.locator('#timeout-trace').dispatchEvent('change');
   assert.equal(await page.evaluate(()=>calls.filter(c=>c[0]==='setRequestTimeout'&&c[1]==='trace').length),before,'Invalid timeout rejected');
-  const labels=await page.locator('#settings-home strong').allTextContents();assert.equal(labels[labels.indexOf('Sending options')+1],'Request timeouts');
+  const timeoutShortcut=page.locator('#settings-home').getByRole('button',{name:'Request timeouts Signal Quality, Ping and traceroute'});
+  await page.evaluate(()=>showSettingsPage('home'));await timeoutShortcut.click();
+  assert.equal(await page.locator('#settings-timeouts-page').isVisible(),true);
   console.log('Signal history: graph filtering, zero SNR, receiver selection, offline history, clear confirmation and responsive layout passed');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

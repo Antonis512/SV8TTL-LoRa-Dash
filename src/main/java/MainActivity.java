@@ -999,12 +999,13 @@ public final class MainActivity extends Activity {
             main.post(()->{if(generation!=currentGeneration||closing||ownId.isEmpty())return;
                 try {
                     JSONObject sample=new JSONObject().put("time",seconds>0?seconds*1000:System.currentTimeMillis())
-                        .put("phoneTime",seconds<=0).put("hops",hops).put("stats",stats).put("requested",requested).put("mqtt",mqtt);
+                        .put("phoneTime",seconds<=0).put("hops",hops).put("stats",stats).put("requested",requested).put("mqtt",mqtt)
+                        .put("settings",observedSettings(seconds)).put("timeSource",meshcore?"message":"reception");
                     if(snr!=null)sample.put("snr",snr);if(rssi!=null)sample.put("rssi",rssi);
-                    String device=ownId,json=sample.toString();
+                    String device=(meshcore?"mc:":"")+ownId,json=sample.toString();
                     storeUpdate(()->chatStore.saveSignal(device,target,json));
                     if(!loading)flushRadioStorage(()->{
-                        if(generation==currentGeneration&&pageReady&&!closing)web.evaluateJavascript("window.onSignalSampleSaved("+JSONObject.quote(key)+","+JSONObject.quote(target)+")",null);
+                        if(generation==currentGeneration&&pageReady&&!closing){web.evaluateJavascript("window.onSignalSampleSaved("+JSONObject.quote(key)+","+JSONObject.quote(target)+")",null);publishRadioUpdate();}
                     });
                 } catch(JSONException ignored){}
             });
@@ -3139,10 +3140,11 @@ public final class MainActivity extends Activity {
         JSONArray nodesJson = new JSONArray();
         Map<String,String> heardSettings=session.loading?java.util.Collections.emptyMap():chatStore.heardSettings(session.meshcore?"mc":"mt",session.ownId);
         Map<String,Long> heardTimes=session.loading?java.util.Collections.emptyMap():chatStore.heardTimes(session.meshcore?"mc":"mt",session.ownId);
+        Map<String,JSONObject> lastSignals=session.loading?java.util.Collections.emptyMap():chatStore.latestSignals((session.meshcore?"mc:":"")+session.ownId);
         if(!session.loading)for (NodeEntry node : session.knownNodes.values())
             {
                 JSONObject item = new JSONObject().put("id", node.id).put("name", node.name)
-                        .put("heardSettings",heardSettings.get(node.id)).put("lastHeard",heardTimes.getOrDefault(node.id,0L)).put("role", node.role).put("model", node.model).put("hops", node.hops)
+                        .put("heardSettings",heardSettings.get(node.id)).put("lastHeard",heardTimes.getOrDefault(node.id,0L)).put("role", node.role).put("model", node.model).put("hops", node.hops).put("lastSignal",lastSignals.get(node.id))
                         .put("favorite", getPreferences(0).getBoolean((session.meshcore ? "mc:" : "mt:") + session.ownId + ":" + node.id, false));
                 if (Double.isFinite(node.latitude) && Double.isFinite(node.longitude))
                     item.put("latitude", node.latitude).put("longitude", node.longitude);
@@ -3154,7 +3156,7 @@ public final class MainActivity extends Activity {
             while(c.moveToNext()) {
                 String id=c.getString(0);if(session.knownNodes.containsKey(id))continue;
                 JSONObject item=new JSONObject().put("id",id).put("name",c.getString(1)).put("role",c.getString(2))
-                        .put("model","").put("hops",-1).put("savedOnly",true).put("heardSettings",heardSettings.get(id))
+                        .put("model","").put("hops",-1).put("savedOnly",true).put("heardSettings",heardSettings.get(id)).put("lastSignal",lastSignals.get(id))
                         .put("lastHeard",heardTimes.getOrDefault(id,0L))
                         .put("favorite",getPreferences(0).getBoolean(radio+":"+session.ownId+":"+id,false));
                 if(!c.isNull(3)&&!c.isNull(4))item.put("latitude",c.getDouble(3)).put("longitude",c.getDouble(4));

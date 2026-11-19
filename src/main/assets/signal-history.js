@@ -1,4 +1,34 @@
 'use strict';
+// Independent display implementation of Meshtastic's documented signal thresholds.
+function nodeHeardDirectly(entry){return entry.lastSignal?.hops===0&&!entry.lastSignal.mqtt;}
+function nodeSnrFloor(radio,settings){
+  if(!settings)return null;
+  const match=/\bSF(\d+)\b/.exec(settings);
+  const preset=radio==='mt'?meshtasticPresets.find(p=>p[0]===settings):null;
+  const sf=match?Number(match[1]):preset?.[2];
+  return sf>=7&&sf<=12?-7.5-2.5*(sf-7):null;
+}
+function nodeSnrRating(snr,floor){
+  if(!Number.isFinite(snr)||!Number.isFinite(floor))return ['unknown','Unrated'];
+  return snr>floor?['good','Good']:snr>floor-5.5?['fair','Fair']:snr>=floor-7.5?['bad','Bad']:['none','None'];
+}
+function nodeRssiRating(rssi){return !Number.isFinite(rssi)?'unknown':rssi> -115?'good':rssi> -120?'fair':rssi> -126?'bad':'none';}
+function nodeSignalReport(radio,entry){
+  const box=node('div','node-signal-report'),s=entry.lastSignal;
+  box.appendChild(node('strong','','Last signal as heard'));
+  if(!s){box.appendChild(node('div','help','No reception measurement recorded for this receiving radio.'));return box;}
+  if(s.mqtt){box.appendChild(node('div','help','Via MQTT · no local radio signal measurement.'));return box;}
+  const floor=nodeSnrFloor(radio,s.settings),[quality,label]=nodeSnrRating(s.snr,floor);
+  const values=node('div','node-signal-values');
+  values.appendChild(node('span','signal-'+quality,Number.isFinite(s.snr)?'SNR '+s.snr+' dB · '+label:'SNR not reported'));
+  values.appendChild(node('span','signal-'+nodeRssiRating(s.rssi),Number.isFinite(s.rssi)?'RSSI '+s.rssi+' dBm':'RSSI not reported'));
+  box.appendChild(values);
+  box.appendChild(node('div','help',s.hops===0?'Direct reception · 0 hops':s.hops>0?'Final-hop reception · '+s.hops+' hops; not the signal of the whole route':'Final-hop reception · incoming hop count unknown'));
+  if(s.time>0)box.appendChild(node('div','help',(s.phoneTime?'Recorded by phone: ':s.timeSource==='message'?'Message timestamp: ':'Reception time: ')+signalDate(s.time)));
+  if(s.settings)box.appendChild(node('div','help','Reception settings: '+s.settings));
+  else if(Number.isFinite(s.snr))box.appendChild(node('div','help','Reception preset unknown; SNR colour is unrated.'));
+  return box;
+}
 let signalView=null;
 function openSignalHistory(key,peer) {
   signalView={key,peer,hours:24,message:''};

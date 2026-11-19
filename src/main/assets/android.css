@@ -10,6 +10,17 @@
 .chat-header-network .cpill { flex: 0 0 auto; min-width: 30px; min-height: 29px; padding-inline: 4px; }
 .header-channel { flex: 1; min-width: 0; max-width: 100%; height: 29px; padding: 1px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg3); color: var(--text); font-size: 9px; text-overflow: ellipsis; }
 .header-channel:disabled { opacity: .65; }
+#header-mc-channel:not(:disabled),#header-mt-channel:not(:disabled) { font-size:11px; font-weight:700; color:#baffd1; border-color:#49b875; background:#163026; padding-inline:4px; }
+#header-mc-channel option,#header-mt-channel option { background:var(--bg3); color:var(--text); }
+.node-heading { flex-wrap:wrap; }
+.node-contact-name { color:var(--accent); font-size:12px; overflow-wrap:anywhere; }
+.node-signal-report { margin:8px 0; padding:8px; border:1px solid var(--border); border-radius:6px; }
+.node-signal-values { display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:4px; font-weight:700; }
+.signal-good { color:#4caf50; }
+.signal-fair { color:#ffeb3b; }
+.signal-bad { color:#ff9800; }
+.signal-none { color:#f44336; }
+.signal-unknown { color:var(--muted); }
 #chat-mode-group { display: flex; align-items: center; justify-content: center; gap: 5px; height: 100%; padding: 0 4px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
 #chat-device-bar { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); min-height: 36px; background: var(--bg2); border-bottom: 1px solid var(--border); }
 .device-header-controls { display: flex; align-items: center; gap: 2px; min-width: 0; padding: 2px 3px; }
@@ -162,7 +173,7 @@
 .android-node small { color: var(--accent); margin-right: 8px; }
 .android-node .node-id { color: var(--muted); font-size: 10px; margin-top: 4px; }
 .node-heading { display: flex; align-items: center; gap: 7px; width: 100%; border: 0; background: none; color: var(--text); text-align: left; padding: 0; min-height: 30px; }
-.node-heading .node-name { font-size: 14px; flex: 1; }
+.node-heading .node-name { font-size: 14px; flex: 0 1 auto; max-width:100%; }
 .node-star { color: var(--accent); font-size: 17px; }
 .node-subtitle { color: var(--muted); font-size: 11px; margin: 2px 0 4px 30px; }
 .node-facts { color: var(--muted); font-size: 11px; margin: 5px 0; }
@@ -466,3 +477,16 @@ body.member-mode #settings-my-nodes-page .node-management{display:none}
 #usage-results table {width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 #usage-results th,#usage-results td {padding:.35rem;text-align:left;border-bottom:1px solid var(--border)}
 #usage-results button:disabled {opacity:.5}
+
+/* Contact groups remain vertical, with removable memberships beside the picker. */
+.contact-group-list{display:flex;flex-direction:column;gap:5px;min-width:0;overflow-wrap:anywhere}
+.contact-group-picker{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}
+.contact-group-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.contact-group-row span{overflow-wrap:anywhere;min-width:0}
+.contact-group-row button{flex-shrink:0;min-width:36px;min-height:36px}
+#contacts-categories{flex-direction:column;align-items:stretch}
+.map-contact-name{font-weight:700;font-size:15px;margin-bottom:4px}
+
+#map-search-results{display:flex;flex-direction:column;gap:8px}
+#map-search-results button{text-align:left;overflow-wrap:anywhere}
+.node-details button:disabled,#map-search-results button:disabled{opacity:.45;cursor:default}

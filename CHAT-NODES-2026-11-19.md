@@ -1,0 +1,18 @@
+# Chat and Nodes — source-only changes
+
+The user requested coding without an APK. The follow-up authorized renaming Contacts categories to Groups, editing multiple memberships through a dropdown with individual removal, vertical group labels, Map group/contact filtering and contact names above node popup details. Existing category storage and export keys remain compatible. Multiple selected groups form a union; contact and receiving-device filters narrow it. Clear filters restores all nodes.
+
+- Chat channel selectors below the device names use larger, bold, brighter text and a distinct background/border. Radio-reported options and selection behavior are unchanged.
+- Node headings show all linked, non-deleted Contact names beside the node name. Node search includes them. Entering Nodes loads Contacts, and contact updates refresh the labels.
+- Expanded node details show the latest recorded signal sample for that receiving radio, with SNR, RSSI, time, reception settings and direct/relayed/unknown-hop context. Relayed SNR/RSSI describes the final hop, not the entire route. Meshtastic colour meanings and thresholds follow the official signal-meter guide. Unknown preset/SF leaves SNR unrated; missing readings are never replaced with zero.
+- MT uses existing reception history. MC V3 DM packets now record signed quarter-dB SNR and incoming flood hops under separate receiver storage keys. MC RSSI is not provided in that response; older messages and unidentifiable channel senders do not acquire invented readings. MC timestamp labels explicitly identify message timestamps rather than claiming GPS/phone reception time.
+- “Heard directly (0 hops)” selects nodes whose latest recorded signal sample has zero incoming hops and is not MQTT. Missing observations and MC outgoing zero-hop routes do not qualify. It is historical evidence, not a guarantee of current reachability.
+- Availability wording was subsequently removed at the user’s request. Nodes always include Show on map, disabled for missing/invalid coordinates. Map search matches partial names or stored keys case-insensitively across all saved nodes, deduplicates receiver observations, disables unpositioned results and clears filters when selecting a positioned result. Selection centers, zooms and opens node details.
+
+Signal history remains outside Full App Backup, as before. The new MC samples share that limitation. No new radio requests or automatic transmissions are added.
+
+Validation: native Java compilation and Android instrumentation source compilation; SignalQualitySmoke (including MC V3 SNR/unknown-route checks); node-reception.cjs (contact linking/updates, colour thresholds, direct filtering, channel styling and narrow/landscape/keyboard-sized viewports), existing node-labels.cjs and contacts.cjs. Android instrumentation adds receiver/network isolation and latest-summary checks, but requires a physical device/emulator to execute. Browser viewport checks do not establish Android system-inset behavior. No APK was assembled or published.
+
+Follow-up validation: contacts.cjs now also checks existing category compatibility, dropdown membership addition/removal and saving, vertical group labels, multi-group Map union, device/contact intersections, deleted-contact exclusion and contact-first popups. map-position.cjs and node-reception.cjs pass. No APK built.
+
+Node-map follow-up checks: node-reception.cjs verifies availability removal and enabled/disabled position buttons; map-position.cjs verifies name/key search, missing-position results, selected identity, centering and zoom. Both passed; no APK built.

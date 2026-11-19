@@ -1,5 +1,13 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 19 November 2026 — 0.10.34 publication
+
+The user authorized an APK build, English/Greek manual updates and GitHub publication. Groups, Map search/filter controls and node UI changes are locally authored. Existing MIT notices, application ID and debug signing configuration are preserved. Production signing and replacement licensing remain undecided. Physical radio verification is pending.
+
+## 19 November 2026 — source-only Chat and Nodes refinements
+
+Contact labels, selector styling, reception summaries and direct-reception filtering are locally authored. Signal thresholds and green/yellow/orange/red meanings follow the official [Meshtastic signal meter documentation](https://meshtastic.org/docs/software/android/user/signal-meter/). SNR is rated against the observed spreading factor/preset; unknown reception settings remain unrated. The MeshCore V3 DM SNR wire layout was checked against [companion firmware MyMesh.cpp](https://github.com/meshcore-dev/MeshCore/blob/main/examples/companion_radio/MyMesh.cpp), using signed quarter-dB values and incoming flood-path length. No upstream implementation or assets were copied. No APK build or publication was requested for this work; existing notices and signing configuration are preserved.
+
 ## 18 November 2026 — 0.10.33 publication
 
 The user authorized publication of the current source and debug APK. Channel management, utilization history and uncertainty-circle geofence overlap changes are locally authored. No MeshCore TEAM code or assets were copied; automatic tracking remains a proposal. Existing MIT attribution, dependency notices, application ID and original debug signing configuration are preserved. Production signing and replacement licensing remain undecided. Physical radio verification remains pending.

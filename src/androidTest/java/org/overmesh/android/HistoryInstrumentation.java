@@ -50,6 +50,12 @@ public final class HistoryInstrumentation extends Instrumentation {
             store.close();store=new ChatStore(context);
             check(store.signals("mt-a","peer-a").length()==1&&store.signals("mt-a","peer-a").getJSONObject(0).getDouble("snr")==0,"Signal history survives reopen and retains zero");
             check(store.signals("mt-a","peer-b").length()==0,"Signal history isolates remote peers");
+            check(store.latestSignals("mt-a").get("peer-a").getDouble("snr")==0,"Node summary preserves zero SNR");
+            store.saveSignal("mc:mt-a","peer-a","{\"snr\":-7,\"hops\":0}");
+            check(store.latestSignals("mt-a").get("peer-a").getDouble("snr")==0&&store.latestSignals("mc:mt-a").get("peer-a").getDouble("snr")==-7,"Latest signal summaries isolate MC and MT receivers");
+            store.saveSignal("mc:mt-a","peer-a","{\"snr\":-3,\"hops\":2}");
+            check(store.latestSignals("mc:mt-a").get("peer-a").getInt("hops")==2,"Most recently recorded reception replaces old direct summary");
+            store.deleteRadio("mc","mt-a");check(store.latestSignals("mc:mt-a").isEmpty()&&!store.latestSignals("mt-a").isEmpty(),"MC radio deletion preserves MT summaries");
             for(int i=0;i<1005;i++)store.saveSignal("mt-a","peer-a","{\"time\":"+i+"}");
             check(store.signals("mt-a","peer-a").length()==1000&&store.signals("mt-a","peer-a").getJSONObject(0).getInt("time")==1004,"Bounded signal history retains newest rows");
             store.clearSignals("mt-a","peer-a");check(store.signals("mt-b","peer-a").length()==1,"Clear isolates receiver");

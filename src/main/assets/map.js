@@ -7,6 +7,7 @@ try {
   for(const id of JSON.parse(localStorage.getItem('map-hidden-fences')||'[]'))hiddenFences.add(id);
 } catch(unavailable){}
 let singleNodePopup=null;
+let mapContactGroups=[];
 let mapSelected=null,mapFocusWaiting=false,mapAlertPin=null;
 let mapProtocol=null,mapDisplayStyle='full';
 const mapUrl=id=>location.origin+'/packs/'+id+'.pmtiles';
@@ -133,8 +134,8 @@ window.onMapData=data=>{
   }
   if(!mapData.packs.some(p=>p.kind===mapLayerKind))mapLayerKind=mapData.packs.some(p=>p.kind==='street')?'street':mapData.packs.some(p=>p.kind==='satellite')?'satellite':'street';
   if(mapFocusWaiting){
-    mapFocusWaiting=false;renderMapFilters();
-    for(const id of ['map-network','map-device','map-role','map-rf'])el(id).value='all';
+    mapFocusWaiting=false;mapContactGroups=[];renderMapFilters();
+    for(const id of ['map-network','map-device','map-role','map-rf','map-contact'])el(id).value='all';
     el('map-from').value='';el('map-to').value='';
     el('map-network').value=mapFocus.radio;
     if(mapFocus.device)el('map-device').value=mapFocus.radio+':'+mapFocus.device;
@@ -142,13 +143,17 @@ window.onMapData=data=>{
   if(draftSaveId&&mapData.items.some(item=>item.id===draftSaveId)){
     resetDraft();mapNotice('Map item saved.');
   }
+  if(el('map-search-dialog').open)renderMapSearch();
   renderGeofenceHistory();
   initMap();setMapMode(mapMode);renderMap();renderMapItems();el('map-send-mark')?.refreshTargets?.();
 };
 function mapFilterRows(){
   const network=el('map-network').value,device=el('map-device').value,role=el('map-role').value,rf=el('map-rf').value;
   const from=mapMoment(el('map-from').value),to=mapMoment(el('map-to').value);
+  const contact=el('map-contact').value;
+  const people=typeof contactPeople==='function'?contactPeople():[];
   const matching=mapData.nodes.filter(n=>{
+    if(contact!=='all'||mapContactGroups.length){const linked=people.filter(c=>(c.nodes||[]).some(a=>a.radio===n.radio&&String(a.id).toLowerCase()===String(n.id).toLowerCase()));if(!linked.some(c=>(contact==='all'||c.id===contact)&&(!mapContactGroups.length||mapContactGroups.some(id=>(c.categories||[]).includes(id)))))return false;}
     if(network!=='all'&&n.radio!==network)return false;if(device!=='all'&&n.radio+':'+n.device!==device)return false;if(role!=='all'&&n.radio+':'+n.role!==role)return false;if(rf!=='all'&&heardProfile(n.radio,n.receivingRf)!==rf)return false;
     if(from||to)return mapData.heard.some(h=>h.radio===n.radio&&h.device===n.device&&h.node===n.id&&(!from||h.time>=from)&&(!to||h.time<=to));
     return true;
@@ -196,6 +201,7 @@ function mapPreferredObservation(a,b){
 }
 function mapHasPosition(n){return Number.isFinite(n.lat)&&Number.isFinite(n.lon)&&Math.abs(n.lat)<=90&&Math.abs(n.lon)<=180&&!(n.lat===0&&n.lon===0);}
 function renderMapFilters(){
+  renderMapContactFilters();
   const device=el('map-device'),old=device.value;device.replaceChildren();const all=mapText('option','All devices');all.value='all';device.appendChild(all);
   const devices=new Map();
   for(const n of mapData.nodes)devices.set(n.radio+':'+n.device,{radio:n.radio,id:n.device,connected:false});
@@ -208,7 +214,7 @@ function renderMapFilters(){
   for(const value of [...new Set(mapData.nodes.map(n=>heardProfile(n.radio,n.receivingRf)))].sort()){const option=mapText('option',value||'Unknown');option.value=value;rf.appendChild(option);}
   if([...rf.options].some(o=>o.value===oldRf))rf.value=oldRf;
 }
-function clearMapFilters(){for(const id of ['map-network','map-device','map-role','map-rf'])el(id).value='all';el('map-from').value='';el('map-to').value='';renderMap();}
+function clearMapFilters(){mapContactGroups=[];renderMapContactFilters();for(const id of ['map-network','map-device','map-role','map-rf','map-contact'])el(id).value='all';el('map-from').value='';el('map-to').value='';renderMap();}
 function mapDistanceMeters(a,b){
   const rad=Math.PI/180,lat=(b.lat-a.lat)*rad,lon=(b.lon-a.lon)*rad;
   const h=Math.sin(lat/2)**2+Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(lon/2)**2;
@@ -699,6 +705,7 @@ function showMapNodeGroup(nodes,selected){
 }
 function mapNodePopup(n){
   const popup=document.createElement('div');
+  for(const name of window.contactNamesForNode?.(n.radio,n.id)||[])popup.appendChild(mapText('div',name,'map-contact-name'));
   popup.appendChild(mapText('strong',n.name||n.id));
   popup.appendChild(mapText('div',n.radio.toUpperCase()+' · '+n.id));
   popup.appendChild(mapText('div','Receiver: '+n.device));
@@ -751,4 +758,24 @@ function renderGeofenceHistory(){
     mapButton(row,'Delete alert',()=>{if(confirm('Delete this saved geofence alert?'))AndroidBridge.deleteGeofenceAlert(a.id);});
     host.appendChild(row);
   }
+}
+
+function renderMapContactFilters(){
+  const groups=typeof contactCategories==='function'?contactCategories():[];
+  mapContactGroups=mapContactGroups.filter(id=>groups.some(g=>g.id===id));
+  const select=el('map-group');mapChoices(select,[['all','All groups / all nodes'],...(mapContactGroups.length?[['','Add another group…']]:[]),...groups.filter(g=>!mapContactGroups.includes(g.id)).map(g=>[g.id,g.title])]);select.value=mapContactGroups.length?'':'all';
+  const selected=el('map-selected-groups');selected.replaceChildren();
+  for(const g of groups.filter(g=>mapContactGroups.includes(g.id))){const row=mapText('div','','contact-group-row');row.appendChild(mapText('span',g.title));const remove=mapButton(row,'×',()=>{mapContactGroups=mapContactGroups.filter(id=>id!==g.id);renderMapContactFilters();renderMap();});remove.setAttribute('aria-label','Remove group filter '+g.title);selected.appendChild(row);}
+  mapChoices(el('map-contact'),[['all','All contacts / all nodes'],...(typeof contactPeople==='function'?contactPeople():[]).map(c=>[c.id,contactName(c)])]);
+}
+function selectMapGroup(id){if(id==='all')mapContactGroups=[];else if(id&&!mapContactGroups.includes(id))mapContactGroups.push(id);renderMapContactFilters();renderMap();}
+window.mapContactsChanged=()=>{renderMapContactFilters();if(activeTab==='map')renderMap();};
+
+function openMapSearch(){const dialog=el('map-search-dialog');el('map-node-search').value='';renderMapSearch();dialog.showModal();el('map-node-search').focus();AndroidBridge.loadMap();}
+function renderMapSearch(){
+  const query=el('map-node-search').value.trim().toLocaleLowerCase(),host=el('map-search-results');host.replaceChildren();
+  const unique=new Map();for(const n of mapData.nodes){const key=n.radio+':'+n.id,old=unique.get(key);unique.set(key,old?mapPreferredObservation(old,n):n);}
+  const matches=[...unique.values()].filter(n=>[n.name,n.id].some(value=>String(value||'').toLocaleLowerCase().includes(query))).sort((a,b)=>(a.name||a.id).localeCompare(b.name||b.id));
+  if(!matches.length)host.appendChild(mapText('p','No matching nodes.','help'));
+  for(const n of matches){const positioned=mapHasPosition(n),button=mapButton(host,(n.name||n.id)+' · '+n.radio.toUpperCase()+' · '+n.id+(positioned?'':' · Position unavailable'),()=>{el('map-search-dialog').close();openMapNode(n.radio,n.id,n.device);});button.disabled=!positioned;}
 }

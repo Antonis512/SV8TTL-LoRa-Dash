@@ -1167,6 +1167,9 @@ final class MeshCoreProtocol implements RadioProtocol {
             if (packet.length < start + 12) return;
             String id = hex(packet, start, 6);
             int textStart = start + 12 + ((packet[start + 7] & 255) == 2 ? 4 : 0);
+            if(type==16&&packet.length>=textStart)
+                events.signalSample(id,littleInt(packet,start+8)&0xffffffffL,packet[1]/4f,null,
+                        (packet[start+6]&255)==255?-1:(packet[start+6]&0x3f),"",false,false);
             if (packet.length >= textStart)
                 events.directMessage(id, new String(packet, textStart, packet.length - textStart, StandardCharsets.UTF_8), littleInt(packet, start + 8) & 0xffffffffL,
                         (packet[start+6]&255)==255?-1:(packet[start+6]&0x3f));

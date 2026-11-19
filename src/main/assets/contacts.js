@@ -6,6 +6,7 @@ const contactClone=x=>JSON.parse(JSON.stringify(x));
 const contactId=()=> 'person-'+crypto.randomUUID();
 const contactById=id=>contactItems.find(x=>x.id===id);
 const contactPeople=()=>contactItems.filter(x=>x.kind!=='category'&&!x.deletedAt);
+window.contactNamesForNode=(radio,id)=>contactPeople().filter(c=>(c.nodes||[]).some(n=>n.radio===radio&&String(n.id).toLowerCase()===String(id).toLowerCase())).map(contactName);
 const contactCategories=()=>contactItems.filter(x=>x.kind==='category'&&!x.deletedAt);
 const contactName=c=>c.displayName||[c.name,c.surname].filter(Boolean).join(' ')||c.alias||'Unnamed';
 const contactNorm=x=>String(x??'').normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase().replace(/ς/g,'σ');
@@ -31,7 +32,8 @@ window.resetContactPreferences=()=>{contactPrefsLoaded=false;AndroidBridge.loadC
 window.onContactsData=data=>{
   contactItems=Array.isArray(data.items)?data.items:[];
   if(!contactPrefsLoaded){contactView={...contactView,...data.view};contactPrefsLoaded=true;el('contacts-search').value=contactView.query;el('contacts-favorites').checked=contactView.favorites;el('contacts-sort').value=contactView.sort;el('contacts-network').value=contactView.network;}
-  renderContacts();window.memberContactsChanged?.();
+  renderContacts();window.memberContactsChanged?.();window.mapContactsChanged?.();
+  if(activeTab==='nodes')renderNodes();
   if(el('contacts-dialog').open)contactPickerRefresh?.();
 };
 window.onContactNodes=radios=>{contactRadios=radios||[];installContactRadios();if(activeTab==='contacts')renderContacts();};
@@ -43,7 +45,7 @@ function contactFields(c){
   const fields=[['Name',[c.name,c.surname].filter(Boolean).join(' ')],['Display name',c.displayName],['Alias',c.alias],['Organization',c.organization],['Role',c.role]];
   for(const [key,label] of [['callsigns','Callsign'],['phones','Phone'],['emails','Email'],['addresses','Address'],['custom','Custom field']])for(const v of c[key]||[])fields.push([v.label||label,v.value]);
   for(const n of c.notes||[])fields.push(['Note',n.text]);
-  for(const id of c.categories||[])fields.push(['Category',contactById(id)?.title]);
+  for(const id of c.categories||[])fields.push(['Group',contactById(id)?.title]);
   for(const n of c.nodes||[]){fields.push(['Node',[n.name,n.id,n.label,n.assignmentRole,...contactNodeRows(n).map(r=>r.entry.name)].filter(Boolean).join(' ')]);}
   return fields.filter(f=>f[1]);
 }
@@ -78,14 +80,14 @@ function renderContactsContent(){
   el('contacts-list-view').hidden=!!contactOpen;el('contact-detail').hidden=!contactOpen;
   if(contactOpen){renderContactDetail();return;}
   const categories=el('contacts-categories');clear(categories);
-  const all=contactButton(categories,'All categories',()=>{contactView.categories=[];contactViewChanged();});all.classList.toggle('active',!contactView.categories.length);
-  for(const cat of [{id:'uncategorized',title:'Uncategorized'},...contactCategories()]){const b=contactButton(categories,cat.title,()=>{contactView.categories=contactView.categories.includes(cat.id)?contactView.categories.filter(id=>id!==cat.id):[...contactView.categories,cat.id];contactViewChanged();});b.classList.toggle('active',contactView.categories.includes(cat.id));}
+  const all=contactButton(categories,'All groups',()=>{contactView.categories=[];contactViewChanged();});all.classList.toggle('active',!contactView.categories.length);
+  for(const cat of [{id:'uncategorized',title:'No group'},...contactCategories()]){const b=contactButton(categories,cat.title,()=>{contactView.categories=contactView.categories.includes(cat.id)?contactView.categories.filter(id=>id!==cat.id):[...contactView.categories,cat.id];contactViewChanged();});b.classList.toggle('active',contactView.categories.includes(cat.id));}
   const matching=contactPeople().map(c=>({c,match:contactMatch(c,contactView.query)})).filter(x=>x.match);
   const shown=matching.filter(({c})=>(!contactView.favorites||c.favorite)&&(!contactView.categories.length||contactView.categories.some(id=>id==='uncategorized'?!(c.categories||[]).some(id=>contactById(id)&&!contactById(id).deletedAt):(c.categories||[]).includes(id)))&&(contactView.network==='all'||(contactView.network==='none'?!(c.nodes||[]).length:(c.nodes||[]).some(n=>n.radio===contactView.network))));
   shown.sort((a,b)=>b.match.score-a.match.score||(contactView.sort==='edited'?b.c.edited-a.c.edited:contactView.sort==='heard'?contactHeard(b.c)-contactHeard(a.c):0)||(contactView.sort==='surname'?(a.c.surname||contactName(a.c)):(contactName(a.c))).localeCompare(contactView.sort==='surname'?(b.c.surname||contactName(b.c)):contactName(b.c),undefined,{sensitivity:'base'}));
   el('contacts-count').textContent=shown.length+' contacts'+(matching.length>shown.length?' · '+(matching.length-shown.length)+' matching contacts hidden by filters':'');
   const list=el('contacts-list');clear(list);if(!shown.length)list.appendChild(node('p','help','No contacts found. Add a contact or clear your filters.'));
-  for(const {c,match} of shown){const row=node('div','contact-row');row.appendChild(contactAvatar(c));const main=node('button','contact-person');main.type='button';main.append(node('strong','',contactName(c)),node('small','',contactSummary(c)),node('small','',(c.categories||[]).map(id=>contactById(id)?.title).filter(Boolean).join(' · ')));if(match.reason)main.appendChild(node('small','contact-match',match.reason));main.onclick=()=>openContact(c.id);row.appendChild(main);const star=contactButton(row,c.favorite?'★':'☆',()=>contactsSave([{...c,favorite:!c.favorite}]));star.setAttribute('aria-label',(c.favorite?'Unfavorite ':'Favorite ')+contactName(c));list.appendChild(row);}
+  for(const {c,match} of shown){const row=node('div','contact-row');row.appendChild(contactAvatar(c));const main=node('button','contact-person');main.type='button';main.append(node('strong','',contactName(c)),node('small','',contactSummary(c)),contactGroupList(c));if(match.reason)main.appendChild(node('small','contact-match',match.reason));main.onclick=()=>openContact(c.id);row.appendChild(main);const star=contactButton(row,c.favorite?'★':'☆',()=>contactsSave([{...c,favorite:!c.favorite}]));star.setAttribute('aria-label',(c.favorite?'Unfavorite ':'Favorite ')+contactName(c));list.appendChild(row);}
 }
 function openContact(id){contactOpen=id;contactExpandedNode='';renderContacts();}
 function contactDetailBack(){if(!contactOpen)return false;contactOpen='';renderContacts();return true;}
@@ -98,7 +100,8 @@ function renderContactDetailContent(){
   contactButton(actions,'Edit',()=>editContact(c));contactButton(actions,'Assign Nodes',()=>{editContact(c);chooseContactNodes();});contactButton(actions,c.androidLink?'Refresh from Android':'Link Android Contact',()=>AndroidBridge.pickAndroidContact(c.id));
   contactButton(actions,'Share',()=>shareContactFields(c));contactButton(actions,'Export',()=>exportContactItems([c,...contactCategories().filter(cat=>(c.categories||[]).includes(cat.id))]));contactButton(actions,'Merge',()=>chooseContactMerge(c));contactButton(actions,'Delete',()=>deleteContact(c));
   if(c.androidLink){host.appendChild(node('p','help','Linked Android contact · last refreshed '+new Date(c.androidLink.refreshed).toLocaleString()+'. Refresh asks you to select the contact again and review fields.'));contactButton(host,'Unlink Android Contact',()=>contactsSave([{...c,androidLink:null}]));}
-  const info=contactSection(host,'Profile');for(const [label,value] of [['Name',c.name],['Surname',c.surname],['Alias',c.alias],['Organization / club',c.organization],['Role',c.role],['Categories',(c.categories||[]).map(id=>contactById(id)?.title).filter(Boolean).join(', ')]])if(value)info.appendChild(node('p','contact-value',label+': '+value));
+  const info=contactSection(host,'Profile');for(const [label,value] of [['Name',c.name],['Surname',c.surname],['Alias',c.alias],['Organization / club',c.organization],['Role',c.role]])if(value)info.appendChild(node('p','contact-value',label+': '+value));
+  const groups=contactSection(host,'Groups');groups.appendChild(contactGroupList(c));
   for(const [key,title] of [['callsigns','Callsigns'],['phones','Phone numbers'],['emails','Email'],['addresses','Addresses'],['custom','Custom fields']]){
     if(!c[key]?.length)continue;const section=contactSection(host,title);for(const value of c[key]){const line=node('div','contact-toolbar');line.appendChild(node('span','contact-value',(value.label?value.label+': ':'')+value.value));if(key==='phones'){contactButton(line,'Call',()=>AndroidBridge.contactCommunicate('call',value.value));contactButton(line,'SMS',()=>AndroidBridge.contactCommunicate('sms',value.value));}if(key==='emails')contactButton(line,'Email',()=>AndroidBridge.contactCommunicate('email',value.value));section.appendChild(line);}
   }
@@ -160,8 +163,11 @@ function renderContactEditorContent(){
   contactCheck(body,'Favorite',c.favorite,v=>c.favorite=v);
   const photo=node('div','contact-toolbar');photo.appendChild(contactAvatar(c));contactButton(photo,'Choose photo',()=>AndroidBridge.pickContactPhoto(contactEdit.token));contactButton(photo,'Remove photo',()=>{c.photo='';renderContactEditor();});body.appendChild(photo);
   for(const [key,title,label] of [['callsigns','Callsigns','Radio Amateur'],['phones','Phone numbers','Mobile'],['emails','Email addresses','Personal'],['addresses','Addresses','Home'],['custom','Custom fields','']])renderContactRepeats(body,c,key,title,label);
-  const cats=contactSection(body,'Categories');for(const cat of contactCategories())contactCheck(cats,cat.title,c.categories.includes(cat.id),yes=>{c.categories=yes?[...c.categories,cat.id]:c.categories.filter(x=>x!==cat.id);});
-  let category='';contactInput(cats,'New category','',v=>category=v);contactButton(cats,'Add category',()=>{if(category.trim()){const cat={id:contactId(),kind:'category',title:category.trim(),edited:contactNow()};contactsSave([cat],()=>{c.categories.push(cat.id);renderContactEditor();});}});
+  const cats=contactSection(body,'Groups'),membership=node('div','contact-group-picker'),selected=node('div','contact-group-list');cats.appendChild(membership);
+  contactSelect(membership,'Add to group','',[['','Choose a group…'],...contactCategories().filter(g=>!c.categories.includes(g.id)).map(g=>[g.id,g.title])],id=>{if(id&&!c.categories.includes(id)){c.categories.push(id);renderContactEditor();}});
+  membership.appendChild(selected);for(const group of contactCategories().filter(g=>c.categories.includes(g.id))){const row=node('div','contact-group-row');row.appendChild(node('span','',group.title));const remove=contactButton(row,'×',()=>{c.categories=c.categories.filter(id=>id!==group.id);renderContactEditor();});remove.setAttribute('aria-label','Remove from '+group.title);selected.appendChild(row);}
+  if(!selected.childElementCount)selected.appendChild(node('span','help','No groups selected.'));
+  let category='';contactInput(cats,'New group','',v=>category=v);contactButton(cats,'Add group',()=>{if(category.trim()){const cat={id:contactId(),kind:'category',title:category.trim(),edited:contactNow()};contactsSave([cat],()=>{c.categories.push(cat.id);renderContactEditor();});}});
   const notes=contactSection(body,'Dated notes');for(const note of c.notes){const row=node('div','contact-repeat');row.appendChild(node('small','',new Date(note.date).toLocaleString()));contactInput(row,'Note',note.text,v=>note.text=v,'textarea');contactButton(row,'Remove note',()=>{c.notes=c.notes.filter(n=>n!==note);renderContactEditor();});notes.appendChild(row);}contactButton(notes,'Add note',()=>{c.notes.push({id:contactId(),date:contactNow(),text:''});renderContactEditor();});
   const logs=contactSection(body,'Related Log entries');for(const entry of logItems.filter(x=>x.kind==='note'))contactCheck(logs,entry.title,c.logs.includes(entry.id),yes=>{c.logs=yes?[...c.logs,entry.id]:c.logs.filter(x=>x!==entry.id);});if(!logItems.some(x=>x.kind==='note'))logs.appendChild(node('p','help','No Log notes yet.'));
   const nodes=contactSection(body,'Assigned nodes');for(const a of c.nodes){const row=node('div','contact-node');row.appendChild(node('strong','',(a.name||a.id)+' · '+a.radio.toUpperCase()));contactInput(row,'Node description',a.label,v=>a.label=v);contactSelect(row,'Association',a.assignmentRole||'Owner',['Owner','Operator','Maintainer','Shared','Associated'].map(x=>[x,x]),v=>a.assignmentRole=v);contactButton(row,'Unassign Node',()=>{c.nodes=c.nodes.filter(n=>n!==a);renderContactEditor();});nodes.appendChild(row);}contactButton(nodes,'Assign Nodes',chooseContactNodes);
@@ -204,12 +210,12 @@ function assignNodeToContact(radio,entry){
   contactButton(body,'Create Contact',()=>{editContact();contactEdit.draft.alias=entry.name||'';contactEdit.draft.nodes.push(assignment);renderContactEditor();});contactButton(body,'Cancel',()=>el('contacts-dialog').close());
 }
 function manageContactCategories(){
-  const body=contactDialog('Contact categories');for(const cat of contactCategories()){
-    const row=node('div','contact-toolbar');let title=cat.title;contactInput(row,'Category name',title,v=>title=v);
+  const body=contactDialog('Contact groups');for(const cat of contactCategories()){
+    const row=node('div','contact-toolbar');let title=cat.title;contactInput(row,'Group name',title,v=>title=v);
     contactButton(row,'Rename',()=>{if(title.trim())contactsSave([{...cat,title:title.trim()}],manageContactCategories);});
-    contactButton(row,'Delete category',()=>{if(confirm('Delete this category? Its contacts will remain.')){const changes=[{...cat,deletedAt:contactNow()},...contactPeople().filter(c=>(c.categories||[]).includes(cat.id)).map(c=>({...c,categories:c.categories.filter(id=>id!==cat.id)}))];contactsSave(changes,()=>{contactView.categories=contactView.categories.filter(id=>id!==cat.id);contactViewChanged();manageContactCategories();});}});body.appendChild(row);
+    contactButton(row,'Delete group',()=>{if(confirm('Delete this group? Its contacts will remain.')){const changes=[{...cat,deletedAt:contactNow()},...contactPeople().filter(c=>(c.categories||[]).includes(cat.id)).map(c=>({...c,categories:c.categories.filter(id=>id!==cat.id)}))];contactsSave(changes,()=>{contactView.categories=contactView.categories.filter(id=>id!==cat.id);contactViewChanged();manageContactCategories();});}});body.appendChild(row);
   }
-  let title='';contactInput(body,'New category name','',v=>title=v);contactButton(body,'Create category',()=>{if(title.trim())contactsSave([{id:contactId(),kind:'category',title:title.trim(),edited:contactNow()}],manageContactCategories);});contactButton(body,'Close',()=>el('contacts-dialog').close());
+  let title='';contactInput(body,'New group name','',v=>title=v);contactButton(body,'Create group',()=>{if(title.trim())contactsSave([{id:contactId(),kind:'category',title:title.trim(),edited:contactNow()}],manageContactCategories);});contactButton(body,'Close',()=>el('contacts-dialog').close());
 }
 function deleteContact(c){
   const body=contactDialog('Delete '+contactName(c)+'?');body.appendChild(node('p','help','This removes the contact and its node assignments from the list. Radio history and Android contacts are unchanged. You can restore it from Deleted contacts.'));
@@ -250,14 +256,14 @@ function exportAllContacts(){exportContactItems(contactItems.filter(c=>!c.delete
 function shareContactFields(c){
   const body=contactDialog('Share contact fields'),selected=new Set(['identity','callsigns','phones','emails']);
   body.appendChild(node('p','help','Only checked fields are shared. Private notes are off by default.'));
-  const groups=[['identity','Name, surname, alias and display name'],['callsigns','Callsigns'],['phones','Phone numbers'],['emails','Email addresses'],['addresses','Addresses'],['organization','Organization and role'],['categories','Categories'],['nodes','Assigned nodes'],['custom','Custom fields'],['notes','Private notes']];
+  const groups=[['identity','Name, surname, alias and display name'],['callsigns','Callsigns'],['phones','Phone numbers'],['emails','Email addresses'],['addresses','Addresses'],['organization','Organization and role'],['categories','Groups'],['nodes','Assigned nodes'],['custom','Custom fields'],['notes','Private notes']];
   if(c.photo)contactCheck(body,'Profile photo',false,yes=>yes?selected.add('photo'):selected.delete('photo'));
   for(const [key,label] of groups)contactCheck(body,label,selected.has(key),yes=>yes?selected.add(key):selected.delete(key));
   contactButton(body,'Share selected fields',()=>{
     const lines=[];for(const [key,title] of groups){if(!selected.has(key))continue;
       if(key==='identity')lines.push(...[['Name',c.name],['Surname',c.surname],['Alias',c.alias],['Display name',c.displayName]].filter(x=>x[1]).map(x=>x.join(': ')));
       else if(key==='organization')lines.push(...[['Organization',c.organization],['Role',c.role]].filter(x=>x[1]).map(x=>x.join(': ')));
-      else if(key==='categories')lines.push('Categories: '+(c.categories||[]).map(id=>contactById(id)?.title).filter(Boolean).join(', '));
+      else if(key==='categories')lines.push('Groups: '+(c.categories||[]).map(id=>contactById(id)?.title).filter(Boolean).join(', '));
       else for(const value of c[key]||[])lines.push(title+': '+(key==='notes'?new Date(value.date).toLocaleDateString()+' '+value.text:key==='nodes'?value.radio.toUpperCase()+' '+value.id+' '+(value.name||''):(value.label?value.label+': ':'')+value.value));
     }if(!lines.length&&!selected.has('photo')){onContactError('Choose at least one field with a value');return;}AndroidBridge.shareContact(lines.join('\n'),selected.has('photo')?c.photo:'');
   });contactButton(body,'Cancel',()=>el('contacts-dialog').close());
@@ -293,3 +299,5 @@ window.onAndroidContact=result=>{
     editContact(draft);
   });contactButton(body,'Cancel',()=>el('contacts-dialog').close());
 };
+
+function contactGroupList(c){const list=node('span','contact-group-list');for(const group of contactCategories().filter(g=>(c.categories||[]).includes(g.id)))list.appendChild(node('small','',group.title));return list;}

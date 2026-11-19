@@ -78,6 +78,18 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
   await group.locator('summary').last().click();
   assert(await group.locator('details').last().evaluate(e=>e.open));
   await page.getByRole('button',{name:'Close node list'}).click();
+  await page.evaluate(()=>{mapData.nodes=[...rows,{radio:'mc',id:'aabbcc',name:'No coordinates',device:'active'}];openMapSearch();});
+  await page.getByRole('searchbox',{name:'Node name or key'}).fill('HERMESH');
+  assert.equal(await page.locator('#map-search-results button').count(),1);
+  assert.match(await page.locator('#map-search-results').innerText(),/!9ea1a414/);
+  await page.getByRole('searchbox',{name:'Node name or key'}).fill('aabb');
+  assert.equal(await page.locator('#map-search-results button').isDisabled(),true);
+  await page.getByRole('searchbox',{name:'Node name or key'}).fill('291b');
+  await page.locator('#map-search-results button').click();
+  await page.evaluate(()=>onMapData({nodes:rows}));
+  assert.deepEqual(await page.evaluate(()=>flight.center),[23.724032,37.9846656]);
+  assert.equal(await page.evaluate(()=>mapSelected.id),'!291b406e');
+  assert.ok(await page.evaluate(()=>flight.zoom>=13));
   assert.deepEqual(errors,[]);
   console.log('Map position UI passed: geographic stacks, exact node/receiver selection, precision radii/toggle, timestamps, stale caches, signed/date-line geometry and no MC uncertainty inference');
  }finally{await browser.close();}

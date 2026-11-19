@@ -92,7 +92,7 @@
       <input id="contacts-search" class="form-input" type="search" placeholder="Search anything you remember…" aria-label="Search contacts" oninput="contactViewChanged()">
       <div class="contact-toolbar"><label><input id="contacts-favorites" type="checkbox" onchange="contactViewChanged()"> Favorites</label><select id="contacts-sort" aria-label="Sort contacts" onchange="contactViewChanged()"><option value="name">Name A–Z</option><option value="surname">Surname A–Z</option><option value="edited">Recently edited</option><option value="heard">Node last heard</option></select><select id="contacts-network" aria-label="Contact network" onchange="contactViewChanged()"><option value="all">All networks</option><option value="mc">MeshCore</option><option value="mt">Meshtastic</option><option value="none">No assigned nodes</option></select></div>
       <div id="contacts-categories" class="contact-toolbar"></div>
-      <details id="contacts-tools"><summary>Tools and import</summary><div class="contact-toolbar"><button type="button" onclick="AndroidBridge.pickAndroidContact('')">Import from Android</button><button type="button" onclick="manageContactCategories()">Categories</button><button type="button" onclick="contactDuplicates()">Find duplicates</button><button type="button" onclick="contactTrash()">Deleted contacts / Undo</button><button type="button" onclick="exportAllContacts()">Export contacts</button><button type="button" onclick="AndroidBridge.importContacts()">Import contacts file</button></div></details>
+      <details id="contacts-tools"><summary>Tools and import</summary><div class="contact-toolbar"><button type="button" onclick="AndroidBridge.pickAndroidContact('')">Import from Android</button><button type="button" onclick="manageContactCategories()">Groups</button><button type="button" onclick="contactDuplicates()">Find duplicates</button><button type="button" onclick="contactTrash()">Deleted contacts / Undo</button><button type="button" onclick="exportAllContacts()">Export contacts</button><button type="button" onclick="AndroidBridge.importContacts()">Import contacts file</button></div></details>
       <p id="contacts-count" class="help"></p><div id="contacts-list"></div>
     </div>
     <div id="contact-detail" hidden></div>
@@ -115,6 +115,7 @@
   </div>
   <div class="node-filter-options">
     <label class="node-hide-label"><input id="nodes-show-unknown" type="checkbox" onchange="renderNodes()" checked>Show unknown last heard</label>
+    <label class="node-hide-label"><input id="nodes-direct-only" type="checkbox" onchange="renderNodes()">Heard directly (0 hops)</label>
   <label class="node-hide-label node-hide-line"><input id="nodes-hide-unmessageable" type="checkbox" onchange="renderNodes()">Hide unmessageable nodes</label>
   </div>
   <div id="nodes-summary"></div>
@@ -126,6 +127,8 @@
   <div class="map-top"><strong>Map</strong><button id="map-source-switch" class="map-source-switch" type="button" onclick="toggleMapMode()" aria-label="Switch to offline map">Online ⇄</button><button type="button" onclick="openOfflineMaps()">Offline maps</button><button type="button" onclick="mapFitVisible()">Fit visible</button></div>
   <div class="map-filters">
     <label>Network<select id="map-network" class="form-input" onchange="renderMap()"><option value="all">All</option><option value="mc">MC</option><option value="mt">MT</option></select></label>
+    <div class="map-group-filter"><label>Groups<select id="map-group" class="form-input" onchange="selectMapGroup(this.value)"><option value="all">All groups / all nodes</option></select></label><div id="map-selected-groups" class="contact-group-list"></div></div>
+    <label>Contact<select id="map-contact" class="form-input" onchange="renderMap()"><option value="all">All contacts / all nodes</option></select></label>
     <label>Device<select id="map-device" class="form-input" onchange="renderMap()"><option value="all">All devices</option></select></label>
     <label>Role<select id="map-role" class="form-input" onchange="renderMap()"><option value="all">All roles</option></select></label>
     <label>Heard settings<select id="map-rf" class="form-input" onchange="renderMap()"><option value="all">All settings</option></select></label>
@@ -133,6 +136,7 @@
     <label>To<input id="map-to" class="form-input" type="datetime-local" onchange="renderMap()"></label>
     <button type="button" onclick="clearMapFilters()">Clear filters</button>
   </div>
+  <button type="button" id="map-search-button" onclick="openMapSearch()">Search nodes</button>
   <button type="button" id="map-alerts-button" onclick="openGeofenceHistory()">Geofence alerts</button>
   <label class="config-switch"><input id="map-show-precision" type="checkbox" checked onchange="renderMap()"> Show shared-position uncertainty circles</label>
   <div id="map-status" role="status" aria-live="polite"></div>
@@ -146,6 +150,7 @@
   <section id="map-tool-panel" aria-live="polite"></section>
   <div id="map-items"></div>
 </main>
+<dialog id="map-search-dialog" class="log-dialog map-dialog" aria-labelledby="map-search-heading"><div class="log-dialog-head"><h2 id="map-search-heading">Search nodes</h2><button type="button" aria-label="Close node search" onclick="el('map-search-dialog').close()">×</button></div><div class="log-dialog-body"><input id="map-node-search" class="form-input" type="search" aria-label="Node name or key" placeholder="Node name or key…" oninput="renderMapSearch()"><p class="help">Search all saved nodes, including those hidden by filters. Selecting a node clears filters and opens its position.</p><div id="map-search-results"></div></div></dialog>
 <dialog id="map-node-dialog" class="log-dialog map-dialog" aria-labelledby="map-node-heading">
   <div class="log-dialog-head"><h2 id="map-node-heading">Nodes at this location</h2><button type="button" aria-label="Close node list" onclick="this.closest('dialog').close()">×</button></div>
   <div class="log-dialog-body" id="map-node-group"></div>
@@ -324,7 +329,7 @@
     <div id="settings-backup-page" class="settings-subpage" hidden>
       <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
       <h2>App backup</h2>
-      <p class="help">Full App Backup includes radios, channels, messages, settings, Log, Map and offline packs, plus all Contacts: profiles, photos, notes, custom fields, categories, favorites and node assignments. Deleted contacts kept for undo are included. Import adds missing data and keeps newer contact edits. Android contact links may need to be selected again on another phone.</p>
+      <p class="help">Full App Backup includes radios, channels, messages, settings, Log, Map and offline packs, plus all Contacts: profiles, photos, notes, custom fields, groups, favorites and node assignments. Deleted contacts kept for undo are included. Import adds missing data and keeps newer contact edits. Android contact links may need to be selected again on another phone.</p>
       <div class="actions"><button type="button" onclick="AndroidBridge.exportAppBackup()">Export full backup</button></div>
       <div class="actions"><button type="button" onclick="AndroidBridge.importAppBackup()">Import full backup</button></div>
       <p class="help">A sound selected on another phone will be used only if it is available here. Bluetooth permission and pairing may still need to be set up on this phone.</p>

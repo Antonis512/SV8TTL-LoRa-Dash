@@ -1,7 +1,7 @@
 # SV8TTL LoRa Dash
 
 **Beta · User manual**  
-For version **0.10.32 (59)** · 16 November 2026
+For version **0.10.34 (61)** · 19 November 2026
 
 Language: **English** · [Ελληνικά](USER-MANUAL-el.md)
 
@@ -12,6 +12,36 @@ SV8TTL LoRa Dash is a standalone Android app for connecting to MeshCore and Mesh
 This is an independent Android adaptation based on OverMesh Lite, incorporating original OverMesh assets. It is not an official OverMesh release. Credits and notices are available in **Config → About** and [LICENSE](LICENSE).
 
 The pictures show the app interface rendered at phone size with fictional names, IDs, messages and readings. Physical radio and phone checks are tracked in [PHONE-TESTS.md](PHONE-TESTS.md).
+
+## Changes in 0.10.34
+
+### Chat and Nodes
+
+The channel selectors beneath the device names now use brighter, bolder text. Choices still come from the selected radio.
+
+In **Nodes**, linked contact names appear beside the node name. Expand a node to see its latest recorded signal report for the receiving radio: SNR, RSSI when available, time and reception settings. Green, yellow, orange and red indicate progressively poorer readings using Meshtastic signal-meter thresholds. SNR depends on the recorded spreading factor/preset; unknown settings remain unrated. Relayed readings describe the final hop. MeshCore V3 direct messages provide SNR but not RSSI; older or missing samples remain unavailable.
+
+**Heard directly (0 hops)** filters by the latest recorded reception with zero incoming hops, excluding MQTT. It does not guarantee current reachability. The availability field has been removed.
+
+**Show on map** centers and zooms to the node and opens its details. The button is greyed out when coordinates are unavailable. A saved position is not necessarily current.
+
+### Contacts: Groups
+
+Contacts categories are now named **Groups**; existing memberships are preserved. A contact can belong to several groups, displayed one beneath another. In **Edit → Groups**, use **Add to group** to choose an existing group. Selected groups appear beside the dropdown. Use the × beside a group to remove that membership, then **Save Contact**. **New group / Add group** creates a group. **Contacts → Tools and import → Groups** manages group names and deletion; deleting a group keeps its contacts. Log categories remain separate.
+
+### Map filters and search
+
+- **Groups** selects one or several groups. Multiple groups show the combined nodes of their contacts. **All groups / all nodes** removes the group restriction; × removes an individual group filter.
+- **Contact** narrows the map to nodes assigned to one person. **Device** selects the receiving radio. These filters combine with the group, network, role, settings and date filters. Clear filters restores all nodes.
+- **Search nodes** searches all saved nodes by partial name or key, ignoring case and current filters. Results show network and key. Nodes without coordinates are greyed out. Selecting a positioned result clears filters, centers and zooms the map, and opens its details. Multiple receiver records produce one result per node.
+- Tapping a node shows linked contact names above its radio details.
+
+### Included from 0.10.33
+
+Per-radio channel management and MeshCore utilization history are available. A geofence can issue a **possible entrance** notification as soon as any part of a Meshtastic shared-position uncertainty circle overlaps it; the whole circle need not enter. Continuous overlap does not repeatedly trigger the same entrance alert.
+
+These changes still require physical MC/MT radio and phone testing. In particular, check connection/reconnection, initial nodes/channels and Chat selection, simultaneous connections, Contacts scrolling, and Android gesture/three-button navigation and keyboard insets. Automatic location sharing is not implemented. Signal history is not included in Full App Backup.
+
 
 ## Contents
 

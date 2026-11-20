@@ -323,7 +323,12 @@ final class ChatStore extends SQLiteOpenHelper {
     }
     void heard(String radio,String nodeId,String peer,long seconds,String settings) {
         if(nodeId.isEmpty()||seconds<=0||seconds>System.currentTimeMillis()/1000+300) return;
-        if(seconds<=lastHeard(radio,nodeId,peer)) return;
+        long previous=lastHeard(radio,nodeId,peer);
+        if(seconds==previous&&!settings.isEmpty()) {
+            ContentValues knownSettings=new ContentValues();knownSettings.put("settings",settings);
+            getWritableDatabase().update("node_heard",knownSettings,"radio=? AND node_id=? AND peer=? AND settings=''",new String[]{radio,nodeId,peer});
+        }
+        if(seconds<=previous) return;
         ContentValues v=new ContentValues();v.put("radio",radio);v.put("node_id",nodeId);v.put("peer",peer);v.put("heard",seconds);v.put("settings",settings);
         getWritableDatabase().insertWithOnConflict("node_heard",null,v,SQLiteDatabase.CONFLICT_REPLACE);
         new MapData(this).heard(radio,nodeId,peer,seconds);

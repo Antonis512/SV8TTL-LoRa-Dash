@@ -10,6 +10,7 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
    window.calls=[];window.AndroidBridge=new Proxy({},{get:(_,name)=>(...args)=>{
     calls.push([name,...args]);
     if(name==='selectChatDevice'){
+     if(window.deferDeviceSwitch)return;
      const [side,radio,key]=args;
      fixture[side]=key?radios.find(r=>r.radio===radio&&(r.key===key||'saved:'+r.ownId===key)):blank();
      onRadioState(fixture);
@@ -30,6 +31,32 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
   assert.equal(await page.locator('#chat-mt-device option').count(),4);
   assert.equal(await page.locator('#chat-header-bar #chat-mc-device').count(),1);
   assert.equal(await page.locator('#chat-device-bar #header-mc-channel').count(),1);
+  // Radio updates must not replace the options under an open Android picker.
+  await page.evaluate(()=>{
+    const menu=el('chat-mt-device');menu.focus();
+    window.pickerOptions=[...menu.options];
+    fixture.devices[1].unread=true;
+    for(let i=0;i<5;i++)onRadioState(fixture);
+  });
+  assert.equal(await page.evaluate(()=>pickerOptions.every((o,i)=>el('chat-mt-device').options[i]===o)),true);
+  await page.locator('#chat-mt-device').blur();
+  assert.match(await page.locator('#chat-mt-device option[value="mt|device1"]').innerText(),/●/);
+  // Delay native confirmation, inject stale updates, then switch back once.
+  await page.evaluate(()=>{window.deferDeviceSwitch=true;});
+  for(const [side,id,targets] of [['right','mt',[2,1]],['left','mc',[2,0]]]){
+    for(const target of targets){
+      const menu=page.locator('#chat-'+id+'-device'),value=(target===0?'mc':'mt')+'|device'+target;
+      await menu.selectOption(value);
+      await menu.blur();
+      await page.evaluate(()=>{for(let i=0;i<5;i++)onRadioState(fixture);});
+      assert.equal(await menu.inputValue(),value,'Stale state must not undo the chosen device');
+      await page.evaluate(({side,target})=>{fixture[side]=radios[target];onRadioState(fixture);},{side,target});
+      assert.equal(await menu.inputValue(),value);
+      assert.equal(await page.evaluate(side=>Object.hasOwn(pendingChatDevices,side),side),false);
+      assert.equal(await page.locator('#header-'+id+'-channel').inputValue(),String(target));
+    }
+  }
+  await page.evaluate(()=>{window.deferDeviceSwitch=false;});
   await page.locator('#chat-mc-device').selectOption('mt|device1');
   await page.locator('#chat-mt-device').selectOption('mt|device2');
   assert.equal(await page.locator('#header-mc-pill').innerText(),'MT');
@@ -84,7 +111,7 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
   await page.setViewportSize({width:390,height:780});
   await page.screenshot({path:'build/multi-device-098.png'});
   await page.evaluate(()=>{switchTab('settings');showSettingsPage('home');});
-  assert.deepEqual((await page.locator('.settings-shortcuts strong').allTextContents()).slice(-4),['Export debug log','Check for Updates','Untrained Member Mode','About']);
+  assert.deepEqual((await page.locator('.settings-shortcuts strong').allTextContents()).slice(-4),['Channel backup','Export debug log','Check for Updates','About']);
   await page.evaluate(()=>showSettingsPage('nodes'));
   const available=page.getByRole('button',{name:'Connect All Available',exact:true});
   assert.equal(await available.evaluate(e=>getComputedStyle(e).backgroundColor),await page.getByRole('button',{name:'View messages',exact:true}).first().evaluate(e=>getComputedStyle(e).backgroundColor));

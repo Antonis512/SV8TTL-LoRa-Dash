@@ -10,6 +10,8 @@ const {pathToFileURL}=require('node:url');
   window.f={mc:radio('mc'),mt:radio('mt'),devices:[],myNodes:[],nodeNames:{},sound:{mode:'shared',shared:{}}};
   f.mt.nodes=[{id:'!11111111',name:'Portable',role:'Client',hops:0,lastSignal:signal},
    {id:'!22222222',name:'Relayed',role:'Client',hops:2,lastSignal:{...signal,hops:2}},
+   {id:'!55555555',name:'Stale direct',role:'Client',hops:1,lastSignal:signal},
+   {id:'!66666666',name:'Stale direct two',role:'Client',hops:2,lastSignal:signal},
    {id:'!33333333',name:'Unknown',role:'Client',hops:-1},
    {id:'!44444444',name:'MQTT',role:'Client',hops:0,lastSignal:{...signal,mqtt:true}}];
   f.mc.nodes=[{id:'abcdefabcdef',name:'MC direct',role:'User',hops:3,lastSignal:{...signal,snr:0,rssi:undefined,settings:'869.618 MHz · BW 62.5 kHz · SF8 · CR4/8',timeSource:'message'}},
@@ -47,6 +49,32 @@ const {pathToFileURL}=require('node:url');
  }));
  assert.deepEqual(ratings,{floors:[-7.5,-10,-12.5,-15,-17.5,-20],snr:['good','fair','fair','bad','bad','none'],rssi:['good','fair','fair','bad','bad','none'],unknown:'unknown'});
  await page.evaluate(()=>{f.mt.connected=true;f.devices=[{radio:'mc',id:'own-mc',key:'mc1',name:'Receiver MC'},{radio:'mt',id:'own-mt',key:'mt1',name:'Receiver MT'}];onRadioState(f);switchTab('chat');openChannelsScreen();});
+ await page.evaluate(()=>{
+   window.positionSent=null;
+   window.AndroidBridge=new Proxy({sendMessage:(...args)=>{window.positionSent=args;}},{get:(o,k)=>o[k]||(()=>{})});
+   startChatLocation();
+   memberLocationFix(pendingMemberLocation.token,37.9,23.7,'Phone position');
+   confirmMemberLocation();
+ });
+ assert.deepEqual(await page.evaluate(()=>positionSent),['mc1',0,'m:37.900000,23.700000|Location|poi']);
+ await page.evaluate(()=>{
+   positionSent=null;startChatLocation();
+   memberLocationFix(pendingMemberLocation.token,37.9,23.7,'Phone position');
+   channel[network]=2;confirmMemberLocation();
+ });
+ assert.equal(await page.evaluate(()=>positionSent),null);
+ assert.equal(await page.locator('#member-location-confirm').isDisabled(),true);
+ await page.evaluate(()=>{el('member-location-dialog').close();channel[network]=0;});
+ assert.equal(await page.locator('#channels-center .composer-templates').isVisible(),false);
+ await page.locator('#chat-input').focus();
+ assert.equal(await page.locator('#channels-center .composer-templates').isVisible(),true);
+ await page.locator('#channels-center .composer-templates button').last().click();
+ assert.equal(await page.locator('#message-template-editor').evaluate(e=>e.open),true);
+ await page.evaluate(()=>closeMessageTemplateEditor());
+ await page.locator('#chat-input').blur();
+ assert.equal(await page.locator('#channels-center .composer-templates').isVisible(),false);
+ assert.equal(await page.locator('.map-filters #map-search-button').count(),1);
+ assert.equal(await page.locator('#channels-center > .composer-templates').count(),1);
  const selector=page.locator('#header-mc-channel');
  assert.equal(await selector.evaluate(e=>getComputedStyle(e).fontWeight),'700');
  assert.deepEqual(await selector.locator('option').allTextContents(),['Team Alpha','Local']);

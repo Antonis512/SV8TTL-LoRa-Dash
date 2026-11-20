@@ -379,22 +379,41 @@ function selectChannel(radio,index) {
   openHistory=null;
   renderChat();
 }
+const pendingChatDevices={};
 function renderDeviceSelector(slot) {
-  const menu=el('chat-'+sideId(slot)+'-device');clear(menu);
-  const empty=node('option','','No device');empty.value='';menu.appendChild(empty);
+  const menu=el('chat-'+sideId(slot)+'-device');
   const devices=[...state.devices];
   for(const known of state.myNodes)if(!devices.some(d=>d.radio===known.radio&&d.id===known.id))
     devices.push({...known,key:'saved:'+known.id});
-  for(const item of devices){
-    const option=node('option','',(item.unread?'● ':'')+(item.name||item.id)+' · '+item.radio.toUpperCase()+(item.connected===false||item.key.startsWith('saved:')?' · offline':''));
-    option.value=item.radio+'|'+item.key;menu.appendChild(option);
-  }
   const current=state[slot];
   const chosen=devices.find(d=>d.radio===current.radio&&(d.key===current.key||d.id===current.ownId));
-  menu.value=chosen?chosen.radio+'|'+chosen.key:'';menu.disabled=false;
+  const confirmed=chosen?chosen.radio+'|'+chosen.key:'';
+  if(pendingChatDevices[slot]===confirmed ||
+      (pendingChatDevices[slot]&&!devices.some(d=>d.radio+'|'+d.key===pendingChatDevices[slot])))
+    delete pendingChatDevices[slot];
+  // Android's select popup retains these option objects while it is open.
+  // Defer radio/unread updates until the user finishes with the picker.
+  menu.onblur=()=>renderDeviceSelector(slot);
+  if(document.activeElement===menu)return;
+  const options=[['','No device'],...devices.map(item=>[
+    item.radio+'|'+item.key,
+    (item.unread?'● ':'')+(item.name||item.id)+' · '+item.radio.toUpperCase()+
+      (item.connected===false||item.key.startsWith('saved:')?' · offline':'')
+  ])];
+  const signature=JSON.stringify(options);
+  if(menu.dataset.options!==signature){
+    menu.replaceChildren(...options.map(([value,label])=>{
+      const option=node('option','',label);option.value=value;return option;
+    }));
+    menu.dataset.options=signature;
+  }
+  const value=pendingChatDevices[slot]??confirmed;
+  if(menu.value!==value)menu.value=value;
+  menu.disabled=false;
 }
 function selectChatDevice(slot,value) {
   const split=value.indexOf('|'),radio=split<0?'':value.slice(0,split),key=split<0?'':value.slice(split+1);
+  pendingChatDevices[slot]=value;
   AndroidBridge.selectChatDevice(slot,radio,key);
 }
 function toggleUsersList(radio) {
@@ -847,6 +866,7 @@ function renderChannelsScreen() {
   el('chat-input').placeholder=canSend?'Message '+selectedChannel.name+'…':!radio.connected?'Reconnect this device to send':'Wait for channel names…';
   el('chat-input').disabled = false;
   el('chat-send').disabled = !canSend;
+  el('chat-position').disabled = !canSend;
   updateMessageBudget(el('chat-input'));
   if(!searching&&selectedChannel&&activeTab==='chat')finishHistoryView(messages,context,network,'',channel[network],entries);
   renderReplyPreview();
@@ -1004,7 +1024,7 @@ function renderNodes() {
       if(nodeRole!=='all'&&id+':'+entry.role!==nodeRole) continue;
       if(rfMenu.value!=='all'&&heardProfile(id,entry.heardSettings)!==rfMenu.value) continue;
       if(el('nodes-hide-unmessageable').checked&&!nodeMessageable(id,entry)) continue;
-      if(el('nodes-direct-only').checked&&!nodeHeardDirectly(entry))continue;
+      if(el('nodes-direct-only').checked&&!nodeHeardDirectly(entry,id))continue;
       const contactNames=window.contactNamesForNode?.(id,entry.id)||[];
       if (!(entry.name + ' ' + localNodeName(id,entry.id) + ' ' + entry.id + ' ' + displayRole(id,entry.role)+' '+contactNames.join(' ')).toLowerCase().includes(search)) continue;
       const row = node('div', 'android-node');

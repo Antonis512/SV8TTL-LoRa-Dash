@@ -4,7 +4,7 @@ Standalone Android app for MeshCore and Meshtastic radios over Bluetooth or USB 
 
 User manuals: [English](USER-MANUAL.md) · [Ελληνικά](USER-MANUAL-el.md). Covers setup, Chat, presets, Map, sending options, backups and troubleshooting. The illustrated guides use fictional devices, users and nodes.
 
-Current version **0.10.34 (61)** adds contact Groups, group/contact Map filters, node search and Show on map, contact names on nodes and popups, latest reception reports and direct-heard filtering, and clearer Chat channel selectors. The availability field is removed. Both user manuals are updated. Physical phone/radio validation remains pending. See [build notes](BUILD-0.10.34.md).
+Current version **0.10.35 (62)** fixes switching Chat devices, direct-heard node filtering and missing MT receiver settings. Channel Chat adds Send position; template buttons appear when writing. Map search fits inside the filters, and grouped markers show a theme-coloured +N badge. Physical phone/radio validation remains pending. See [build notes](BUILD-0.10.35.md).
 
 Version **0.10.33 (60)** adds per-radio channel management, MeshCore utilization history, a highlighted Chat channel name, and possible-entrance geofence alerts when any part of a Meshtastic uncertainty circle overlaps the fence. Repeated overlap does not repeat the alert. See [build notes](BUILD-0.10.33.md). Physical phone and radio validation is pending.
 

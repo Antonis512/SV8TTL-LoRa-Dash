@@ -262,8 +262,15 @@ function renderMap(){
   const groups=mapPositionGroups(placed);
   for(const members of groups){
     const n=members.find(item=>mapSelected&&sameMapNode(item,mapSelected))||members.find(item=>item.id===item.device)||members[0];
-    const dot=mapText('span',members.length>1?String(members.length):'',`map-node-dot ${n.radio}${members.length>1?' map-node-stack':''}${!mapPositionTime(n)?' undated':Date.now()-mapPositionTime(n)>86400000?' old':''}`);
+    const dot=mapText('span','',`map-node-dot ${n.radio}${members.length>1?' map-node-stack':''}${!mapPositionTime(n)?' undated':Date.now()-mapPositionTime(n)>86400000?' old':''}`);
     dot.setAttribute('aria-label',members.length>1?members.length+' nodes at this location':n.name||n.id);
+    if(members.length>1){
+      const label=mapText('span',Array.from(n.shortName||n.name||n.id).slice(0,4).join(''),'map-node-stack-label');
+      const badge=mapText('span','+'+(members.length-1),'map-node-count');
+      badge.setAttribute('aria-hidden','true');
+      dot.append(label,badge);
+      dot.title=(n.name||n.id)+' · '+(members.length-1)+' more '+(members.length===2?'node':'nodes');
+    }
     // Keep the count badge clear of small geographic rings, including rings
     // belonging to a member other than the node used to anchor the stack.
     const precisionStack=members.length>1 && el('map-show-precision').checked && members.some(item=>mapPrecisionRadius(item)>0);
@@ -292,7 +299,7 @@ function renderMap(){
     if(index>=0){const n=placed[index];mapSelected=n;const nearby=nearbyMapNodes(n,placed);
       if(nearby.length>1)showMapNodeGroup(nearby,n);
       else showSingleMapNode(n);
-      mapView.flyTo({center:[n.lon,n.lat],zoom:Math.max(mapView.getZoom(),13)});mapNotice('Selected '+(n.name||n.id)+' · '+n.id);}
+      mapView.flyTo({center:[n.lon,n.lat],zoom:Math.max(mapView.getZoom(),13)});mapNotice('');}
     else {mapSelected=null;mapNotice('No saved position for '+requested.id+' on this receiving device.',true);}
   }
   for(const item of mapData.items.filter(i=>i.kind==='mark'&&i.enabled)){

@@ -1,7 +1,7 @@
 # SV8TTL LoRa Dash
 
 **Beta · User manual**  
-For version **0.10.34 (61)** · 19 November 2026
+For version **0.10.35 (62)** · 20 November 2026
 
 Language: **English** · [Ελληνικά](USER-MANUAL-el.md)
 
@@ -12,6 +12,18 @@ SV8TTL LoRa Dash is a standalone Android app for connecting to MeshCore and Mesh
 This is an independent Android adaptation based on OverMesh Lite, incorporating original OverMesh assets. It is not an official OverMesh release. Credits and notices are available in **Config → About** and [LICENSE](LICENSE).
 
 The pictures show the app interface rendered at phone size with fictional names, IDs, messages and readings. Physical radio and phone checks are tracked in [PHONE-TESTS.md](PHONE-TESTS.md).
+
+## Changes in 0.10.35
+
+- Chat device pickers retain your choice while Android switches radios, including when returning from a third device.
+- **Send position**, above **Send** in channel Chat, gets the phone location and asks for confirmation before sending it to the selected radio/channel. Changing the destination before confirmation prevents sending.
+- **Templates** and **Save template** sit below the composer font controls and above the text box. Both appear only while writing.
+- **Heard directly (0 hops)** also excludes MT nodes whose reported hop count is positive despite an older zero-hop sample.
+- Missing MT reception settings fall back to the receiving device's known preset. Recorded reception settings take precedence.
+- Map **Search nodes** is inside the styled filters frame. Selecting a node no longer adds a Selected line above the map.
+- Grouped map markers show a short node label and a gold **+N** badge for additional nodes. **+1** means two nodes in total. Tap to open the complete list.
+
+Physical phone/radio validation remains pending.
 
 ## Changes in 0.10.34
 

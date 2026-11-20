@@ -415,7 +415,7 @@ public final class MainActivity extends Activity {
         int settingsGeneration=-1;
         long settingsSince;
         String observedSettings(long seconds) {
-            return settingsGeneration==generation && seconds>=settingsSince && seconds<=System.currentTimeMillis()/1000 ? rfLabel : "";
+            return settingsGeneration==generation && (!meshcore || (seconds>=settingsSince && seconds<=System.currentTimeMillis()/1000)) ? rfLabel : "";
         }
         final ArrayDeque<ChatEntry> pendingSends = new ArrayDeque<>();
         final Map<Long,ChatEntry> trackedMessages=new java.util.LinkedHashMap<>();
@@ -3144,7 +3144,7 @@ public final class MainActivity extends Activity {
         if(!session.loading)for (NodeEntry node : session.knownNodes.values())
             {
                 JSONObject item = new JSONObject().put("id", node.id).put("name", node.name)
-                        .put("heardSettings",heardSettings.get(node.id)).put("lastHeard",heardTimes.getOrDefault(node.id,0L)).put("role", node.role).put("model", node.model).put("hops", node.hops).put("lastSignal",lastSignals.get(node.id))
+                        .put("heardSettings",heardSettings.getOrDefault(node.id,!session.meshcore&&heardTimes.getOrDefault(node.id,0L)>0?sessionRfLabel(session):"")).put("lastHeard",heardTimes.getOrDefault(node.id,0L)).put("role", node.role).put("model", node.model).put("hops", node.hops).put("lastSignal",lastSignals.get(node.id))
                         .put("favorite", getPreferences(0).getBoolean((session.meshcore ? "mc:" : "mt:") + session.ownId + ":" + node.id, false));
                 if (Double.isFinite(node.latitude) && Double.isFinite(node.longitude))
                     item.put("latitude", node.latitude).put("longitude", node.longitude);
@@ -3156,7 +3156,7 @@ public final class MainActivity extends Activity {
             while(c.moveToNext()) {
                 String id=c.getString(0);if(session.knownNodes.containsKey(id))continue;
                 JSONObject item=new JSONObject().put("id",id).put("name",c.getString(1)).put("role",c.getString(2))
-                        .put("model","").put("hops",-1).put("savedOnly",true).put("heardSettings",heardSettings.get(id)).put("lastSignal",lastSignals.get(id))
+                        .put("model","").put("hops",-1).put("savedOnly",true).put("heardSettings",heardSettings.getOrDefault(id,!session.meshcore&&heardTimes.getOrDefault(id,0L)>0?sessionRfLabel(session):"")).put("lastSignal",lastSignals.get(id))
                         .put("lastHeard",heardTimes.getOrDefault(id,0L))
                         .put("favorite",getPreferences(0).getBoolean(radio+":"+session.ownId+":"+id,false));
                 if(!c.isNull(3)&&!c.isNull(4))item.put("latitude",c.getDouble(3)).put("longitude",c.getDouble(4));

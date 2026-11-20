@@ -1,6 +1,6 @@
 'use strict';
 // Independent display implementation of Meshtastic's documented signal thresholds.
-function nodeHeardDirectly(entry){return entry.lastSignal?.hops===0&&!entry.lastSignal.mqtt;}
+function nodeHeardDirectly(entry,radio){return entry.lastSignal?.hops===0&&!entry.lastSignal.mqtt&&(radio!=='mt'||!(entry.hops>0));}
 function nodeSnrFloor(radio,settings){
   if(!settings)return null;
   const match=/\bSF(\d+)\b/.exec(settings);

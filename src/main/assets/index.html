@@ -57,9 +57,9 @@
       <div id="channel-message-search" class="message-search-bar" hidden></div>
       <div id="chat-messages"></div>
       <div id="chat-empty">Connect a radio in Config, then choose a channel.</div>
-      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="chat-input-bar">
+      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div class="composer-templates"><button class="preset-picker-button" type="button" onclick="openPresetPicker('chat-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('chat-input').value)">Save template</button></div><div id="chat-input-bar">
         <textarea id="chat-input" class="form-input" placeholder="Message…" rows="1"></textarea>
-        <div class="composer-actions"><button class="preset-picker-button" type="button" onclick="openPresetPicker('chat-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('chat-input').value)">Save template</button><button id="chat-send" onclick="sendMsg()">Send</button></div>
+        <div class="composer-actions"><button id="chat-position" type="button" onclick="startChatLocation()">Send position</button><button id="chat-send" onclick="sendMsg()">Send</button></div>
       </div>
     </section>
     <aside class="chat-side" id="channel-mt-side"></aside>
@@ -71,7 +71,7 @@
       <div id="dm-message-search" class="message-search-bar" hidden></div>
       <div id="dm-chat-history"></div>
       <div id="dm-chat-status" aria-live="polite"></div>
-      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><div class="composer-actions"><button class="preset-picker-button" type="button" onclick="openPresetPicker('dm-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('dm-input').value)">Save template</button><button id="dm-reply" onclick="replyDm()">Reply</button></div></div>
+      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div class="composer-templates"><button class="preset-picker-button" type="button" onclick="openPresetPicker('dm-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('dm-input').value)">Save template</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><div class="composer-actions"><button id="dm-reply" onclick="replyDm()">Reply</button></div></div>
     </section>
     <aside class="dm-side" id="dm-mt-side"></aside>
   </div>
@@ -135,8 +135,8 @@
     <label>Heard from<input id="map-from" class="form-input" type="datetime-local" onchange="renderMap()"></label>
     <label>To<input id="map-to" class="form-input" type="datetime-local" onchange="renderMap()"></label>
     <button type="button" onclick="clearMapFilters()">Clear filters</button>
+    <button type="button" id="map-search-button" onclick="openMapSearch()">Search nodes</button>
   </div>
-  <button type="button" id="map-search-button" onclick="openMapSearch()">Search nodes</button>
   <button type="button" id="map-alerts-button" onclick="openGeofenceHistory()">Geofence alerts</button>
   <label class="config-switch"><input id="map-show-precision" type="checkbox" checked onchange="renderMap()"> Show shared-position uncertainty circles</label>
   <div id="map-status" role="status" aria-live="polite"></div>

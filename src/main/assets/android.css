@@ -266,10 +266,8 @@ input,textarea,[contenteditable="true"] { user-select:text; -webkit-user-select:
 .composer-font-tools button { min-width:32px; min-height:30px; background:var(--bg3); color:var(--accent); border:1px solid var(--border); border-radius:5px; }
 #chat-input-bar,#dm-compose { align-items:flex-end; }
 .composer-actions { display:flex; flex-direction:column; align-items:stretch; gap:5px; flex-shrink:0; }
-.composer-actions button { min-height:36px; border:1px solid var(--accent); border-radius:5px; background:var(--accent-dim); color:var(--accent); font-weight:700; padding:4px 7px; }
+.composer-actions button,.composer-templates button { min-height:36px; border:1px solid var(--accent); border-radius:5px; background:var(--accent-dim); color:var(--accent); font-weight:700; padding:4px 7px; }
 .composer-actions button:disabled { opacity:.45; }
-.preset-picker-button { display:none; }
-.composing .preset-picker-button { display:block; }
 #preset-editor-list { display:flex; flex-direction:column; gap:12px; }
 .preset-editor { border:1px solid var(--border); border-radius:8px; background:var(--bg2); padding:10px; }
 .preset-editor-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; color:var(--accent); }
@@ -490,3 +488,9 @@ body.member-mode #settings-my-nodes-page .node-management{display:none}
 #map-search-results{display:flex;flex-direction:column;gap:8px}
 #map-search-results button{text-align:left;overflow-wrap:anywhere}
 .node-details button:disabled,#map-search-results button:disabled{opacity:.45;cursor:default}
+
+.composer-templates { display:none; flex-wrap:wrap; gap:5px; padding:4px 8px; }
+#chat-input-bar .composer-actions { flex-direction:column; }
+#chat-position { max-width:80px; white-space:normal; }
+
+.composing .composer-templates { display:flex; }

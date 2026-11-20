@@ -176,6 +176,23 @@ function memberBudget(){
   el('member-send').disabled=memberBusy||!text||!target||warning;
 }
 let pendingMemberLocation=null;
+function chatLocationDestination(){
+  const device=state?.[network];
+  const selected=device?.channels.find(c=>c.index===channel[network]);
+  if(!device?.connected||dmMode||!selected||state?.memberConfig?.enabled)return null;
+  return {radio:radioType(network),nodeId:device.ownId,key:device.key,peer:'',channel:selected.index,label:selected.name};
+}
+function startChatLocation(){
+  const dest=chatLocationDestination();
+  if(!dest||pendingCompose)return;
+  const token=++markPhoneSequence;
+  pendingMemberLocation={token,dest,chat:true};
+  el('member-location-target').textContent=dest.radio.toUpperCase()+' · '+dest.label;
+  el('member-location-status').textContent=mtWord('locating');
+  el('member-location-confirm').disabled=true;
+  el('member-location-dialog').showModal();
+  AndroidBridge.fetchMarkPosition(token);
+}
 function locationDestination(){
   const t=memberTarget();
   if(!t||!memberConfig().enabled)return null;
@@ -208,9 +225,16 @@ function memberLocationFix(token,lat,lon,message){
 function confirmMemberLocation(){
   const pending=pendingMemberLocation;
   if(!pending?.fix||memberBusy)return;
-  if(JSON.stringify(locationDestination())!==JSON.stringify(pending.dest)){
+  if(JSON.stringify(pending.chat?chatLocationDestination():locationDestination())!==JSON.stringify(pending.dest)){
     el('member-location-status').textContent=mtWord('routeChanged');
     el('member-location-confirm').disabled=true;return;
+  }
+  if(pending.chat){
+    if(pendingCompose)return;
+    const text='m:'+pending.fix.lat.toFixed(6)+','+pending.fix.lon.toFixed(6)+'|Location|poi';
+    AndroidBridge.sendMessage(pending.dest.key,pending.dest.channel,text);
+    el('member-location-dialog').close();
+    return;
   }
   memberBusy=true;memberBudget();
   AndroidBridge.sendMemberLocation(JSON.stringify([pending.dest]),pending.fix.lat,pending.fix.lon);

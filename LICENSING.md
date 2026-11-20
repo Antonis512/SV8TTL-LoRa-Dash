@@ -1,5 +1,9 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 20 November 2026 — 0.10.35 publication
+
+The user authorized building the debug APK and updating GitHub. Chat picker stability, position sharing controls, template visibility, node filtering/settings and Map badge/layout changes are locally authored. The grouped badge follows the interaction shown in a user-supplied screenshot, using the app's own theme; no third-party implementation or assets were copied. Existing MIT notices, application ID and signing configuration are preserved. Production signing and replacement licensing remain undecided. Physical radio verification is pending.
+
 ## 19 November 2026 — 0.10.34 publication
 
 The user authorized an APK build, English/Greek manual updates and GitHub publication. Groups, Map search/filter controls and node UI changes are locally authored. Existing MIT notices, application ID and debug signing configuration are preserved. Production signing and replacement licensing remain undecided. Physical radio verification is pending.

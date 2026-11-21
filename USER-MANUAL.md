@@ -1,7 +1,7 @@
 # SV8TTL LoRa Dash
 
 **Beta · User manual**  
-For version **0.10.35 (62)** · 20 November 2026
+For version **0.10.36 (63)** · 21 November 2026
 
 Language: **English** · [Ελληνικά](USER-MANUAL-el.md)
 
@@ -13,10 +13,23 @@ This is an independent Android adaptation based on OverMesh Lite, incorporating 
 
 The pictures show the app interface rendered at phone size with fictional names, IDs, messages and readings. Physical radio and phone checks are tracked in [PHONE-TESTS.md](PHONE-TESTS.md).
 
+## Changes in 0.10.36
+
+- DM now has **Send position** above **Reply**, for both MC and MT, with phone location confirmation and recipient checks. Message drafts are preserved.
+- Send controls keep their normal size while typing. On short screens, channel/user and text-size toolbars temporarily hide while editing to keep the controls above navigation.
+- **Config → Notifications → Silence Notifications** supports All, Contact, or Node, until restored or for a chosen number of minutes. Contact silencing follows assigned nodes. Messages continue to be received and saved.
+- Direct signal details are hidden for relayed, unknown-route and MQTT receptions, including stale direct samples on MT nodes now marked as relayed. Detailed Signal Quality history remains available.
+- The Copernicus download option is removed for now. Existing offline packs remain usable; PMTiles import remains available.
+- Favorites synchronize with compatible connected MC/MT radios; contact favorite/assignment changes update assigned-node favorites. Radio confirmation and physical testing are still required.
+- MT nodes offer Ignore/Unignore, with **Manage Ignored** in Config. Per-node geofence exclusions are reversible from Nodes and geofence alert history.
+- The old **Heard directly (0 hops)** Nodes filter has been removed; hop-count sorting remains.
+
+Physical phone/radio validation remains pending.
+
 ## Changes in 0.10.35
 
 - Chat device pickers retain your choice while Android switches radios, including when returning from a third device.
-- **Send position**, above **Send** in channel Chat, gets the phone location and asks for confirmation before sending it to the selected radio/channel. Changing the destination before confirmation prevents sending.
+- **Send position** appears above **Send** in channel Chat and above **Reply** in DM. It gets the phone location and asks for confirmation before sending to the selected radio/channel or DM recipient. Changing the recipient/device or disconnecting before confirmation prevents sending. Any unsent message draft is preserved.
 - **Templates** and **Save template** sit below the composer font controls and above the text box. Both appear only while writing.
 - **Heard directly (0 hops)** also excludes MT nodes whose reported hop count is positive despite an older zero-hop sample.
 - Missing MT reception settings fall back to the receiving device's known preset. Recorded reception settings take precedence.
@@ -362,9 +375,15 @@ Use the chain monitor to pause, continue and review individual outcomes. **Cance
 
 <img src="docs/manual/nodes.png" width="360" alt="Node 1 and Node 2 reported by the two example devices">
 
-Choose a radio in **Nodes**, then search by name, ID or role. Filters include network, role, infrastructure/users, messageability and local favorites. A Last Heard visibility filter can hide older contacts; unknown timestamps remain unknown.
+Choose a radio in **Nodes**, then search by name, ID or role. Filters include network, role, infrastructure/users, messageability and favorites. A Last Heard visibility filter can hide older contacts; unknown timestamps remain unknown.
 
 Tap a contact to inspect the details and supported actions. **Enter Name** adds a private app-local label; it does not rename the remote radio. Clear the label to remove it. Position and hardware details appear only when supplied by the network. MeshCore contact advertisements provide contact type rather than a hardware model.
+
+**Favorites:** the star requests a favorite change on the connected radio; a pending indication remains until confirmed. Contact favorite and node-assignment changes also update the associated node favorites. Physical behavior depends on compatible firmware.
+
+**MT Ignore:** open a node and choose **Ignore** or **Unignore**. **Config → Manage Ignored** lists the last reported ignored nodes for each MT radio. Connect that radio to unignore a node and wait for confirmation. MeshCore does not offer this control.
+
+**Geofence exclusions:** choose **Exclude from geofence alerts** for an individual node. Restore alerts with **Allow geofence alerts for this node** or through geofence alert history. These exclusions apply across receiving devices; position updates continue, and restoring alerts does not replay suppressed crossings.
 
 Available actions depend on the contact and network:
 
@@ -387,7 +406,7 @@ The map opens in Online mode. Tap **Online ⇄** to switch to Offline mode. Node
 1. While online, open **Map → Offline maps → Open BBBike area download**. Choose the area you need and the **PMTiles** format. Download the completed file or ZIP to your phone. A smaller area is easier to store and back up.
 2. In **Offline maps**, choose **Detailed map**, **BBBike / Shortbread**, then **Install file from phone**. Select the download. You can instead use a compatible Protomaps PMTiles pack and select **Protomaps**.
 3. Switch off mobile data and Wi-Fi. Return to Map, zoom and pan around the downloaded area to confirm it works. The pack's native maximum zoom appears in the pack list; further zoom only enlarges existing detail.
-4. For satellite view, zoom and pan Map to the area you want. Open **Offline maps → Use visible area**, choose an imagery date range and review the tile count and rough size estimate. Tap **Don't have an account yet?** to open Copernicus Data Space, register and verify your email. In its Sentinel Hub dashboard, create an OAuth client and enter its ID and secret in the app. Tick **Remember my credentials on this phone** if you want later downloads without re-entering them; the app encrypts them on this device and excludes them from Full App Backup. **Log off** stops an active download and prevents the app from using remembered credentials until **Log in with remembered account** is tapped. **Forget my credentials** also deletes the saved credentials. These controls do not sign out the external Copernicus website in your browser. Tap **Download satellite area** while online and keep the app open. Copernicus account quotas apply, and large areas must be divided into smaller downloads. Once installed, choose **View** for that pack and test with Wi-Fi and mobile data off. You can also import an already prepared raster PMTiles pack.
+4. For offline satellite view, import a prepared raster PMTiles pack. The Copernicus download option has been removed for now; existing installed packs remain usable.
 
 Choose **All**, **MC** or **MT** in the network filter. Narrow the view by receiving device, node role and **Heard from/to** dates. Position age and last heard time are different: hearing a node does not prove it has moved or sent a new position. Tap a node for details and its recorded position trail. **Map** in a Node action opens the same screen and focuses that node.
 
@@ -405,6 +424,8 @@ The six Map tools have short steps in the app:
 ## 8. Notifications and background use
 
 Open **Config → Notifications** to select shared or separate MC, MT and DM sounds, configure repeats, and enable an unexpected-disconnection sound.
+
+**Silence Notifications** offers **Silence All**, **Silence Contact**, and **Silence Node**, each either until restored or for a chosen number of minutes. Contact silencing follows all nodes assigned to that person; node silencing applies to that radio identity across receiving devices. Messages continue to arrive and are saved. Silencing suppresses message previews/sounds, new-node alerts and geofence alerts; Silence All also suppresses disconnect sounds. The ongoing radio service notification remains visible. Use **Restore alerts** beside a rule to remove it; another active rule can still silence that sender. Timers survive app restarts and expire automatically. MeshCore channel names are matched to known nodes only when unambiguous; unknown named senders can be silenced under their named-sender entry.
 
 On Android 13 and newer, the app asks for notification permission on its first launch after installation. Allow it to show the running-app notification and notification icons. Declining does not prevent radio connections, and the app will not repeatedly prompt at startup. You can enable notifications later in Android's app settings. This permission does not automatically enable background message previews.
 

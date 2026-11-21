@@ -38,19 +38,28 @@ final class MessageNotifications {
     static void show(Context context,String title,String text) {
         show(context,title,text,false);
     }
-    static void showGeofence(Context context,String text){show(context,"Map geofence",text,true);}
-    private static void show(Context context,String title,String text,boolean geofence){
+    static void showGeofence(Context context,String text,String radio,String node){show(context,"Map geofence",text,true,radio,node);}
+    private static void show(Context context,String title,String text,boolean geofence){show(context,title,text,geofence,"","");}
+    private static void show(Context context,String title,String text,boolean geofence,String radio,String node){
         createChannel(context);
         if(!allowed(context))return;
         int notificationId=geofence?203:ID;
         Intent open=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
         if(geofence)open.putExtra("geofenceHistory",true);
         PendingIntent pending=PendingIntent.getActivity(context,notificationId,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        Notification notification=new Notification.Builder(context,CHANNEL)
+        Notification.Builder builder=new Notification.Builder(context,CHANNEL)
                 .setSmallIcon(R.drawable.ic_radio_unread).setContentTitle(title).setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text)).setContentIntent(pending)
                 .setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE)
-                .setVisibility(Notification.VISIBILITY_PRIVATE).build();
+                .setVisibility(Notification.VISIBILITY_PRIVATE);
+        if(geofence){
+            Intent exclude=new Intent(context,MainActivity.class).setData(new android.net.Uri.Builder().scheme("loradash").authority("geofence-exclude").appendPath(radio).appendPath(node).build())
+                .putExtra("excludeGeofenceNode",node).putExtra("geofenceRadio",radio).putExtra("geofenceHistory",true)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            PendingIntent action=PendingIntent.getActivity(context,0,exclude,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+            builder.addAction(new Notification.Action.Builder(null,"Exclude node",action).build());
+        }
+        Notification notification=builder.build();
         try {context.getSystemService(NotificationManager.class).notify(notificationId,notification);}
         catch(SecurityException denied) { /* Permission can change while the app is running. */ }
     }

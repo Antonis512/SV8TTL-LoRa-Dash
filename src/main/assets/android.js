@@ -258,6 +258,7 @@ function showSettingsPage(page) {
   el('settings-backup-page').hidden=settingsPage!=='backup';
   el('settings-channel-backup-page').hidden=settingsPage!=='channel-backup';
   if(settingsPage==='channel-backup') renderBackupDevices();
+  if(settingsPage==='sounds'){AndroidBridge.loadContacts();window.renderSilenceTargets?.();}
   if(state&&settingsPage==='nodes')renderMyNodes();
   if(state&&settingsPage==='sounds')renderSoundConfig();
   el('settings-content').scrollTop=0;
@@ -543,7 +544,7 @@ function renderDmScreen() {
     resetMessageSearch('dm');
     el('dm-chat-title').textContent='Choose a contact';
     history.appendChild(node('div','empty-panel','Select a name to view direct messages.'));
-    el('dm-reply').disabled=true; el('dm-input').disabled=true;
+    el('dm-reply').disabled=true; el('dm-position').disabled=true; el('dm-input').disabled=true;
     el('dm-input').placeholder='Choose a conversation';
     updateMessageBudget(el('dm-input'));
     return;
@@ -569,7 +570,7 @@ function renderDmScreen() {
   if(!entries.length) history.appendChild(node('div','empty-panel',state[radio].loading?'Loading messages…':'No messages yet. Start a conversation below.'));
   const searching=renderMessageSearchResults('dm',history);
   const canReply=state[radio].connected&&state[radio].nodes.some(item=>item.id===peer && nodeMessageable(radio,item));
-  el('dm-reply').disabled=!canReply; el('dm-input').disabled=false;
+  el('dm-reply').disabled=!canReply; el('dm-position').disabled=!canReply; el('dm-input').disabled=false;
   updateMessageBudget(el('dm-input'));
   el('dm-input').placeholder=canReply?'Direct message…':!state[radio].connected?'Reconnect this radio in Config to send':'Wait for this contact to load';
   if(!searching&&activeTab==='chat')finishHistoryView(history,context,radio,peer,-1,entries);
@@ -635,6 +636,9 @@ function nodeDetails(radio, entry) {
   details.appendChild(node('div', 'node-facts', displayRole(radio,entry.role) + (entry.model ? ' · ' + entry.model : '') + ' · ' + entry.id));
   details.appendChild(node('div','node-facts',heardDescription(radioType(radio),entry.heardSettings)));
   details.appendChild(nodeSignalReport(radioType(radio),entry));
+  if(entry.favoritePending)details.appendChild(node('div','node-facts','Favorite change pending radio confirmation'));
+  if(entry.ignored)details.appendChild(node('div','node-facts','Ignored on this radio'));
+  nodeButton(details,geofenceNodeActionLabel(radioType(radio),entry.id),'',radio,entry,()=>toggleNodeGeofence(radioType(radio),entry.id));
   nodeButton(details,'Enter Name','',radio,entry,()=>enterNodeName(radio,entry));
   nodeButton(details,'Assign to Contact','',radio,entry,()=>assignNodeToContact(radio,entry));
   if(entry.id!==state[radio].ownId) nodeButton(details,'Forget Node','',radio,entry,()=>forgetNode(radio,entry));
@@ -644,6 +648,11 @@ function nodeDetails(radio, entry) {
     if(nodeMessageable(radio,entry))
       nodeButton(actions,'DM','dm',radio,entry,()=>openDmForNode(radio,entry));
     if (radioType(radio) === 'mt') {
+      if(entry.id!==state[radio].ownId){
+        const ignore=nodeButton(actions,entry.ignorePending?'Waiting for radio…':entry.ignored?'Unignore':'Ignore',entry.ignored?'unignore':'ignore',radio,entry);
+        ignore.disabled=!!entry.ignorePending;
+        ignore.title='Stop receiving and relaying packets originating from this node on this radio';
+      }
       nodeButton(actions, 'TR', 'tr', radio, entry);
       nodeButton(actions, 'Req info', 'req', radio, entry);
       nodeButton(actions, 'Req position', 'pos', radio, entry);
@@ -1024,7 +1033,6 @@ function renderNodes() {
       if(nodeRole!=='all'&&id+':'+entry.role!==nodeRole) continue;
       if(rfMenu.value!=='all'&&heardProfile(id,entry.heardSettings)!==rfMenu.value) continue;
       if(el('nodes-hide-unmessageable').checked&&!nodeMessageable(id,entry)) continue;
-      if(el('nodes-direct-only').checked&&!nodeHeardDirectly(entry,id))continue;
       const contactNames=window.contactNamesForNode?.(id,entry.id)||[];
       if (!(entry.name + ' ' + localNodeName(id,entry.id) + ' ' + entry.id + ' ' + displayRole(id,entry.role)+' '+contactNames.join(' ')).toLowerCase().includes(search)) continue;
       const row = node('div', 'android-node');
@@ -1146,6 +1154,7 @@ window.onRadioState = function (next) {
   el('mt-disconnect').hidden = !next.mt.connected;
   el('message-audio').checked = next.audioEnabled;
   el('new-node-alerts').checked=!!next.newNodeAlerts;
+  window.renderSilenceRules?.(next.notificationSilences||{});
   el('background-message-notifications').checked = !!next.backgroundMessageNotifications;
   el('message-notifications-status').textContent = !next.messageNotificationsAllowed
     ? 'Android notifications are blocked. Enable them in Android notification settings to receive background previews.'

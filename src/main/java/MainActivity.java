@@ -309,6 +309,12 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);openNotificationTarget();}
     private void openNotificationTarget(){
+        if(pageReady&&getIntent().hasExtra("excludeGeofenceNode")){
+            String node=getIntent().getStringExtra("excludeGeofenceNode"),radio=getIntent().getStringExtra("geofenceRadio");
+            getIntent().removeExtra("excludeGeofenceNode");
+            setGeofenceNodeExcluded(radio,node,true);
+            getSystemService(android.app.NotificationManager.class).cancel(203);
+        }
         if(pageReady&&web!=null&&getIntent().hasExtra("newNode")){
             String node=getIntent().getStringExtra("newNode"),device=getIntent().getStringExtra("receivingDevice");
             getIntent().removeExtra("newNode");
@@ -410,6 +416,12 @@ public final class MainActivity extends Activity {
         final java.util.Set<String> historyRequests=new java.util.HashSet<>();
         final Map<String,Long> readThrough=new java.util.HashMap<>();
         final Map<String, NodeEntry> knownNodes = new TreeMap<>();
+        final Map<String,Boolean> radioFavorites=new TreeMap<>();
+        final Map<String,Boolean> radioIgnored=new TreeMap<>();
+        String ignoreInFlight="";
+        final java.util.Set<String> failedFavorites=new java.util.HashSet<>();
+        String favoriteInFlight="",favoriteToken="";
+        long favoritePumpAt;
         String rfLabel="";
         String ownRadioUsage="",ownBattery="";
         int settingsGeneration=-1;
@@ -636,6 +648,8 @@ public final class MainActivity extends Activity {
             configureAttempts(this);
             markPendingUnconfirmed();
             knownNodes.clear(); pendingSends.clear(); connected = false;
+            radioFavorites.clear();failedFavorites.clear();favoriteInFlight="";favoriteToken="";favoritePumpAt=0;
+            radioIgnored.clear();ignoreInFlight="";
             nodePositions.clear();latestPositionReports.clear();ignoredPositionReports.clear();
             ownLatitude = Double.NaN; ownLongitude = Double.NaN;
             channelNames.clear();
@@ -685,6 +699,10 @@ public final class MainActivity extends Activity {
         }
 
         void markPendingUnconfirmed() {
+            if(!ignoreInFlight.isEmpty()){
+                ignoreInFlight="";nodeActionResult("Ignore update interrupted. Reconnect to check the radio.",key);
+                sendIgnoredNodes("Ignore update interrupted. Reconnect to check the radio.");
+            }
             if(protocol!=null && protocol.channelAdmin().active())channelSetupMessage="Channel setup interrupted. Reconnect to check the radio before trying again.";
             if(pendingSignal!=0){protocol.expireRequest(pendingSignal);pendingSignal=0;signalNotice(signalTarget,"Request interrupted: radio disconnected.",false);}
             pendingPaths.clear();
@@ -727,7 +745,7 @@ public final class MainActivity extends Activity {
                     if(generation!=activeGeneration||!connected||protocol==null) return;
                     byte[] next=protocol.poll(RadioSession.this);
                     if(next!=null) sendTracked(next);
-                    else if(protocol instanceof MeshCoreProtocol){
+                    else if(!pumpFavorites(RadioSession.this)&&protocol instanceof MeshCoreProtocol){
                         byte[] stats=((MeshCoreProtocol)protocol).pollRadioUsage();
                         if(stats!=null)send(stats);
                     }
@@ -877,6 +895,12 @@ public final class MainActivity extends Activity {
                 flushRadioStorage(()->{
                     if(generation!=currentGeneration||!loading||storageFailed)return;
                     installingNodes=false;loading=false;syncSucceeded=true;loadingStage="Ready";
+                    if(!meshcore){
+                        SharedPreferences.Editor edit=getPreferences(0).edit();String prefix="mt_ignored:"+ownId+":";
+                        for(String setting:getPreferences(0).getAll().keySet())if(setting.startsWith(prefix)&&!Boolean.TRUE.equals(radioIgnored.get(setting.substring(prefix.length()))))edit.remove(setting);
+                        edit.apply();
+                    }
+                    reconcileContactFavorites();
                     state="Connected · "+knownNodes.size()+" nodes, "+channelNames.size()+" channels";
                     debug(key+" sync complete elapsedMs="+(SystemClock.elapsedRealtime()-loadingStartedAt)+" messages="+loadingMessages+" nodes="+knownNodes.size()+" channels="+channelNames.size());
                     publish();requestRadioMapUpdate();
@@ -970,7 +994,7 @@ public final class MainActivity extends Activity {
                         else directs.computeIfAbsent(peer,ignored->new ArrayList<>()).add(entry);
                         if(!reaction){
                             unread=true;showMessageNotification(this,sender,text);
-                            messageSound(peer.isEmpty()?"mt":"dm",startup);
+                            if(!notificationsSilenced("mt",sender))messageSound(peer.isEmpty()?"mt":"dm",startup);
                         }
                         publishRadioUpdate();
                     });
@@ -1040,7 +1064,7 @@ public final class MainActivity extends Activity {
                 chats.computeIfAbsent(channel, ignored -> new ArrayList<>()).add(entry);
                 unread = true;
                 showMessageNotification(this, sender, text);
-                messageSound(meshcore?"mc":"mt",loading);
+                if(!notificationsSilenced(meshcore?"mc":"mt",notificationSender(this,sender,text)))messageSound(meshcore?"mc":"mt",loading);
                 if (selected == this && page == 1 && selectedChannel() == channel) renderChat();
                 publishRadioUpdate();
             });
@@ -1065,7 +1089,7 @@ public final class MainActivity extends Activity {
                 directs.computeIfAbsent(id, ignored -> new ArrayList<>()).add(entry);
                 unread = true;
                 showMessageNotification(this, id, text);
-                messageSound("dm",loading);
+                if(!notificationsSilenced(meshcore?"mc":"mt",id))messageSound("dm",loading);
                 publishRadioUpdate();
             });
         }
@@ -1088,7 +1112,7 @@ public final class MainActivity extends Activity {
                     SharedPreferences prefs=getPreferences(0);
                     if(!prefs.contains(seenKey)){
                         prefs.edit().putBoolean(seenKey,true).apply();
-                        if(syncSucceeded && !loading && connected && prefs.getBoolean("new_node_alerts",true))
+                        if(syncSucceeded && !loading && connected && prefs.getBoolean("new_node_alerts",true)&&!notificationsSilenced("mt",id))
                             MessageNotifications.showNewNode(MainActivity.this,ownId,id,name.isEmpty()?id:name);
                     }
                 }
@@ -1124,6 +1148,50 @@ public final class MainActivity extends Activity {
                 if (!loading && selected == this && page == 2) renderNodes();
                 publishRadioUpdate();
                 if(meshcore||!loading||installingNodes)requestRadioMapUpdate();
+            });
+        }
+        @Override public void favorite(String id,boolean value) {
+            int attempt=generation;
+            main.post(()->{
+                if(generation!=attempt||ownId.isEmpty())return;
+                radioFavorites.put(id,value);
+                String scope=favoriteScope(this,id);
+                SharedPreferences prefs=getPreferences(0);
+                if(!prefs.getBoolean("favorite_migrated:"+scope,false)){
+                    SharedPreferences.Editor edit=prefs.edit().putBoolean("favorite_migrated:"+scope,true);
+                    if(prefs.getBoolean(scope,false)&&!prefs.contains("favorite_pending:"+scope))edit.putString("favorite_pending:"+scope,java.util.UUID.randomUUID()+":true");
+                    edit.apply();
+                }
+                getPreferences(0).edit().putBoolean("radio_favorite:"+favoriteScope(this,id),value).apply();
+                publishRadioUpdate();
+            });
+        }
+        @Override public void favoriteResult(String id,boolean value,boolean success,String message) {
+            int attempt=generation;
+            main.post(()->{
+                if(generation!=attempt||!id.equals(favoriteInFlight))return;
+                String pending="favorite_pending:"+favoriteScope(this,id);
+                if(success&&getPreferences(0).getString(pending,"").equals(favoriteToken))getPreferences(0).edit().remove(pending).apply();
+                if(!success)failedFavorites.add(favoriteToken);
+                favoriteInFlight="";favoriteToken="";
+                nodeActionResult(message,key);publish();sendContactNodes();
+            });
+        }
+        @Override public void ignored(String id,boolean value){
+            int attempt=generation;
+            main.post(()->{
+                if(generation!=attempt||meshcore||ownId.isEmpty())return;
+                radioIgnored.put(id,value);
+                SharedPreferences.Editor edit=getPreferences(0).edit();String setting="mt_ignored:"+ownId+":"+id;
+                if(value)edit.putBoolean(setting,true);else edit.remove(setting);edit.apply();
+                publishRadioUpdate();
+            });
+        }
+        @Override public void ignoreResult(String id,boolean value,boolean success,String message){
+            int attempt=generation;
+            main.post(()->{
+                if(generation!=attempt||!id.equals(ignoreInFlight))return;
+                ignoreInFlight="";nodeActionResult(message,key);publish();sendIgnoredNodes(message);
             });
         }
         @Override public void position(String id, double latitude, double longitude) {
@@ -1428,17 +1496,69 @@ public final class MainActivity extends Activity {
     }
     @Override public void onBackPressed() { navigateBack(); }
 
+    private JSONObject notificationSilences() {
+        try{return new JSONObject(getPreferences(0).getString("notification_silences","{}"));}
+        catch(JSONException error){return new JSONObject();}
+    }
+    private boolean silenceActive(JSONObject rules,String key) {
+        JSONObject rule=rules.optJSONObject(key);if(rule==null)return false;
+        long until=rule.optLong("until",0);return until==-1||until>System.currentTimeMillis();
+    }
+    private boolean notificationsSilenced(String radio,String node) {
+        JSONObject rules=notificationSilences();
+        if(silenceActive(rules,"all")||silenceActive(rules,"node:"+radio+":"+node.toLowerCase(java.util.Locale.ROOT)))return true;
+        if(node.isEmpty())return false;
+        boolean hasContact=false;java.util.Iterator<String> keys=rules.keys();
+        while(keys.hasNext()){String key=keys.next();if(key.startsWith("contact:")&&silenceActive(rules,key)){hasContact=true;break;}}
+        if(!hasContact)return false;
+        try{JSONArray people=ContactsStore.all(chatStore);
+            for(int i=0;i<people.length();i++){JSONObject person=people.getJSONObject(i);
+                if(person.optLong("deletedAt",0)>0||!silenceActive(rules,"contact:"+person.optString("id")))continue;
+                JSONArray nodes=person.optJSONArray("nodes");if(nodes==null)continue;
+                for(int j=0;j<nodes.length();j++){JSONObject assigned=nodes.getJSONObject(j);
+                    if(radio.equals(assigned.optString("radio"))&&node.equalsIgnoreCase(assigned.optString("id")))return true;}
+            }
+        }catch(Exception error){debug("Could not resolve notification contact");}
+        return false;
+    }
+
     private boolean backgroundMessagesAllowed() {
         return getPreferences(0).getBoolean("background_message_notifications",false) && MessageNotifications.allowed(this);
     }
+    private String notificationSender(RadioSession session,String sender,String text){
+        if(!session.meshcore||!"MeshCore".equals(sender))return sender;
+        int longest=-1,matches=0;String match="";
+        for(NodeEntry entry:session.knownNodes.values())if(!entry.name.isEmpty()&&text.startsWith(entry.name+": ")){
+            if(entry.name.length()>longest){longest=entry.name.length();matches=1;match=entry.id;}
+            else if(entry.name.length()==longest)matches++;
+        }
+        if(matches>0)return matches==1?match:"";
+        int separator=text.indexOf(": ");
+        return separator>0?"heard-name:"+text.substring(0,separator):"";
+    }
     private void showMessageNotification(RadioSession s, String sender, String text) {
-        if (visible || closing || !backgroundMessagesAllowed()) return;
+        if (visible || closing || notificationsSilenced(s.meshcore?"mc":"mt",notificationSender(s,sender,text)) || !backgroundMessagesAllowed()) return;
         NodeEntry contact = s.knownNodes.get(sender);
         String name = contact != null && !contact.name.isEmpty() ? contact.name : sender;
         MessageNotifications.show(this,(s.meshcore ? "MC" : "MT") + " · " + s.ownName + " · " + name,text);
     }
 
     private final class Bridge {
+        @JavascriptInterface public void setNotificationSilence(String scope,String target,String label,int minutes){main.post(()->{
+            if(!scope.equals("all")&&!scope.equals("contact")&&!scope.equals("node"))return;
+            if(minutes<0||minutes>525600||(!scope.equals("all")&&target.isEmpty()))return;
+            try{JSONObject rules=notificationSilences();String key=scope.equals("all")?"all":scope+":"+(scope.equals("node")?target.toLowerCase(java.util.Locale.ROOT):target);
+                rules.put(key,new JSONObject().put("label",label).put("until",minutes==0?-1:System.currentTimeMillis()+minutes*60000L));
+                getPreferences(0).edit().putString("notification_silences",rules.toString()).apply();
+                pendingTones.clear();main.removeCallbacks(advanceSoundQueue);if(activeTone!=null){activeTone.stop();activeTone=null;}
+                MessageNotifications.cancel(MainActivity.this);
+                getSystemService(android.app.NotificationManager.class).cancel(203);
+                publish();
+            }catch(JSONException error){nodeActionResult("Could not save notification silence");}
+        });}
+        @JavascriptInterface public void clearNotificationSilence(String key){main.post(()->{
+            JSONObject rules=notificationSilences();rules.remove(key);getPreferences(0).edit().putString("notification_silences",rules.toString()).apply();publish();
+        });}
         @JavascriptInterface public boolean usageRecording() {return getPreferences(0).getBoolean("record_mt_usage",false);}
         @JavascriptInterface public void recordUsage(boolean enabled) {getPreferences(0).edit().putBoolean("record_mt_usage",enabled).putLong("usage_recording_epoch",System.currentTimeMillis()).apply();}
         @JavascriptInterface public String usageDevices() {return chatStore.usageDevices().toString();}
@@ -1567,7 +1687,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void loadContacts() {main.post(()->{contactsLoaded=true;sendContacts();sendContactNodes();sendLogItems();});}
         @JavascriptInterface public void contactsActive(boolean active) {main.post(()->contactsLoaded=active);}
         @JavascriptInterface public void saveContacts(String json) {main.post(()->{
-            try{ContactsStore.merge(chatStore,new JSONArray(json),false);sendContacts();contactEvent("onContactsSaved",true);}
+            try{ContactsStore.merge(chatStore,new JSONArray(json),false);sendContacts();publish();sendContactNodes();contactEvent("onContactsSaved",true);}
             catch(Exception e){contactEvent("onContactError",e.getMessage());}
         });}
         @JavascriptInterface public void contactsView(String json) {main.post(()->{
@@ -1579,6 +1699,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void shareContact(String text,String photo) {main.post(()->contactActions.share(text,photo));}
         @JavascriptInterface public void exportContacts(String json) {main.post(()->contactActions.exportContacts(json));}
         @JavascriptInterface public void importContacts() {main.post(()->contactActions.importContacts());}
+        @JavascriptInterface public void setGeofenceNodeExcluded(String radio,String node,boolean excluded){main.post(()->MainActivity.this.setGeofenceNodeExcluded(radio,node,excluded));}
         @JavascriptInterface public void deleteGeofenceAlert(String id){main.post(()->{mapData.deleteAlert(id);sendMapData();});}
         @JavascriptInterface public void mapActive(boolean active) {main.post(()->mapActive=active);}
         @JavascriptInterface public void loadMap() {main.post(()->sendMapData());}
@@ -1748,6 +1869,8 @@ public final class MainActivity extends Activity {
             main.post(() -> MainActivity.this.nodeAction(session(radio), id, action, text));
         }
         @JavascriptInterface public void getNodeManagement(String radio,String id){main.post(()->sendNodeManagement(radio,id,""));}
+        @JavascriptInterface public void getIgnoredNodes(){main.post(()->sendIgnoredNodes(""));}
+        @JavascriptInterface public void setNodeIgnored(String device,String id,boolean ignored){main.post(()->setNodeIgnoredOnRadio(managedRadio("mt",device),id,ignored));}
         @JavascriptInterface public String generateChannelKey(boolean meshcore){
             byte[] key=new byte[meshcore?16:32];new java.security.SecureRandom().nextBytes(key);
             if(!meshcore)return java.util.Base64.getEncoder().encodeToString(key);
@@ -1787,10 +1910,14 @@ public final class MainActivity extends Activity {
                     SharedPreferences.Editor editor=getPreferences(0).edit().remove("node_name_"+radio+":"+id);
                     if(!senderName.isEmpty())editor.remove("node_name_"+radio+":heard-name:"+senderName);
                     for(String setting:getPreferences(0).getAll().keySet())
-                        if((setting.startsWith("contact_name:"+radio+":")||setting.startsWith(radio+":"))&&setting.endsWith(":"+id))editor.remove(setting);
+                        if((setting.startsWith("contact_name:"+radio+":")||setting.startsWith(radio+":")
+                            ||setting.startsWith("radio_favorite:"+radio+":")||setting.startsWith("favorite_pending:"+radio+":")
+                            ||setting.startsWith("favorite_intent:"+radio+":")||setting.startsWith("favorite_seen:"+radio+":")
+                            ||setting.startsWith("favorite_migrated:"+radio+":"))&&setting.endsWith(":"+id))editor.remove(setting);
                     editor.apply();
                     for(RadioSession s:sessions.values())if(s.meshcore==source.meshcore){
                         s.knownNodes.remove(id);
+                        s.radioFavorites.remove(id);
                         if(s.protocol!=null)s.protocol.forgetNode(id);
                         if(id.equals(s.traceTarget)){s.lastTrace=null;s.pendingTrace=0;s.traceTarget="";}
                         s.pendingMtTraces.entrySet().removeIf(pending->{if(!id.equals(pending.getValue()))return false;if(s.protocol!=null)s.protocol.expireRequest(pending.getKey());return true;});
@@ -2081,6 +2208,40 @@ public final class MainActivity extends Activity {
             web.evaluateJavascript("window.onNodeManagement("+data+")",null);
         }catch(JSONException ignored){nodeActionResult("Could not load node management");}
     }
+    private void setNodeIgnoredOnRadio(RadioSession s,String id,boolean value){
+        String message;
+        try{
+            if(s==null||s.meshcore||!s.connected||s.loading||s.protocol==null||s.ownId.isEmpty())throw new IllegalArgumentException("Connect the Meshtastic radio and wait for loading to finish.");
+            if(id==null||!id.matches("![0-9a-fA-F]{8}")||id.equalsIgnoreCase(s.ownId))throw new IllegalArgumentException("Choose another Meshtastic node.");
+            if(!s.ignoreInFlight.isEmpty())throw new IllegalArgumentException("Wait for the current Ignore update to finish.");
+            if(value&&!s.radioIgnored.containsKey(id))throw new IllegalArgumentException("Wait for this node to load from the radio.");
+            byte[] frame=s.protocol.setIgnored(id,value);s.ignoreInFlight=id;s.send(frame);
+            message=value?"Ignoring node… waiting for radio confirmation.":"Unignoring node… waiting for radio confirmation.";
+        }catch(IllegalArgumentException error){message=error.getMessage();}
+        nodeActionResult(message,s==null?null:s.key);publish();sendIgnoredNodes(message);
+    }
+    private void sendIgnoredNodes(String message){
+        if(!pageReady||closing)return;
+        try{
+            Map<String,String> devices=new TreeMap<>();
+            for(ChatStore.KnownRadio radio:chatStore.radios())if(radio.radio.equals("mt"))devices.put(radio.id,radio.name);
+            for(RadioSession s:sessions.values())if(!s.meshcore&&!s.ownId.isEmpty())devices.put(s.ownId,s.ownName);
+            JSONArray radios=new JSONArray();SharedPreferences prefs=getPreferences(0);
+            for(Map.Entry<String,String> device:devices.entrySet()){
+                RadioSession s=managedRadio("mt",device.getKey());boolean ready=s!=null&&!s.loading&&s.protocol!=null;
+                java.util.Set<String> ids=new java.util.TreeSet<>();String prefix="mt_ignored:"+device.getKey()+":";
+                if(ready){for(Map.Entry<String,Boolean> item:s.radioIgnored.entrySet())if(item.getValue())ids.add(item.getKey());}
+                else for(Map.Entry<String,?> item:prefs.getAll().entrySet())if(item.getKey().startsWith(prefix)&&Boolean.TRUE.equals(item.getValue()))ids.add(item.getKey().substring(prefix.length()));
+                JSONArray nodes=new JSONArray();
+                for(String id:ids){NodeEntry entry=ready?s.knownNodes.get(id):null;
+                    nodes.put(new JSONObject().put("id",id).put("name",entry==null?prefs.getString("contact_name:mt:"+device.getKey()+":"+id,id):entry.name));}
+                radios.put(new JSONObject().put("id",device.getKey()).put("name",device.getValue()).put("ready",ready)
+                    .put("loading",s!=null&&s.loading).put("busy",ready&&(s.protocol.favoriteAdmin().blocked()||s.protocol.channelAdmin().blocked()||!s.ignoreInFlight.isEmpty()))
+                    .put("nodes",nodes));
+            }
+            web.evaluateJavascript("window.onIgnoredNodes?.("+new JSONObject().put("radios",radios).put("message",message)+")",null);
+        }catch(JSONException error){nodeActionResult("Could not load ignored nodes.");}
+    }
     private RadioSession newConnectionSession(String radio) {
         if(!"mt".equals(radio) && !"mc".equals(radio)) return null;
         RadioSession current=session(radio);
@@ -2107,7 +2268,7 @@ public final class MainActivity extends Activity {
         catch(ActivityNotFoundException error) { nodeActionResult("System sound picker unavailable"); }
     }
     private boolean soundAllowed(String kind) {
-        if (closing) return false;
+        if (closing || notificationsSilenced("","")) return false;
         if ("disconnect".equals(kind)) return getPreferences(0).getBoolean("disconnect_audio",true);
         if ("geofence".equals(kind)) return getPreferences(0).getBoolean("geofence_audio",false)
                 && (visible || MessageNotifications.allowed(this));
@@ -2654,10 +2815,49 @@ public final class MainActivity extends Activity {
         if(pageReady&&!closing&&web!=null)web.evaluateJavascript("window."+event+"?.("+(value instanceof String?JSONObject.quote((String)value):String.valueOf(value))+")",null);
     }
     private void sendContacts() {
+        reconcileContactFavorites();
         try{contactEvent("onContactsData",new JSONObject().put("items",ContactsStore.all(chatStore))
                 .put("view",new JSONObject(getPreferences(0).getString("contacts_view","{}"))));}
         catch(Exception e){contactEvent("onContactError",e.getMessage());}
     }
+    private String favoriteScope(RadioSession s,String id){return (s.meshcore?"mc:":"mt:")+s.ownId+":"+id;}
+    private void reconcileContactFavorites(){
+        try{
+            SharedPreferences prefs=getPreferences(0);
+            JSONObject after=ContactFavorites.snapshot(ContactsStore.all(chatStore));
+            JSONObject before=new JSONObject(prefs.getString("favorite_contact_snapshot","{}"));
+            Map<String,Boolean> changes=ContactFavorites.changes(before,after);
+            SharedPreferences.Editor edit=prefs.edit().putString("favorite_contact_snapshot",after.toString());
+            for(Map.Entry<String,Boolean> change:changes.entrySet())edit.putString("favorite_intent:"+change.getKey(),java.util.UUID.randomUUID()+":"+change.getValue());
+            edit.apply();
+            if(!changes.isEmpty())nodeActionResult("Contact favorites queued for assigned nodes. Disconnected radios will update after reconnecting.");
+        }catch(Exception error){contactEvent("onContactError","Could not queue contact favorites: "+error.getMessage());}
+    }
+    private boolean favoritePending(String radio,String device,String id){
+        SharedPreferences p=getPreferences(0);String scope=radio+":"+device+":"+id;
+        String intent=p.getString("favorite_intent:"+radio+":"+id,"");
+        return p.contains("favorite_pending:"+scope)||(!intent.isEmpty()&&!intent.equals(p.getString("favorite_seen:"+scope,"")));
+    }
+    private boolean pumpFavorites(RadioSession s){
+        if(!s.connected||s.loading||s.ownId.isEmpty()||s.protocol==null||s.protocol.favoriteAdmin().blocked()||!s.favoriteInFlight.isEmpty())return false;
+        long now=SystemClock.elapsedRealtime();if(now<s.favoritePumpAt)return false;s.favoritePumpAt=now+1000;
+        SharedPreferences prefs=getPreferences(0);
+        for(Map.Entry<String,Boolean> node:s.radioFavorites.entrySet()){
+            String id=node.getKey(),scope=favoriteScope(s,id),pending="favorite_pending:"+scope;
+            if(!s.knownNodes.containsKey(id))continue;
+            String intent=prefs.getString("favorite_intent:"+(s.meshcore?"mc:":"mt:")+id,"");
+            if(!intent.isEmpty()&&!intent.equals(prefs.getString("favorite_seen:"+scope,"")))prefs.edit().putString("favorite_seen:"+scope,intent).putString(pending,intent).apply();
+            String token=prefs.getString(pending,"");if(token.isEmpty()||s.failedFavorites.contains(token))continue;
+            boolean desired=token.endsWith(":true");
+            if(node.getValue()==desired){prefs.edit().remove(pending).apply();publishRadioUpdateForFavorite();continue;}
+            try{
+                byte[] frame=s.protocol.setFavorite(id,desired);
+                s.favoriteInFlight=id;s.favoriteToken=token;s.send(frame);return true;
+            }catch(IllegalArgumentException busy){return false;}
+        }
+        return false;
+    }
+    private void publishRadioUpdateForFavorite(){publish();sendContactNodes();}
     private void sendContactNodes() {
         if(!contactsLoaded||!pageReady||closing)return;
         try {
@@ -2676,7 +2876,8 @@ public final class MainActivity extends Activity {
                     if(found)continue;
                     JSONObject n=new JSONObject().put("id",c.getString(2)).put("name",c.getString(3)).put("role",c.getString(4)).put("savedOnly",true)
                         .put("lastHeard",chatStore.lastHeard(c.getString(0),c.getString(1),c.getString(2)))
-                        .put("favorite",getPreferences(0).getBoolean(c.getString(0)+":"+c.getString(1)+":"+c.getString(2),false));
+                        .put("favoritePending",favoritePending(c.getString(0),c.getString(1),c.getString(2)))
+                        .put("favorite",getPreferences(0).getBoolean("radio_favorite:"+c.getString(0)+":"+c.getString(1)+":"+c.getString(2),false));
                     if(!c.isNull(5)&&!c.isNull(6))n.put("latitude",c.getDouble(5)).put("longitude",c.getDouble(6));nodes.put(n);
                 }
             }
@@ -2778,13 +2979,19 @@ public final class MainActivity extends Activity {
         mapSensePacket=null;
         showMapSenseResult(title,mapSenseDestination,detail);
     }
+    private void setGeofenceNodeExcluded(String radio,String node,boolean excluded){
+        try{
+            mapData.setGeofenceNodeExcluded(radio,node,excluded);
+            publish();sendMapData();
+        }catch(Exception error){nodeActionResult("Could not change geofence alerts for this node");}
+    }
     private void showMapGeofenceAlerts(String radio,String device,String id,String name,NodePosition position){
         try{JSONArray alerts=mapData.geofenceChanges(radio,device,id,position);
             for(int i=0;i<alerts.length();i++){JSONObject alert=alerts.getJSONObject(i);String message=(name.isEmpty()?id:name)+" "+alert.getString("event")+" "+alert.getString("title");
-                Runnable notify=()->{if(closing)return;
-                    if(pageReady&&visible)web.evaluateJavascript("window.onMapAlert("+JSONObject.quote(message)+")",null);
+                Runnable notify=()->{if(closing||notificationsSilenced(radio,id)||mapData.geofenceNodeExcluded(radio,id))return;
+                    if(pageReady&&visible)web.evaluateJavascript("window.onMapAlert("+JSONObject.quote(message)+","+JSONObject.quote(radio)+","+JSONObject.quote(id)+")",null);
                     if(visible||MessageNotifications.allowed(this))enqueueSound("geofence");
-                    MessageNotifications.showGeofence(this,message);
+                    MessageNotifications.showGeofence(this,message,radio,id);
                 };
                 List<Runnable> committed=radioCommitCallbacks.get();
                 if(committed!=null)committed.add(notify);else main.post(notify);
@@ -3044,6 +3251,7 @@ public final class MainActivity extends Activity {
             for(RadioSession s:sessions.values())canDisconnectAll|=s.connected||s.loading||s.scanning;
             data.put("canDisconnectAll",canDisconnectAll);
             data.put("myNodes",myNodes).put("audioEnabled",getPreferences(0).getBoolean("message_audio",true));
+            data.put("notificationSilences",notificationSilences());
             data.put("newNodeAlerts",getPreferences(0).getBoolean("new_node_alerts",true));
             data.put("backgroundMessageNotifications",getPreferences(0).getBoolean("background_message_notifications",false))
                     .put("messageNotificationsAllowed",MessageNotifications.allowed(this));
@@ -3075,6 +3283,7 @@ public final class MainActivity extends Activity {
                         .put("unread",hasUnread(s)).put("dmUnread",hasUnreadDm(s))
                         .put("channelUnread",hasUnreadChannel(s)));
             }
+            data.put("geofenceNodes",mapData.geofenceNodeSettings());
             data.put("devices",active).put("selectedMc",selectedMc.key).put("selectedMt",selectedMt.key);
             web.evaluateJavascript("window.onRadioState(" + data.toString() + ")", null);
         } catch (JSONException error) { android.util.Log.e("OverMesh", "Could not encode radio state", error); }
@@ -3145,7 +3354,9 @@ public final class MainActivity extends Activity {
             {
                 JSONObject item = new JSONObject().put("id", node.id).put("name", node.name)
                         .put("heardSettings",heardSettings.getOrDefault(node.id,!session.meshcore&&heardTimes.getOrDefault(node.id,0L)>0?sessionRfLabel(session):"")).put("lastHeard",heardTimes.getOrDefault(node.id,0L)).put("role", node.role).put("model", node.model).put("hops", node.hops).put("lastSignal",lastSignals.get(node.id))
-                        .put("favorite", getPreferences(0).getBoolean((session.meshcore ? "mc:" : "mt:") + session.ownId + ":" + node.id, false));
+                        .put("favoritePending",favoritePending(session.meshcore?"mc":"mt",session.ownId,node.id))
+                        .put("ignored",!session.meshcore&&session.radioIgnored.getOrDefault(node.id,false)).put("ignorePending",node.id.equals(session.ignoreInFlight))
+                        .put("favorite", getPreferences(0).getBoolean("radio_favorite:"+(session.meshcore ? "mc:" : "mt:") + session.ownId + ":" + node.id, false));
                 if (Double.isFinite(node.latitude) && Double.isFinite(node.longitude))
                     item.put("latitude", node.latitude).put("longitude", node.longitude);
                 nodesJson.put(item);
@@ -3158,7 +3369,8 @@ public final class MainActivity extends Activity {
                 JSONObject item=new JSONObject().put("id",id).put("name",c.getString(1)).put("role",c.getString(2))
                         .put("model","").put("hops",-1).put("savedOnly",true).put("heardSettings",heardSettings.getOrDefault(id,!session.meshcore&&heardTimes.getOrDefault(id,0L)>0?sessionRfLabel(session):"")).put("lastSignal",lastSignals.get(id))
                         .put("lastHeard",heardTimes.getOrDefault(id,0L))
-                        .put("favorite",getPreferences(0).getBoolean(radio+":"+session.ownId+":"+id,false));
+                        .put("favoritePending",favoritePending(radio,session.ownId,id))
+                        .put("favorite",getPreferences(0).getBoolean("radio_favorite:"+radio+":"+session.ownId+":"+id,false));
                 if(!c.isNull(3)&&!c.isNull(4))item.put("latitude",c.getDouble(3)).put("longitude",c.getDouble(4));
                 nodesJson.put(item);
             }
@@ -3259,6 +3471,7 @@ public final class MainActivity extends Activity {
 
     private void nodeAction(RadioSession session, String id, String action, String text) {
         if (session == null || id == null || action == null) return;
+        if(action.equals("ignore")||action.equals("unignore")){setNodeIgnoredOnRadio(session,id,action.equals("ignore"));return;}
         debug(session.key+" node action="+action+" target="+id);
         if("map".equals(action)){
             if(pageReady)web.evaluateJavascript("window.openMapNode("+JSONObject.quote(session.meshcore?"mc":"mt")+","+JSONObject.quote(id)+","+JSONObject.quote(session.ownId)+")",null);
@@ -3278,9 +3491,16 @@ public final class MainActivity extends Activity {
         String key = (session.meshcore ? "mc:" : "mt:") + session.ownId + ":" + id;
         try {
             if ("favorite".equals(action)) {
-                boolean next = !getPreferences(0).getBoolean(key, false);
-                getPreferences(0).edit().putBoolean(key, next).apply();
-                publish(); nodeActionResult(next ? "Added to favorites" : "Removed from favorites"); return;
+                if(!session.radioFavorites.containsKey(id)){nodeActionResult("Wait for the radio's favorite state to load");return;}
+                if(id.equals(session.favoriteInFlight)){nodeActionResult("Wait for this favorite update to finish");return;}
+                SharedPreferences prefs=getPreferences(0);
+                String pending=prefs.getString("favorite_pending:"+key,"");
+                boolean next=pending.isEmpty()?!session.radioFavorites.get(id):!pending.endsWith(":true");
+                String intent=prefs.getString("favorite_intent:"+(session.meshcore?"mc:":"mt:")+id,"");
+                prefs.edit().putString("favorite_pending:"+key,java.util.UUID.randomUUID()+":"+next)
+                    .putString("favorite_seen:"+key,intent).putBoolean("favorite_migrated:"+key,true).apply();
+                session.favoritePumpAt=0;pumpFavorites(session);
+                publish();nodeActionResult("Favorite change queued; waiting for radio confirmation.");return;
             }
             if ("share".equals(action)) {
                 String details = session.name + " · " + entry.name + " · " + entry.id + " · " + entry.role;

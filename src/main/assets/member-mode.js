@@ -177,6 +177,13 @@ function memberBudget(){
 }
 let pendingMemberLocation=null;
 function chatLocationDestination(){
+  if(state?.memberConfig?.enabled)return null;
+  if(dmMode){
+    const {radio,peer}=dmSelection,device=state?.[radio];
+    const contact=device?.nodes.find(n=>n.id===peer&&nodeMessageable(radio,n));
+    if(!device?.connected||!contact)return null;
+    return {radio:radioType(radio),nodeId:device.ownId,key:device.key,peer,channel:-1,label:(contact.name||peer)+' · '+peer};
+  }
   const device=state?.[network];
   const selected=device?.channels.find(c=>c.index===channel[network]);
   if(!device?.connected||dmMode||!selected||state?.memberConfig?.enabled)return null;
@@ -232,7 +239,8 @@ function confirmMemberLocation(){
   if(pending.chat){
     if(pendingCompose)return;
     const text='m:'+pending.fix.lat.toFixed(6)+','+pending.fix.lon.toFixed(6)+'|Location|poi';
-    AndroidBridge.sendMessage(pending.dest.key,pending.dest.channel,text);
+    if(pending.dest.peer)AndroidBridge.nodeAction(pending.dest.key,pending.dest.peer,'dm',text);
+    else AndroidBridge.sendMessage(pending.dest.key,pending.dest.channel,text);
     el('member-location-dialog').close();
     return;
   }

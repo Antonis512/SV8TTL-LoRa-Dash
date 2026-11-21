@@ -31,11 +31,22 @@ const {pathToFileURL}=require('node:url');
  assert.match(await first.locator('.node-signal-report').innerText(),/SNR -16 dB · Good/);
  assert.match(await first.locator('.node-signal-report').innerText(),/RSSI -116 dBm/);
  assert.equal(await first.locator('.signal-good').count(),1);assert.equal(await first.locator('.signal-fair').count(),1);
- await page.locator('#nodes-direct-only').check();
- assert.deepEqual((await page.locator('.android-node').evaluateAll(rows=>rows.map(r=>r.dataset.nodeKey))).sort(),['mc:abcdefabcdef','mt:!11111111']);
- await page.locator('#nodes-direct-only').uncheck();
+ assert.equal(await page.locator('#nodes-direct-only').count(),0);
+ await page.evaluate(()=>{
+   window.geofenceCalls=[];
+   window.AndroidBridge=new Proxy({setGeofenceNodeExcluded:(...args)=>geofenceCalls.push(args)},{get:(o,k)=>o[k]||(()=>{})});
+ });
+ await first.getByRole('button',{name:'Exclude from geofence alerts',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>geofenceCalls.at(-1)),['mt','!11111111',true]);
+ await page.evaluate(()=>{f.geofenceNodes=[{radio:'mt',node:'!11111111',excluded:true}];onRadioState(f);});
+ await first.getByRole('button',{name:'Allow geofence alerts for this node',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>geofenceCalls.at(-1)),['mt','!11111111',false]);
  const relayed=page.locator('[data-node-key="mt:!22222222"]');await relayed.locator('.node-heading').click();
- assert.match(await relayed.innerText(),/Final-hop reception · 2 hops/);
+ assert.equal(await relayed.locator('.node-signal-report').isVisible(),false);
+ assert.doesNotMatch(await relayed.innerText(),/Direct signal as heard|SNR -16|RSSI -116/);
+ for(const entry of [{},{hops:2,lastSignal:{hops:0,snr:1}},{lastSignal:{hops:-1,snr:1}},{lastSignal:{hops:0,mqtt:true,snr:1}}]){
+   assert.equal(await page.evaluate(e=>nodeSignalReport('mt',e).hidden,entry),true);
+ }
  await page.evaluate(()=>{people[0].name='Renamed';people[1].deletedAt=1;onContactsData({items:people,view:{}});f.mt.connected=false;onRadioState(f);});
  assert.equal(await first.locator('.node-contact-name').innerText(),'· Renamed');
  assert.doesNotMatch(await first.innerText(),/reachability|availability|Saved record/);
@@ -78,11 +89,13 @@ const {pathToFileURL}=require('node:url');
  const selector=page.locator('#header-mc-channel');
  assert.equal(await selector.evaluate(e=>getComputedStyle(e).fontWeight),'700');
  assert.deepEqual(await selector.locator('option').allTextContents(),['Team Alpha','Local']);
+ const actionSizes=await page.locator('.composer-actions button').evaluateAll(es=>es.map(e=>({height:e.getBoundingClientRect().height,font:getComputedStyle(e).fontSize})));
  for(const viewport of [{width:320,height:640},{width:390,height:780},{width:780,height:390},{width:390,height:360}]){
   await page.setViewportSize(viewport);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No horizontal overflow');
+  assert.deepEqual(await page.locator('.composer-actions button').evaluateAll(es=>es.map(e=>({height:e.getBoundingClientRect().height,font:getComputedStyle(e).fontSize}))),actionSizes,'Buttons keep their size when keyboard reduces height');
  }
  await page.setViewportSize({width:390,height:780});await page.screenshot({path:'build/previews/chat-channel-019.png'});
  await page.evaluate(()=>{switchTab('nodes');el('nodes-search').value='Portable';openedNode='mt:!11111111';renderNodes();});
  await page.screenshot({path:'build/previews/node-reception-019.png'});
- assert.deepEqual(errors,[]);console.log('Node contacts, reception colours, zero-hop evidence, unavailable wording and channel selector checks passed');
+ assert.deepEqual(errors,[]);console.log('Node contacts, reception colours, node alert exclusions, unavailable wording and channel selector checks passed');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

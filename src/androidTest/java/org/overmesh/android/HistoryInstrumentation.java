@@ -19,6 +19,7 @@ public final class HistoryInstrumentation extends Instrumentation {
     @Override public void onStart(){
         Bundle report=new Bundle();ChatStore store=null;
         try {
+            ContactFavoriteAssertions.run();
             ContextWrapper context=new ContextWrapper(getTargetContext()){
                 @Override public File getDatabasePath(String name){return super.getDatabasePath("regression-"+name);}
                 @Override public SQLiteDatabase openOrCreateDatabase(String name,int mode,SQLiteDatabase.CursorFactory factory){return SQLiteDatabase.openOrCreateDatabase(getDatabasePath(name),factory);}
@@ -148,6 +149,25 @@ public final class HistoryInstrumentation extends Instrumentation {
             check(alertsMap.geofenceChanges("mt","saved-a","peer",40,25).length()==1,"Leaving saves alert");
             JSONObject alertBackup=alertsMap.backup();alertsMap.mergeBackup(alertBackup);
             check(alertsMap.alerts().length()==2,"Backup merges alerts by stable ID");
+            alertsMap.setGeofenceNodeExcluded("mt","peer",true);
+            check(alertsMap.geofenceChanges("mt","saved-a","peer",38,23).length()==0,"Excluded node entering is silent");
+            check(alertsMap.geofenceChanges("mt","saved-b","peer",38,23).length()==0,"Exclusion applies across receivers");
+            check(alertsMap.alerts().length()==2,"Excluded changes do not enter alert history");
+            JSONObject excludedBackup=alertsMap.backup();
+            store.close();store=new ChatStore(context);alertsMap=new MapData(store);
+            check(alertsMap.geofenceNodeExcluded("mt","peer"),"Exclusion survives restart");
+            check(!alertsMap.geofenceNodeExcluded("mc","peer"),"Network identities stay separate");
+            alertsMap.setGeofenceNodeExcluded("mt","peer",false);
+            alertsMap.mergeBackup(excludedBackup);
+            check(!alertsMap.geofenceNodeExcluded("mt","peer"),"Older backup does not undo re-enabled alerts");
+            check(alertsMap.geofenceChanges("mt","saved-a","peer",38,23).length()==0,"Re-enable does not replay suppressed changes");
+            check(alertsMap.geofenceChanges("mt","saved-a","peer",40,25).length()==1,"Re-enabled node alerts on next transition");
+            // Keep the pre-existing alert-history fixture count stable.
+            JSONArray afterEnable=alertsMap.alerts();
+            for(int ai=0;ai<afterEnable.length();ai++){String alertId=afterEnable.getJSONObject(ai).getString("id");boolean original=false;
+                for(int bi=0;bi<alertBackup.getJSONArray("alerts").length();bi++)if(alertBackup.getJSONArray("alerts").getJSONObject(bi).getString("id").equals(alertId))original=true;
+                if(!original)alertsMap.deleteAlert(alertId);
+            }
             alertsMap.delete("alert-test");store.close();store=new ChatStore(context);alertsMap=new MapData(store);
             check(alertsMap.alerts().length()==2,"Alerts survive restart and fence deletion");
             JSONObject savedAlert=alertsMap.alerts().getJSONObject(0);

@@ -1,6 +1,5 @@
 'use strict';
 // Independent display implementation of Meshtastic's documented signal thresholds.
-function nodeHeardDirectly(entry,radio){return entry.lastSignal?.hops===0&&!entry.lastSignal.mqtt&&(radio!=='mt'||!(entry.hops>0));}
 function nodeSnrFloor(radio,settings){
   if(!settings)return null;
   const match=/\bSF(\d+)\b/.exec(settings);
@@ -15,9 +14,8 @@ function nodeSnrRating(snr,floor){
 function nodeRssiRating(rssi){return !Number.isFinite(rssi)?'unknown':rssi> -115?'good':rssi> -120?'fair':rssi> -126?'bad':'none';}
 function nodeSignalReport(radio,entry){
   const box=node('div','node-signal-report'),s=entry.lastSignal;
-  box.appendChild(node('strong','','Last signal as heard'));
-  if(!s){box.appendChild(node('div','help','No reception measurement recorded for this receiving radio.'));return box;}
-  if(s.mqtt){box.appendChild(node('div','help','Via MQTT · no local radio signal measurement.'));return box;}
+  if(!s||s.mqtt||s.hops!==0||(radio==='mt'&&entry.hops>0)){box.hidden=true;return box;}
+  box.appendChild(node('strong','','Direct signal as heard'));
   const floor=nodeSnrFloor(radio,s.settings),[quality,label]=nodeSnrRating(s.snr,floor);
   const values=node('div','node-signal-values');
   values.appendChild(node('span','signal-'+quality,Number.isFinite(s.snr)?'SNR '+s.snr+' dB · '+label:'SNR not reported'));

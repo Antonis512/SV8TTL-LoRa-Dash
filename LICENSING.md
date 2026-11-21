@@ -1,5 +1,21 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 21 November 2026 — 0.10.36 publication authorized
+
+The user authorized an APK build, English/Greek manual updates and GitHub publication, superseding the earlier source-only instruction. Notification silence rules, DM position sharing, direct signal visibility and composer layout changes are locally authored. This publication also includes the prepared radio favorites, MT Ignore and geofence exclusion changes described below. No third-party code or assets were copied for this update. Existing MIT attribution, provenance, application ID and debug signing configuration are preserved. Production signing and replacement licensing remain undecided. Physical phone/radio verification remains pending.
+
+## 20 November 2026 — local APK build authorized
+
+The user subsequently requested an APK build, superseding the earlier no-build instruction for the favorites and MT Ignore changes. `gradlew.bat assembleDebug` completed successfully with the existing application ID and debug signing configuration. No GitHub publication was requested. Physical MT/MC verification remains pending.
+
+## 20 November 2026 — Meshtastic Ignore management
+
+MT Ignore/Unignore transactions, radio-state caching, Config's Manage Ignored panel and tests are locally authored using the official Meshtastic AdminMessage fields 47/48 and NodeInfo field 11 documented in the protocol references below. No third-party code or assets were copied. Existing attribution, application ID and signing configuration are preserved. Validation uses Java compilation and protocol/browser tests only; no APK is built for this change, following the user's instruction. Physical-radio verification remains pending.
+
+## 20 November 2026 — radio favorites and Contact inheritance
+
+Favorite transactions, Contact assignment transitions and regression tests are locally authored. Protocol facts were checked against the official [Meshtastic AdminMessage](https://github.com/meshtastic/protobufs/blob/master/meshtastic/admin.proto), [NodeInfo](https://github.com/meshtastic/protobufs/blob/master/meshtastic/mesh.proto), and [MeshCore companion firmware](https://github.com/meshcore-dev/MeshCore/blob/main/examples/companion_radio/MyMesh.cpp). No third-party implementation or assets were copied. Existing notices, application ID and signing configuration are preserved. Debug and instrumentation APKs were built locally before the user's subsequent instruction to stop building APKs; subsequent work does not authorize another build or publication. Physical MT/MC confirmation remains pending.
+
 ## 20 November 2026 — 0.10.35 publication
 
 The user authorized building the debug APK and updating GitHub. Chat picker stability, position sharing controls, template visibility, node filtering/settings and Map badge/layout changes are locally authored. The grouped badge follows the interaction shown in a user-supplied screenshot, using the app's own theme; no third-party implementation or assets were copied. Existing MIT notices, application ID and signing configuration are preserved. Production signing and replacement licensing remain undecided. Physical radio verification is pending.

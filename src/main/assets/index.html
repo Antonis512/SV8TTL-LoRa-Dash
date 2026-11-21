@@ -59,7 +59,7 @@
       <div id="chat-empty">Connect a radio in Config, then choose a channel.</div>
       <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div class="composer-templates"><button class="preset-picker-button" type="button" onclick="openPresetPicker('chat-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('chat-input').value)">Save template</button></div><div id="chat-input-bar">
         <textarea id="chat-input" class="form-input" placeholder="Message…" rows="1"></textarea>
-        <div class="composer-actions"><button id="chat-position" type="button" onclick="startChatLocation()">Send position</button><button id="chat-send" onclick="sendMsg()">Send</button></div>
+        <div class="composer-actions"><button id="chat-position" type="button" onpointerdown="event.preventDefault()" onclick="startChatLocation()">Send position</button><button id="chat-send" onclick="sendMsg()">Send</button></div>
       </div>
     </section>
     <aside class="chat-side" id="channel-mt-side"></aside>
@@ -71,7 +71,7 @@
       <div id="dm-message-search" class="message-search-bar" hidden></div>
       <div id="dm-chat-history"></div>
       <div id="dm-chat-status" aria-live="polite"></div>
-      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div class="composer-templates"><button class="preset-picker-button" type="button" onclick="openPresetPicker('dm-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('dm-input').value)">Save template</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><div class="composer-actions"><button id="dm-reply" onclick="replyDm()">Reply</button></div></div>
+      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div class="composer-templates"><button class="preset-picker-button" type="button" onclick="openPresetPicker('dm-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('dm-input').value)">Save template</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><div class="composer-actions"><button id="dm-position" type="button" onpointerdown="event.preventDefault()" onclick="startChatLocation()">Send position</button><button id="dm-reply" onclick="replyDm()">Reply</button></div></div>
     </section>
     <aside class="dm-side" id="dm-mt-side"></aside>
   </div>
@@ -115,7 +115,6 @@
   </div>
   <div class="node-filter-options">
     <label class="node-hide-label"><input id="nodes-show-unknown" type="checkbox" onchange="renderNodes()" checked>Show unknown last heard</label>
-    <label class="node-hide-label"><input id="nodes-direct-only" type="checkbox" onchange="renderNodes()">Heard directly (0 hops)</label>
   <label class="node-hide-label node-hide-line"><input id="nodes-hide-unmessageable" type="checkbox" onchange="renderNodes()">Hide unmessageable nodes</label>
   </div>
   <div id="nodes-summary"></div>
@@ -156,12 +155,12 @@
   <div class="log-dialog-body" id="map-node-group"></div>
 </dialog>
 <dialog id="map-alerts-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><h2>Geofence alerts</h2><button type="button" aria-label="Close geofence alerts" onclick="el('map-alerts-dialog').close()">×</button></div><div class="log-dialog-body" id="map-alerts-list"></div></dialog>
-<dialog id="map-offline-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><h2>Offline maps</h2><button type="button" aria-label="Close Offline maps" onclick="el('map-offline-dialog').close()">×</button></div><div class="log-dialog-body map-offline-choices"><button type="button" onclick="openInstalledMaps()"><strong>Installed maps</strong><span>Choose a map already on this phone.</span></button><button type="button" onclick="openMapImport()"><strong>Import maps</strong><span>Add a BBBike pack or download a Copernicus area.</span></button><button type="button" onclick="openMapDisplayStyle()"><strong>Map Display Style</strong><span>Choose Full or Dark for offline vector maps.</span></button></div></dialog>
+<dialog id="map-offline-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><h2>Offline maps</h2><button type="button" aria-label="Close Offline maps" onclick="el('map-offline-dialog').close()">×</button></div><div class="log-dialog-body map-offline-choices"><button type="button" onclick="openInstalledMaps()"><strong>Installed maps</strong><span>Choose a map already on this phone.</span></button><button type="button" onclick="openMapImport()"><strong>Import maps</strong><span>Add an offline map pack.</span></button><button type="button" onclick="openMapDisplayStyle()"><strong>Map Display Style</strong><span>Choose Full or Dark for offline vector maps.</span></button></div></dialog>
 <dialog id="map-style-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><button type="button" aria-label="Back to Offline maps" onclick="backToOfflineMaps('map-style-dialog')">←</button><h2>Map Display Style</h2><button type="button" aria-label="Close Map Display Style" onclick="el('map-style-dialog').close()">×</button></div><div class="log-dialog-body map-style-choices"><label><input type="radio" name="map-display-style" value="full" onchange="setMapDisplayStyle(this.value)"><span><strong>Full</strong><small>Colorful land use, water, roads, buildings and labels.</small></span></label><label><input type="radio" name="map-display-style" value="dark" onchange="setMapDisplayStyle(this.value)"><span><strong>Dark</strong><small>The original dark map style.</small></span></label><p>Applies to offline vector maps. Satellite imagery keeps its original colors.</p></div></dialog>
 <dialog id="map-installed-dialog" class="log-dialog map-dialog"><div class="log-dialog-head"><button type="button" aria-label="Back to Offline maps" onclick="backToOfflineMaps('map-installed-dialog')">←</button><h2>Installed maps</h2><button type="button" onclick="el('map-installed-dialog').close()">×</button></div><div class="log-dialog-body"><div id="map-pack-list"></div></div></dialog>
 <dialog id="map-import-dialog" class="log-dialog map-dialog"><div class="log-dialog-head map-pack-dialog-head"><button type="button" aria-label="Back to Offline maps" onclick="backToOfflineMaps('map-import-dialog')">←</button><div class="map-pack-heading"><h2>Import maps</h2><div id="map-pack-import-feedback" hidden><span id="map-pack-import-status" role="status" aria-live="polite"></span><progress id="map-pack-import-progress" aria-label="Map import in progress"></progress></div></div><button type="button" onclick="el('map-import-dialog').close()">×</button></div><div class="log-dialog-body">
-  <div class="actions"><button type="button" onclick="importShortbreadMap()">Import BBBike PMTiles or ZIP</button><button type="button" onclick="showCopernicusMapSetup()">Download Copernicus satellite area…</button></div>
-  <p class="help">BBBike opens the Android file picker immediately. Copernicus downloads satellite imagery through the setup below.</p>
+  <div class="actions"><button type="button" onclick="importShortbreadMap()">Import BBBike PMTiles or ZIP</button></div>
+  <p class="help">BBBike opens the Android file picker immediately.</p>
   <h3>Install a map file</h3>
   <label>Pack type<select id="map-pack-kind" class="form-input" onchange="el('map-pack-schema').value=this.value==='satellite'?'raster':'shortbread'"><option value="street">Detailed map</option><option value="satellite">Satellite view</option></select></label>
   <label>Pack format<select id="map-pack-schema" class="form-input"><option value="shortbread">BBBike / Shortbread</option><option value="protomaps">Protomaps</option><option value="raster">Raster satellite PMTiles</option></select></label>
@@ -173,22 +172,6 @@
   <div class="actions"><button type="button" onclick="downloadMapPackFromForm()">Download and install</button></div>
   <p><strong>Need a detailed map?</strong> Open BBBike while online, choose your area and PMTiles / Shortbread, then download the file or ZIP to this phone. Use the import button at the top of this dialog. Switch off internet afterward to check the map.</p>
   <p><a href="https://extract.bbbike.org/" target="_blank" rel="noopener">Open BBBike area download</a> · <a href="https://docs.protomaps.com/guide/getting-started" target="_blank" rel="noopener">Protomaps area packs</a></p>
-  <h3 id="copernicus-map-heading">Download Copernicus satellite imagery on this phone</h3>
-  <p>1. On Map, zoom and pan until the area you want fills the screen. 2. Open Offline maps → Import maps and tap <strong>Use visible area</strong>. 3. Choose an imagery date range. 4. Enter your Copernicus OAuth client ID and secret, then review the tile and size estimate. 5. Download while online. The finished area works offline and joins Full App Backup.</p>
-  <p><button type="button" onclick="AndroidBridge.openCopernicusAccount()">Don't have an account yet?</button> This opens Copernicus Data Space in your browser. Register and verify your email. Sign in, open the Sentinel Hub dashboard, then <button type="button" onclick="AndroidBridge.openCopernicusCredentialsHelp()">see how to generate an OAuth client ID and secret</button>. Return here and enter both values. Copernicus limits requests; choose a smaller area if the estimate is too large.</p>
-  <div class="map-satellite-form">
-    <div class="actions"><button type="button" onclick="chooseSatelliteArea()">Use visible area</button><span id="satellite-estimate" role="status">No area chosen</span></div>
-    <label>Area name<input id="satellite-title" class="form-input" maxlength="100" placeholder="My area satellite"></label>
-    <label>Imagery from<input id="satellite-from" class="form-input" type="date"></label>
-    <label>To<input id="satellite-to" class="form-input" type="date"></label>
-    <label>Copernicus OAuth client ID<input id="satellite-client-id" class="form-input" autocomplete="off"></label>
-    <label>Copernicus OAuth client secret<input id="satellite-client-secret" class="form-input" type="password" autocomplete="off"></label>
-    <label class="map-remember"><input id="satellite-remember" type="checkbox"> Remember my credentials on this phone</label>
-    <p class="help">If left off, entered credentials are used for this download only. Remembered credentials are encrypted on this phone and excluded from Full App Backup.</p>
-    <div class="actions"><span id="satellite-account-status" role="status">Checking account…</span><button id="satellite-login" type="button" onclick="AndroidBridge.useRememberedSatelliteAccount()" hidden>Log in with remembered account</button><button id="satellite-logoff" type="button" onclick="logOffSatelliteAccount()" hidden>Log off</button><button id="satellite-forget" type="button" onclick="forgetSatelliteAccount()" hidden>Forget my credentials</button></div>
-    <div class="actions"><button type="button" onclick="downloadSatelliteArea()">Download satellite area</button><button type="button" onclick="AndroidBridge.cancelSatelliteDownload();el('satellite-estimate').textContent='Stopping after the current tile…'">Cancel download</button></div>
-  </div>
-  <p class="help">Choose the highest native detail available. Sentinel-2 satellite imagery is 10 m per pixel; extra zoom cannot reveal finer details. Packs and saved Map data are included in Full App Backup.</p>
 </div></dialog>
 
 <main id="tab-log" class="tab-panel" hidden>
@@ -228,6 +211,7 @@
       <h2>Radios</h2>
       <button type="button" onclick="showSettingsPage('nodes')"><strong>My Nodes</strong><span>Connect and manage known radios</span></button>
       <button type="button" onclick="showSettingsPage('connections')"><strong>Add Radio Connections</strong><span>Add a radio using Bluetooth or USB</span></button>
+      <button type="button" onclick="openIgnoredNodes()"><strong>Manage Ignored</strong><span>Review and unignore Meshtastic nodes</span></button>
       <button type="button" onclick="showSettingsPage('timeouts')"><strong>Request timeouts</strong><span>Signal Quality, Ping and traceroute</span></button>
       <button type="button" onclick="openSettingsWindow('usage')"><strong>MT / MC utilization history</strong><span>Record and compare radio airtime utilization</span></button>
       <h2>Messaging</h2>
@@ -236,7 +220,7 @@
       <button id="member-config-button" type="button" onclick="openMemberSetup()"><strong data-member-text="mode">Untrained Member Mode</strong></button>
       <h2>Map &amp; alerts</h2>
       <button type="button" onclick="openGeofenceHistory()"><strong>Geofence alerts</strong><span>View recorded alerts on the map</span></button>
-      <button type="button" onclick="showSettingsPage('sounds')"><strong>Notifications</strong><span>Background notifications, sounds and repeats</span></button>
+      <button type="button" onclick="showSettingsPage('sounds')"><strong>Notifications</strong><span>Silence notifications, sounds and repeats</span></button>
       <h2>Data &amp; app</h2>
       <button type="button" onclick="showSettingsPage('backup')"><strong>App backup</strong><span>Export or merge radios, messages, Log and templates</span></button>
       <button type="button" onclick="showSettingsPage('channel-backup')"><strong>Channel backup</strong><span>Export channel chat as CSV</span></button>
@@ -278,6 +262,15 @@
     <div id="settings-sounds-page" class="settings-subpage" hidden>
     <button class="settings-back" type="button" onclick="showSettingsPage('home')">← Config</button>
     <h2>Notifications</h2>
+    <fieldset class="sound-frame"><legend>Silence Notifications</legend>
+      <p class="help">Messages are still received and saved. Contact silencing covers all nodes assigned to that person. Node silencing covers that identity on all receiving radios. The radio connection service stays visible.</p>
+      <label>Scope<select id="silence-scope" class="form-input" onchange="renderSilenceTargets()"><option value="all">Silence All</option><option value="contact">Silence Contact</option><option value="node">Silence Node</option></select></label>
+      <label id="silence-target-label">Contact or node<select id="silence-target" class="form-input"></select></label>
+      <label>Duration<select id="silence-duration" class="form-input" onchange="el('silence-minutes-label').hidden=this.value!=='timed'"><option value="forever">Until restored</option><option value="timed">For … minutes</option></select></label>
+      <label id="silence-minutes-label" hidden>Minutes<input id="silence-minutes" class="form-input" type="number" min="1" max="525600" value="60"></label>
+      <button class="silence-action" type="button" onclick="applySilence()">Silence notifications</button>
+      <p id="silence-status" class="help" role="status"></p><div id="silence-rules"></div>
+    </fieldset>
     <fieldset class="sound-frame"><legend>Meshtastic node notifications</legend>
       <label class="config-switch"><input id="new-node-alerts" type="checkbox" onchange="AndroidBridge.setNewNodeAlerts(this.checked)"> New Node Seen</label>
       <p class="help">Notify when a connected Meshtastic radio first identifies a new node after initial sync.</p>
@@ -433,6 +426,16 @@
   <div class="settings-window-footer"><button type="button" onclick="closeSettingsWindow('node-management')">Close</button></div>
 </dialog>
 <script src="node-management.js" defer></script>
+<dialog id="settings-window-ignored" class="settings-window" aria-labelledby="ignored-title">
+  <div class="settings-window-header"><h2 id="ignored-title">Manage Ignored</h2><button type="button" class="window-x" aria-label="Close ignored nodes" onclick="closeSettingsWindow('ignored')">×</button></div>
+  <div class="settings-window-body">
+    <p class="help">Meshtastic radios drop packets originating from ignored nodes and do not relay them. Ignore applies separately to each radio.</p>
+    <p id="ignored-status" class="help" role="status"></p>
+    <div id="ignored-list"></div>
+  </div>
+  <div class="settings-window-footer"><button type="button" onclick="AndroidBridge.getIgnoredNodes()">Refresh</button><button type="button" onclick="closeSettingsWindow('ignored')">Close</button></div>
+</dialog>
+<script src="ignored-nodes.js" defer></script>
 <nav id="bottom-nav">
   <button class="nav-btn" data-tab="map" onclick="switchTab('map')"><span class="nav-icon">◎</span><span>Map</span></button>
   <button class="nav-btn" data-tab="nodes" onclick="switchTab('nodes')"><span class="nav-icon">⬡</span><span>Nodes</span></button>
@@ -441,7 +444,7 @@
   <button class="nav-btn" data-tab="log" onclick="switchTab('log')"><span class="nav-icon">≡</span><span>Log</span></button>
   <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')"><span class="nav-icon">⊞</span><span>Config</span></button>
 </nav>
-<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="radio-presets.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="contacts.js"></script><script src="member-mode.js"></script><script src="usage-history.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
+<script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="radio-presets.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="contacts.js"></script><script src="member-mode.js"></script><script src="usage-history.js"></script><script src="notification-silence.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
 </body>
 </html>
 

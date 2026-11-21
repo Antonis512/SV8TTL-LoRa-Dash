@@ -127,7 +127,7 @@ function setMapStyle(preserveView=false){
 }
 window.onMapData=data=>{
   if(data.displayStyle==='dark'||data.displayStyle==='full')mapDisplayStyle=data.displayStyle;
-  mapData={nodes:data.nodes||[],positions:data.positions||[],heard:data.heard||[],items:data.items||[],packs:data.packs||[],alerts:data.alerts||[]};
+  mapData={nodes:data.nodes||[],positions:data.positions||[],heard:data.heard||[],items:data.items||[],packs:data.packs||[],alerts:data.alerts||[],geofenceNodes:data.geofenceNodes||[]};
   if(!mapData.packs.some(p=>p.id===mapPackId)){
     const saved=mapData.packs.find(p=>p.id===data.selectedPackId);
     mapPackId=saved?.id||'';if(saved)mapLayerKind=saved.kind;
@@ -311,7 +311,15 @@ function renderMap(){
 }
 function mapFitVisible(){if(!mapView)return;const rows=mapFilterRows().filter(mapHasPosition);if(!rows.length){mapNotice('No positioned nodes match these filters.');return;}const bounds=new maplibregl.LngLatBounds();for(const n of rows)bounds.extend([n.lon,n.lat]);mapView.fitBounds(bounds,{padding:45,maxZoom:15});}
 window.openMapNode=(radio,id,device='')=>{mapSelected=null;mapFocus={radio,id,device};mapFocusWaiting=true;mapAlertPin?.remove();mapAlertPin=null;switchTab('map');AndroidBridge.loadMap();};
-window.onMapAlert=message=>mapNotice('Geofence: '+message);
+function geofenceNodeKey(radio,id){const key=String(id).toLowerCase();return radio==='mc'&&/^[0-9a-f]{64}$/.test(key)?key.slice(0,12):key;}
+function geofenceNodeSettings(){return state?.geofenceNodes||mapData.geofenceNodes||[];}
+function nodeGeofenceExcluded(radio,id){return geofenceNodeSettings().some(n=>n.radio===radio&&n.node===geofenceNodeKey(radio,id)&&n.excluded);}
+function geofenceNodeActionLabel(radio,id){return nodeGeofenceExcluded(radio,id)?'Allow geofence alerts for this node':'Exclude from geofence alerts';}
+function toggleNodeGeofence(radio,id){AndroidBridge.setGeofenceNodeExcluded(radio,id,!nodeGeofenceExcluded(radio,id));}
+window.onMapAlert=(message,radio,id)=>{
+  mapNotice('Geofence: '+message);
+  if(radio&&id){const actions=mapText('div','','map-item-actions');const button=mapButton(actions,geofenceNodeActionLabel(radio,id),()=>toggleNodeGeofence(radio,id));button.id='map-alert-node-action';button.dataset.radio=radio;button.dataset.node=id;el('map-status').appendChild(actions);}
+};
 function showMapTrail(n){
   const points=mapData.positions.filter(p=>p.radio===n.radio&&p.node===n.id&&p.device===n.device);
   mapNotice(points.length+' saved position reports for '+(n.name||n.id)+(points.length?' · newest '+mapDate(points.at(-1).time):'')+'. Gaps over 30 minutes are not connected.');
@@ -331,44 +339,15 @@ function setMapDisplayStyle(value){
 function openOfflineMaps(){el('map-offline-dialog').showModal();}
 function backToOfflineMaps(from){el(from).close();openOfflineMaps();}
 function openInstalledMaps(){if(el('map-offline-dialog').open)el('map-offline-dialog').close();renderMapPacks();el('map-installed-dialog').showModal();}
-function openMapImport(){if(!el('satellite-to').value)el('satellite-to').value=new Date().toISOString().slice(0,10);
-  if(!el('satellite-from').value)el('satellite-from').value=new Date(Date.now()-30*86400000).toISOString().slice(0,10);
-  if(el('map-offline-dialog').open)el('map-offline-dialog').close();AndroidBridge.loadSatelliteAccount();el('map-import-dialog').showModal();}
+function openMapImport(){if(el('map-offline-dialog').open)el('map-offline-dialog').close();el('map-import-dialog').showModal();}
 function importShortbreadMap(){
   if(!el('map-import-dialog').open)openMapImport();
   AndroidBridge.importMapPack('street','shortbread','','BBBike / OpenStreetMap','');
 }
-function showCopernicusMapSetup(){
-  if(!el('map-import-dialog').open)openMapImport();
-  el('copernicus-map-heading').scrollIntoView({block:'start'});
-}
-let satelliteBounds=null,satellitePlan=null;
-let satelliteAccountSaved=false,satelliteSignedIn=false;
-window.onSatelliteAccount=(saved,signedIn,label)=>{
-  satelliteAccountSaved=!!saved;satelliteSignedIn=!!signedIn;
-  el('satellite-account-status').textContent=saved?(signedIn?'Copernicus access ready · '+label:'Logged off · credentials remembered for '+label):'No account remembered on this phone';
-  el('satellite-login').hidden=!saved||signedIn;el('satellite-logoff').hidden=!signedIn;el('satellite-forget').hidden=!saved;
-  el('satellite-remember').checked=!!saved;
-};
-function logOffSatelliteAccount(){el('satellite-client-id').value='';el('satellite-client-secret').value='';satelliteSignedIn=false;AndroidBridge.logOffSatelliteAccount();}
-function forgetSatelliteAccount(){if(!confirm('Forget saved Copernicus credentials from this phone? Offline map packs will stay.'))return;
-  el('satellite-client-id').value='';el('satellite-client-secret').value='';satelliteSignedIn=false;satelliteAccountSaved=false;AndroidBridge.forgetSatelliteAccount();}
-function chooseSatelliteArea(){
-  if(!mapView){mapNotice('Open Map first to choose an area.');return;}
-  const b=mapView.getBounds();satelliteBounds=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()];
-  satellitePlan=null;el('satellite-estimate').textContent='Checking area…';AndroidBridge.estimateSatellite(JSON.stringify(satelliteBounds));
-}
-window.onSatelliteEstimate=plan=>{satellitePlan=plan;el('satellite-estimate').textContent=plan.tiles+' tiles · native zoom '+plan.maxZoom+' · about '+plan.estimatedMB+' MB (rough estimate; actual size may vary).';};
-window.onSatelliteProgress=(done,total)=>{el('satellite-estimate').textContent='Downloading '+done+' of '+total+' tiles. Keep the app open.';};
-function downloadSatelliteArea(){
-  const from=el('satellite-from').value,to=el('satellite-to').value,id=el('satellite-client-id').value.trim(),secret=el('satellite-client-secret').value;
-  if(!satellitePlan||!satelliteBounds){mapNotice('Choose the visible area first.');return;}
-  if(!from||!to||from>to){mapNotice('Choose a valid imagery date range.');return;}
-  if((!id||!secret)&&!(satelliteSignedIn&&!id&&!secret)){mapNotice('Enter both Copernicus credentials or log in with the remembered account.');return;}
-  if(!confirm('Download '+satellitePlan.tiles+' tiles for roughly '+satellitePlan.estimatedMB+' MB? Copernicus account quotas apply.'))return;
-  AndroidBridge.downloadSatellite(JSON.stringify(satelliteBounds),from,to,el('satellite-title').value,id,secret,el('satellite-remember').checked);
-  el('satellite-client-id').value='';el('satellite-client-secret').value='';el('satellite-estimate').textContent='Starting download…';
-}
+// Download setup is deferred; keep callbacks safe for restored native state.
+window.onSatelliteAccount=()=>{};
+window.onSatelliteEstimate=()=>{};
+window.onSatelliteProgress=()=>{};
 function downloadMapPackFromForm(){const url=el('map-pack-url').value.trim();if(!/^https:\/\//i.test(url)){mapNotice('Enter an HTTPS address for a PMTiles file.');return;}AndroidBridge.downloadMapPack(url,el('map-pack-title').value,el('map-pack-kind').value,el('map-pack-schema').value,el('map-pack-source').value,el('map-pack-date').value);}
 window.onMapPackImportStatus=(message,busy=false,percent=-1)=>{
   // Android may recreate the page while its document picker is in front.
@@ -398,7 +377,7 @@ window.onMapPackInstalled=pack=>{
 };
 function renderMapPacks(){
   const host=el('map-pack-list'),activeId=mapMode==='offline'?activePack()?.id:null;host.replaceChildren();
-  if(!mapData.packs.length)host.appendChild(mapText('p','No maps installed yet. Open Import maps to add a BBBike file or download a Copernicus area.'));
+  if(!mapData.packs.length)host.appendChild(mapText('p','No maps installed yet. Open Import maps to add an offline map file.'));
   for(const p of mapData.packs){const row=document.createElement('div');if(p.id===activeId)row.className='map-pack-selected';row.appendChild(mapText('strong',p.title));
     if(p.id===activeId)row.appendChild(mapText('span','Currently shown on Map','map-pack-active'));
     row.appendChild(mapText('small',p.kind+' · '+(p.size/1048576).toFixed(1)+' MB · zoom '+p.minZoom+'–'+p.maxZoom+(p.source?' · '+p.source:'')+(p.captureDate?' · imagery '+p.captureDate:'')+(p.requestedRange?' · requested '+p.requestedRange:'')));
@@ -742,9 +721,19 @@ window.openGeofenceHistory=()=>{
   AndroidBridge.loadMap();
 };
 function renderGeofenceHistory(){
+  const action=el('map-alert-node-action');
+  if(action)action.textContent=geofenceNodeActionLabel(action.dataset.radio,action.dataset.node);
   const alerts=mapData.alerts||[],host=el('map-alerts-list');host.replaceChildren();
   el('map-alerts-button').textContent='Geofence alerts ('+alerts.length+')';
   if(!alerts.length)host.appendChild(mapText('p','No saved geofence alerts. New alerts stay here until you delete them.'));
+  const excluded=geofenceNodeSettings().filter(n=>n.excluded);
+  if(excluded.length){
+    host.appendChild(mapText('h3','Nodes excluded from geofence alerts'));
+    for(const n of excluded){const row=mapText('article','','map-alert-record');
+      row.appendChild(mapText('strong',n.radio.toUpperCase()+' · '+n.node));
+      mapButton(row,'Allow geofence alerts for this node',()=>toggleNodeGeofence(n.radio,n.node));host.appendChild(row);
+    }
+  }
   for(const a of alerts){
     const row=mapText('article','','map-alert-record');
     row.appendChild(mapText('strong',(a.name||a.node)+' '+a.event+' '+a.title));
@@ -762,6 +751,7 @@ function renderGeofenceHistory(){
       mapNotice('Historical alert location · '+mapDate(a.time));
     });
     mapButton(row,'Latest node position',()=>{el('map-alerts-dialog').close();openMapNode(a.radio,a.node,a.device);});
+    mapButton(row,geofenceNodeActionLabel(a.radio,a.node),()=>toggleNodeGeofence(a.radio,a.node));
     mapButton(row,'Delete alert',()=>{if(confirm('Delete this saved geofence alert?'))AndroidBridge.deleteGeofenceAlert(a.id);});
     host.appendChild(row);
   }

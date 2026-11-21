@@ -32,11 +32,12 @@ window.resetContactPreferences=()=>{contactPrefsLoaded=false;AndroidBridge.loadC
 window.onContactsData=data=>{
   contactItems=Array.isArray(data.items)?data.items:[];
   if(!contactPrefsLoaded){contactView={...contactView,...data.view};contactPrefsLoaded=true;el('contacts-search').value=contactView.query;el('contacts-favorites').checked=contactView.favorites;el('contacts-sort').value=contactView.sort;el('contacts-network').value=contactView.network;}
+  window.renderSilenceTargets?.();
   renderContacts();window.memberContactsChanged?.();window.mapContactsChanged?.();
   if(activeTab==='nodes')renderNodes();
   if(el('contacts-dialog').open)contactPickerRefresh?.();
 };
-window.onContactNodes=radios=>{contactRadios=radios||[];installContactRadios();if(activeTab==='contacts')renderContacts();};
+window.onContactNodes=radios=>{contactRadios=radios||[];installContactRadios();window.renderSilenceTargets?.();if(activeTab==='contacts')renderContacts();};
 function installContactRadios(){if(!state)return;contactRadios.forEach((r,i)=>{state['contact-radio-'+i]={...r,channels:r.channels||[],chats:{},directs:{}};});}
 function contactViewChanged(){contactView={...contactView,query:el('contacts-search').value,favorites:el('contacts-favorites').checked,sort:el('contacts-sort').value,network:el('contacts-network').value};AndroidBridge.contactsView(JSON.stringify(contactView));renderContacts();}
 function contactNavOverflow(){const nav=el('bottom-nav');nav.classList.toggle('more-left',nav.scrollLeft>2);nav.classList.toggle('more-right',nav.scrollLeft+nav.clientWidth<nav.scrollWidth-2);}

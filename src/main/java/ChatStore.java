@@ -37,7 +37,7 @@ final class ChatStore extends SQLiteOpenHelper {
         final String name;
         SavedChannel(int index, String name) { this.index=index; this.name=name; }
     }
-    ChatStore(Context context) { super(context, "chat-history.db", null, 21); setWriteAheadLoggingEnabled(true); }
+    ChatStore(Context context) { super(context, "chat-history.db", null, 22); setWriteAheadLoggingEnabled(true); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, radio TEXT NOT NULL, " +
                 "node_id TEXT NOT NULL DEFAULT '', channel INTEGER NOT NULL, sender TEXT NOT NULL, " +
@@ -55,6 +55,7 @@ final class ChatStore extends SQLiteOpenHelper {
         addMapPositionMetadata(db);
         ContactsStore.create(db);
         createGeofenceAlerts(db);
+        createGeofenceNodeSettings(db);
     }
     private void createUsageHistory(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE mt_usage(device TEXT NOT NULL,time INTEGER NOT NULL,air REAL,channel REAL)");
@@ -134,6 +135,7 @@ final class ChatStore extends SQLiteOpenHelper {
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         if(oldVersion<20)createUsageHistory(db);
         if(oldVersion<21)addUsageSegments(db);
+        if(oldVersion<22)createGeofenceNodeSettings(db);
         if(oldVersion<18)createGeofenceAlerts(db);
         if(oldVersion<17)ContactsStore.create(db);
         if(oldVersion<15)createMapTables(db);
@@ -178,6 +180,9 @@ final class ChatStore extends SQLiteOpenHelper {
     }
     private void addHeardSettings(SQLiteDatabase db) {
         db.execSQL("ALTER TABLE node_heard ADD COLUMN settings TEXT NOT NULL DEFAULT ''");
+    }
+    private void createGeofenceNodeSettings(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS geofence_node_settings(radio TEXT NOT NULL,node TEXT NOT NULL,excluded INTEGER NOT NULL,edited INTEGER NOT NULL,PRIMARY KEY(radio,node))");
     }
     private void createGeofenceAlerts(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS map_alerts(id TEXT PRIMARY KEY,time INTEGER NOT NULL,body TEXT NOT NULL)");

@@ -162,7 +162,7 @@
 .radio-state progress { flex: 1; min-width: 50px; height: 10px; accent-color: var(--accent); }
 .radio-state progress[hidden], .stop-scan-btn[hidden] { display: none; }
 .actions { display: flex; gap: 8px; }
-.actions button { flex: 1; min-height: 42px; padding: 8px; border: 1px solid var(--accent); border-radius: 7px; background: var(--accent-dim); color: var(--accent); font-weight: 700; }
+.actions button,.silence-action { flex: 1; min-height: 42px; padding: 8px; border: 1px solid var(--accent); border-radius: 7px; background: var(--accent-dim); color: var(--accent); font-weight: 700; }
 .actions button[hidden] { display: none; }
 .actions .disconnect-btn { border-color: #b75a5a; color: #f0a4a4; background: #44292d; }
 .stop-scan-btn { min-height: 40px; border: 1px solid var(--accent); border-radius: 7px; background: var(--accent-dim); color: var(--accent); font-weight: 700; }
@@ -279,8 +279,7 @@ input,textarea,[contenteditable="true"] { user-select:text; -webkit-user-select:
 .composing #channels-screen,.composing #dm-screen { grid-template-columns:0 minmax(0,1fr) 0; }
 .composing .chat-side,.composing .dm-side { display:none; }
 @media (max-height:480px) {
-  .composer-actions { gap:3px; }
-  .composer-actions button,#chat-send { min-height:26px; height:26px; padding:2px 6px; font-size:11px; }
+  .composing #chat-device-bar,.composing #chat-font-bar,.composing .composer-font-tools { display:none; }
   #chat-input,#dm-input { max-height:48px; }
 }
 @media (max-height:480px) and (min-width:600px) {
@@ -490,7 +489,7 @@ body.member-mode #settings-my-nodes-page .node-management{display:none}
 .node-details button:disabled,#map-search-results button:disabled{opacity:.45;cursor:default}
 
 .composer-templates { display:none; flex-wrap:wrap; gap:5px; padding:4px 8px; }
-#chat-input-bar .composer-actions { flex-direction:column; }
-#chat-position { max-width:80px; white-space:normal; }
+#chat-input-bar .composer-actions,#dm-compose .composer-actions { flex-direction:column; }
+#chat-position,#dm-position { max-width:80px; white-space:normal; }
 
 .composing .composer-templates { display:flex; }

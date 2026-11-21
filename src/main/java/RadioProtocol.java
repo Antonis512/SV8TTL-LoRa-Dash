@@ -34,6 +34,10 @@ interface RadioProtocol {
         default void radioSettings(String label) {}
         default void ownBattery(String label) {}
         default void pathReset(String id) {}
+        default void favorite(String id,boolean value) {}
+        default void favoriteResult(String id,boolean value,boolean success,String message) {}
+        default void ignored(String id,boolean value) {}
+        default void ignoreResult(String id,boolean value,boolean success,String message) {}
         default void usageSample(Float air,Float channel) {}
         default void channelSetupResult(String message) {}
         default void ownRadioUsage(String label) {}
@@ -62,6 +66,9 @@ interface RadioProtocol {
     default byte[] nodeCommand(String action, String id, String text, int channel) { throw new IllegalArgumentException("Action is not supported by this radio"); }
     void receive(byte[] packet, Events events);
     ChannelAdmin channelAdmin();
+    FavoriteAdmin favoriteAdmin();
+    byte[] setFavorite(String id,boolean value);
+    default byte[] setIgnored(String id,boolean value){throw new IllegalArgumentException("Ignore on radio requires Meshtastic");}
     default byte[] addChannel(String name,String mode,String secret){return channelAdmin().start(name,mode,secret);}
     default byte[] nextCommand() { return null; }
 }
@@ -80,11 +87,26 @@ final class MeshtasticProtocol implements RadioProtocol {
     private final java.util.Set<Integer> configChannelIds=new java.util.HashSet<>();
     MeshtasticProtocol() { this(()->System.nanoTime()/1000000); }
     private final ChannelAdmin channelAdmin;
+    private final FavoriteAdmin favoriteAdmin;
+    @Override public FavoriteAdmin favoriteAdmin(){return favoriteAdmin;}
+    @Override public byte[] setFavorite(String id,boolean value){
+        if(configuring||channelAdmin.blocked())throw new IllegalArgumentException("Wait for radio loading or channel setup");
+        return favoriteAdmin.start(id,value,null);
+    }
+    @Override public byte[] setIgnored(String id,boolean value){
+        if(configuring||channelAdmin.blocked())throw new IllegalArgumentException("Wait for radio loading or channel setup");
+        return favoriteAdmin.startIgnored(id,value);
+    }
+    @Override public byte[] addChannel(String name,String mode,String secret){
+        if(favoriteAdmin.blocked())throw new IllegalArgumentException("Wait for favorite update");
+        return channelAdmin.start(name,mode,secret);
+    }
     @Override public ChannelAdmin channelAdmin(){return channelAdmin;}
-    @Override public byte[] nextCommand(){return channelAdmin.next();}
-    MeshtasticProtocol(java.util.function.LongSupplier clock) { this.clock=clock;channelAdmin=new ChannelAdmin(false,clock); }
-    @Override public void cancelAll() { configuring=false;configNonce=0;configStage=0;channelAdmin.reset(); }
+    @Override public byte[] nextCommand(){byte[] next=favoriteAdmin.next();return next!=null?next:channelAdmin.next();}
+    MeshtasticProtocol(java.util.function.LongSupplier clock) { this.clock=clock;channelAdmin=new ChannelAdmin(false,clock);favoriteAdmin=new FavoriteAdmin(false,clock); }
+    @Override public void cancelAll() { configuring=false;configNonce=0;configStage=0;channelAdmin.reset();favoriteAdmin.reset(); }
     @Override public byte[] poll(Events events) {
+        if(favoriteAdmin.active())return favoriteAdmin.poll(events);
         if(channelAdmin.active())return channelAdmin.poll(events);
         long now=clock.getAsLong();
         if(configuring&&configStage==2&&now>=nextStageAt) {
@@ -174,6 +196,7 @@ final class MeshtasticProtocol implements RadioProtocol {
     @Override public byte[] initialCommand() {
         int nonce = CONFIG_ONLY;
         channelAdmin.reset();
+        favoriteAdmin.reset();
         configNonce=nonce;configuring=true;configNodes=configChannels=0;
         configNodeIds.clear();configChannelIds.clear();
         configStage=1;myNode=0;
@@ -293,6 +316,7 @@ final class MeshtasticProtocol implements RadioProtocol {
         ProtoWire.Reader r = new ProtoWire.Reader(bytes);
         while (r.next()) { if (r.field == 1) myNode = r.number(); else r.skip(); }
         channelAdmin.ownNode(myNode);
+        favoriteAdmin.ownNode(myNode);
         if (myNode != 0) events.ownNode("!" + String.format("%08x", myNode), "Meshtastic !" + String.format("%08x", myNode));
     }
 
@@ -317,6 +341,7 @@ final class MeshtasticProtocol implements RadioProtocol {
 
     private boolean readNode(byte[] bytes, Events events) {
         byte[] metrics = null;
+        boolean favorite=false,ignored=false;
         ProtoWire.Reader r = new ProtoWire.Reader(bytes); long num = 0, lastHeard=0; String name = ""; String role = "";
         String model = "", shortName = ""; int channel = 0, hops = -1; Position position=new Position();
         while (r.next()) {
@@ -337,6 +362,8 @@ final class MeshtasticProtocol implements RadioProtocol {
             else if (r.field == 6) metrics = r.bytes();
             else if (r.field == 7) channel = (int)r.number();
             else if (r.field == 9) hops = (int)r.number();
+            else if (r.field == 10) favorite = r.number()!=0;
+            else if (r.field == 11) ignored = r.number()!=0;
             else r.skip();
         }
         if(num==0||num==0xffffffffL)return false;
@@ -346,6 +373,8 @@ final class MeshtasticProtocol implements RadioProtocol {
         double lat=position.lat,lon=position.lon;
         events.positionInfo(id,position.report("mt_snapshot"));
         events.node(id, name, role, model, channel, hops, lat, lon);
+        events.favorite(id,favorite);
+        events.ignored(id,ignored);
         events.lastHeard(id,lastHeard,false);
         if (num == myNode && !name.isEmpty()) events.ownNode(id, name);
         if (num == myNode && metrics != null) readUsage(metrics, false, events);
@@ -583,6 +612,7 @@ final class MeshtasticProtocol implements RadioProtocol {
             else data.skip();
         }
         if(!mqtt)channelAdmin.receiveMt(from,port,requestId,body,events);
+        if(!mqtt)favoriteAdmin.receiveMt(from,port,requestId,body,events);
         String sender = "!" + String.format("%08x", from);
         if(from!=myNode) events.lastHeard(sender,receivedAt,!mqtt);
         // Proto3 omits zero scalar values. A zero start is trustworthy with a modern Data bitfield.
@@ -746,8 +776,8 @@ final class MeshCoreProtocol implements RadioProtocol {
         configuredDirectAttempts=direct;configuredFloodAttempts=flood;
     }
     void stopFutureAttempts(long id) {DmSend job=dmSends.get(id);if(job!=null){job.total=job.attempt+1;job.stopRequested=true;}}
-    boolean busyForSend(){return initializing||syncInFlight||syncStalled||!operation.isEmpty()||discoveryId!=0||!dmSends.isEmpty();}
-    boolean splitCommandBusy(){return initializing||syncInFlight||syncStalled||!operation.isEmpty()||discoveryId!=0||dmSends.size()>=32;}
+    boolean busyForSend(){return favoriteAdmin.blocked()||initializing||syncInFlight||syncStalled||!operation.isEmpty()||discoveryId!=0||!dmSends.isEmpty();}
+    boolean splitCommandBusy(){return favoriteAdmin.blocked()||initializing||syncInFlight||syncStalled||!operation.isEmpty()||discoveryId!=0||dmSends.size()>=32;}
     String sendWaitReason() {
         if(syncStalled||operation.equals("dm-stalled"))return "Reconnect this radio: its previous operation timed out. Pending parts have not been sent.";
         if(initializing||syncInFlight)return "Waiting for MeshCore message loading to finish";
@@ -759,13 +789,21 @@ final class MeshCoreProtocol implements RadioProtocol {
     private final java.util.function.IntSupplier jitter;
     MeshCoreProtocol() { this(() -> System.nanoTime()/1000000L, () -> new SecureRandom().nextInt(7001)+1000); }
     private final ChannelAdmin channelAdmin;
+    private final FavoriteAdmin favoriteAdmin;
+    @Override public FavoriteAdmin favoriteAdmin(){return favoriteAdmin;}
+    @Override public byte[] setFavorite(String id,boolean value){
+        if(!channelsLoaded||busyForSend()||syncRequested||pending!=null||traceTag!=0||channelAdmin.blocked())
+            throw new IllegalArgumentException("Wait for MeshCore loading and current radio commands to finish");
+        return favoriteAdmin.start(id,value,contactKeys.get(id));
+    }
     @Override public ChannelAdmin channelAdmin(){return channelAdmin;}
     @Override public byte[] addChannel(String name,String mode,String secret){
+        if(favoriteAdmin.blocked())throw new IllegalArgumentException("Wait for favorite update, or reconnect after its timeout");
         if(!channelsLoaded||initializing||syncInFlight||syncRequested||syncStalled||!operation.isEmpty()||!dmSends.isEmpty()||pending!=null||discoveryId!=0||traceTag!=0)
             throw new IllegalArgumentException("Wait for MeshCore loading and current radio commands to finish");
         return channelAdmin.start(name,mode,secret);
     }
-    MeshCoreProtocol(java.util.function.LongSupplier clock, java.util.function.IntSupplier jitter) { this.clock=clock;this.jitter=jitter;channelAdmin=new ChannelAdmin(true,clock); }
+    MeshCoreProtocol(java.util.function.LongSupplier clock, java.util.function.IntSupplier jitter) { this.clock=clock;this.jitter=jitter;channelAdmin=new ChannelAdmin(true,clock);favoriteAdmin=new FavoriteAdmin(true,clock); }
     private static final class DmSend {
         final long id; final byte[] frame, key; final int directAttempts; int total;
         int attempt; long due=Long.MAX_VALUE; boolean resetDone, actualFlood,stopRequested;
@@ -778,9 +816,10 @@ final class MeshCoreProtocol implements RadioProtocol {
     private final java.util.Set<String> knownRoutes=new java.util.HashSet<>();
     private long commandDeadline;
     @Override public boolean automaticDeliveryPending(long id) { return dmSends.containsKey(id); }
-    @Override public void cancelAll() { dmSends.clear();acknowledgments.clear();repeats.clear();operation="";discoveryId=0;traceTag=0;tracePath=null;channelAdmin.reset(); }
+    @Override public void cancelAll() { dmSends.clear();acknowledgments.clear();repeats.clear();operation="";discoveryId=0;traceTag=0;tracePath=null;channelAdmin.reset();favoriteAdmin.reset(); }
     private void stopDm(long id) { dmSends.remove(id); }
     @Override public byte[] poll(Events events) {
+        if(favoriteAdmin.blocked())return favoriteAdmin.poll(events);
         if(channelAdmin.blocked())return channelAdmin.poll(events);
         long now=clock.getAsLong();
         if((initializing||syncInFlight)&&!syncStalled&&now>=loadDeadline) {
@@ -818,6 +857,7 @@ final class MeshCoreProtocol implements RadioProtocol {
         return null;
     }
     byte[] pollRadioUsage() {
+        if(favoriteAdmin.blocked())return null;
         if(channelAdmin.blocked())return null;
         long now=clock.getAsLong();
         if (channelsLoaded && !syncStalled && !initializing && !syncRequested && !syncInFlight
@@ -857,6 +897,7 @@ final class MeshCoreProtocol implements RadioProtocol {
     @Override public boolean requestPending(long id) { return pendingId==id&&!operation.isEmpty(); }
     boolean manualResetPending(long token){return token==pendingId && operation.equals("reset-path");}
     private void begin(String kind) {
+        if(favoriteAdmin.blocked())throw new IllegalArgumentException("Wait for favorite update, or reconnect after its timeout");
         if(channelAdmin.blocked())throw new IllegalArgumentException("Wait for channel setup, or reconnect after its timeout");
         if(syncStalled)throw new IllegalArgumentException("Reconnect this radio after its loading timeout");
         if(operation.equals("dm-stalled")) throw new IllegalArgumentException("Reconnect this radio after its command-response timeout");
@@ -889,6 +930,7 @@ final class MeshCoreProtocol implements RadioProtocol {
     @Override public byte[] initialCommand() {
         nextUsageAt=nextBatteryAt=0;
         channelAdmin.reset();
+        favoriteAdmin.reset();
         usageAt=-1;
         initializing=true;channelsLoaded=false;syncStalled=false;syncInFlight=false;syncRequested=false;
         loadDeadline=clock.getAsLong()+30000;
@@ -1004,6 +1046,7 @@ final class MeshCoreProtocol implements RadioProtocol {
     @Override public void receive(byte[] packet, Events events) {
         if (packet.length == 0) return;
         int type = packet[0] & 255;
+        if(favoriteAdmin.receiveMc(packet,events))return;
         if(channelAdmin.stalled&&(type==0||type==1||type==18))return;
         if(channelAdmin.active() && type==18 && packet.length>=50)
             channelSecrets.put(packet[1]&255,java.util.Arrays.copyOfRange(packet,34,50));
@@ -1095,6 +1138,7 @@ final class MeshCoreProtocol implements RadioProtocol {
             events.positionInfo(id.toString(),new NodePosition(lat,lon,advertTime,0,System.currentTimeMillis(),0,type==0x8a?"mc_advert":"mc_snapshot"));
             events.node(id.toString(), new String(packet, 100, end - 100, StandardCharsets.UTF_8),
                     contactType(packet[33] & 255), "", 0, hops, lat, lon);
+            events.favorite(id.toString(),(packet[34]&1)!=0);
             if(type==0x8a && Double.isFinite(lat) && Double.isFinite(lon)) events.position(id.toString(),lat,lon);
             if(packet.length>=136) events.lastHeard(id.toString(),littleInt(packet,132)&0xffffffffL,true);
         }
@@ -1268,6 +1312,7 @@ final class MeshCoreProtocol implements RadioProtocol {
     }
 
     @Override public byte[] nextCommand() {
+        if(favoriteAdmin.blocked())return favoriteAdmin.next();
         if(channelAdmin.blocked())return channelAdmin.next();
         if (pending != null) { byte[] result = pending; pending = null; return result; }
         if (channelsLoaded&&syncRequested&&!syncInFlight&&!syncStalled) {

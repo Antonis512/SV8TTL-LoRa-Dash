@@ -1,7 +1,7 @@
 # SV8TTL LoRa Dash
 
 **Beta · User manual**  
-For source version **0.10.37 (64)** · 26 November 2026 (published APK remains 0.10.36)
+For version **0.10.37 (64)** · 26 November 2026
 
 Language: **English** · [Ελληνικά](USER-MANUAL-el.md)
 

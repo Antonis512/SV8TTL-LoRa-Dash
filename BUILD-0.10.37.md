@@ -1,5 +1,11 @@
 # SV8TTL LoRa Dash Beta 0.10.37 (64)
 
+## 26 November APK publication
+
+The user subsequently authorized building and publishing the APK. assembleDebug passed with the latest source, including per-radio Manage channel copying and Android contact-detail importing. Package org.overmesh.android, version 0.10.37 (64), and the original signing certificate were verified. The APK declares READ_CONTACTS for the selected-contact permission fallback. Existing compileSdk/Gradle warnings remain; physical phone/radio checks are pending.
+
+Published APK size: 10748953 bytes. SHA-256: 34951821e38cfe4363bfc82d88957a9106096d7d69709a94b46ac5550903e1dc. Signing certificate SHA-256: 5f5f9e0071e32ff2702567aa27940645dadda37df9183b1ceb16b8e09d6041b0. The updates APK and latest.json now describe this build; earlier hashes below are historical local builds.
+
 ## 26 November source update
 
 Published source includes the subsequent Manage-menu and Android contact-linking fixes. Copy channels now starts from the managed radio. Android contact details use the selected contact's data directory, request Contacts permission if access is denied, and merge phone numbers, emails, addresses and notes without duplicates after review/save. Existing personal fields and node assignments are retained.

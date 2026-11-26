@@ -1,5 +1,9 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 26 November 2026 — APK publication authorized
+
+The user subsequently requested building and publishing the APK, superseding the source-only instruction below. Version 0.10.37 (64) includes the latest Manage-menu and Android contact-import changes. assembleDebug passed, the package identity is unchanged, and the verified signing certificate matches the previous published APK. Existing MIT attribution and dependency notices are retained. Production signing and replacement licensing remain undecided; physical phone/radio verification remains pending.
+
 ## 26 November 2026 — source update authorized
 
 The user authorized updating GitHub after the per-radio Manage menu and Android contact import changes. This publication updates source, tests and documentation only; the published APK and update feed remain unchanged. Contact-detail reading and permission fallback follow the official Android ContactsContract and common-intent documentation; no third-party code was copied. All existing attribution, application ID and signing configuration are retained. Phone/radio checks remain pending.

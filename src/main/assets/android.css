@@ -279,7 +279,10 @@ input,textarea,[contenteditable="true"] { user-select:text; -webkit-user-select:
 .composing #channels-screen,.composing #dm-screen { grid-template-columns:0 minmax(0,1fr) 0; }
 .composing .chat-side,.composing .dm-side { display:none; }
 @media (max-height:480px) {
-  .composing #chat-device-bar,.composing #chat-font-bar,.composing .composer-font-tools { display:none; }
+  .composing #chat-device-bar,.composing #chat-font-bar { display:none; }
+  .composing #dm-chat-history,.composing #chat-messages { padding-block:0; }
+  .composing #dm-chat-status:empty { display:none; }
+  .composing .composer-font-tools { padding:0; }
   #chat-input,#dm-input { max-height:48px; }
 }
 @media (max-height:480px) and (min-width:600px) {

@@ -12,20 +12,22 @@ import java.util.function.LongSupplier;
 final class ChannelAdmin {
     final boolean meshcore;
     final Map<Integer,String> slots=new TreeMap<>();
+    final Map<Integer,byte[]> secrets=new TreeMap<>();
     private final LongSupplier clock;
     private int stage,slot;
     private long deadline,requestId,ownNode;
     private byte[] key,queued;
     private String name;
     boolean stalled;
+    private boolean removing;
     ChannelAdmin(boolean meshcore,LongSupplier clock){this.meshcore=meshcore;this.clock=clock;}
     boolean active(){return stage!=0;}
     boolean blocked(){return active()||stalled;}
     void ownNode(long id){ownNode=id;}
-    void reset(){stage=0;stalled=false;queued=null;key=null;slots.clear();}
+    void reset(){stage=0;stalled=false;queued=null;key=null;slots.clear();secrets.clear();}
     void observe(int index,String title){if(index>=0 && index<(meshcore?40:8))slots.put(index,title);}
     private static boolean zero(byte[] bytes){for(byte b:bytes)if(b!=0)return false;return true;}
-    void observeMc(int index,String title,byte[] secret){observe(index,title.isEmpty()&&!zero(secret)?"\0":title);}
+    void observeMc(int index,String title,byte[] secret){secrets.put(index,secret.clone());observe(index,title.isEmpty()&&!zero(secret)?"\0":title);}
     int freeSlot(){for(Map.Entry<Integer,String> item:slots.entrySet())if(item.getValue().isEmpty() && (meshcore||item.getKey()!=0))return item.getKey();return -1;}
     static byte[] key(boolean mc,String mode,String name,String text) {
         try {
@@ -57,8 +59,15 @@ final class ChannelAdmin {
         int available=freeSlot();if(available<0)throw new IllegalArgumentException("No reported empty channel slots. Reconnect to refresh the radio's channels.");
         if(!meshcore&&ownNode==0)throw new IllegalArgumentException("Wait for the radio identity");
         byte[] decoded=key(meshcore,mode,title,secret);
-        slot=available;name=title;key=decoded;stage=1;deadline=clock.getAsLong()+15000;
+        removing=false;slot=available;name=title;key=decoded;stage=1;deadline=clock.getAsLong()+15000;
         return read();
+    }
+    byte[] remove(int index,String expectedName){
+        if(blocked())throw new IllegalArgumentException("Wait for channel setup, or reconnect after a timeout");
+        if(index<=0)throw new IllegalArgumentException("The primary/default channel cannot be removed here");
+        if(!slots.containsKey(index)||slots.get(index).isEmpty()||!slots.get(index).equals(expectedName))throw new IllegalArgumentException("Channel changed. Refresh before removing it");
+        if(!meshcore&&ownNode==0)throw new IllegalArgumentException("Wait for the radio identity");
+        removing=true;slot=index;name=expectedName;key=meshcore?new byte[16]:new byte[0];stage=1;deadline=clock.getAsLong()+15000;return read();
     }
     byte[] next(){byte[] result=queued;queued=null;return result;}
     byte[] poll(RadioProtocol.Events events){
@@ -74,20 +83,22 @@ final class ChannelAdmin {
     private byte[] read(){return meshcore?new byte[]{31,(byte)slot}:admin(new ProtoWire.Writer().varint(1,slot+1).build(),true);}
     private void received(int index,String title,byte[] secret,int role,byte[] passkey,RadioProtocol.Events events){
         if(index!=slot)return;
+        secrets.put(index,secret.clone());
         observe(index,role==0?"":title.isEmpty()?"\0":title);
         if(stage==1){
-            if(role!=0){finish(events,"The empty slot is now occupied. Refresh and try again.");return;}
+            if(removing?(role==0||!title.equals(name)||(!meshcore&&role==1)):role!=0){finish(events,"The empty slot is now occupied. Refresh and try again.");return;}
+            if(removing)name="";
             stage=2;deadline=clock.getAsLong()+15000;
             if(meshcore){queued=new byte[50];queued[0]=32;queued[1]=(byte)slot;byte[] bytes=name.getBytes(StandardCharsets.UTF_8);System.arraycopy(bytes,0,queued,2,bytes.length);System.arraycopy(key,0,queued,34,16);}
             else {
                 if(passkey.length==0){finish(events,"Radio did not provide an admin session key. Channel was not changed.");return;}
                 byte[] settings=new ProtoWire.Writer().bytes(2,key).bytes(3,name.getBytes(StandardCharsets.UTF_8)).build();
-                byte[] channel=new ProtoWire.Writer().varint(1,slot).bytes(2,settings).varint(3,2).build();
+                byte[] channel=new ProtoWire.Writer().varint(1,slot).bytes(2,settings).varint(3,removing?0:2).build();
                 queued=admin(new ProtoWire.Writer().bytes(33,channel).bytes(101,passkey).build(),false);
             }
         } else if(stage==3){
-            if(role!=(meshcore?1:2)||!title.equals(name)||!Arrays.equals(secret,key)){finish(events,"Channel read-back did not match. Reconnect to check the radio.");return;}
-            events.channel(slot,title);finish(events,"Channel added and verified on the radio.");
+            if(removing?role!=0:(role!=(meshcore?1:2)||!title.equals(name)||!Arrays.equals(secret,key))){finish(events,"Channel read-back did not match. Reconnect to check the radio.");return;}
+            if(removing){slots.put(slot,"");events.channelRemoved(slot);}else events.channel(slot,title);finish(events,removing?"Channel removed and verified on the radio.":"Channel added and verified on the radio.");
         }
     }
     boolean receiveMc(byte[] packet,RadioProtocol.Events events){

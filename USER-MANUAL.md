@@ -1,7 +1,7 @@
 # SV8TTL LoRa Dash
 
 **Beta · User manual**  
-For version **0.10.36 (63)** · 21 November 2026
+For source version **0.10.37 (64)** · 26 November 2026 (published APK remains 0.10.36)
 
 Language: **English** · [Ελληνικά](USER-MANUAL-el.md)
 
@@ -12,6 +12,30 @@ SV8TTL LoRa Dash is a standalone Android app for connecting to MeshCore and Mesh
 This is an independent Android adaptation based on OverMesh Lite, incorporating original OverMesh assets. It is not an official OverMesh release. Credits and notices are available in **Config → About** and [LICENSE](LICENSE).
 
 The pictures show the app interface rendered at phone size with fictional names, IDs, messages and readings. Physical radio and phone checks are tracked in [PHONE-TESTS.md](PHONE-TESTS.md).
+
+## Android contact linking
+
+Open a contact and choose **Link Android Contact** (or **Refresh from Android**). Select the Android contact. Phone numbers, emails, addresses and notes are selected by default and merged without duplicates; other fields can be selected for replacement. Choose **Review profile**, then **Save Contact**. If Android blocks detail access, allow the Contacts permission prompt to retry. Denial leaves the app contact unchanged. Android contacts are never modified. **Call** opens the phone dialer with the saved number.
+
+## Changes in 0.10.37
+
+### Contacts and receiving devices
+
+Within a person's **Contacts → Nodes**, each unique network/node ID appears once, even when several of your radios have recorded it. These repeated observations are not additional person records. Different IDs stay separate even when their names match. The card lists receiving devices; expand it to see each device's identity, connected/offline status, last-heard time and favorite status. Unknown hearing times remain unknown. The star on a grouped card means a favorite on at least one matching receiver.
+
+Use **Receiving device** to filter observations. With several receivers, **Use device for node actions** selects the radio for requests and other actions. Offline records remain viewable, but do not enable live radio requests. Personal records and assignments are preserved. In **Nodes**, tapping a node shows the same **Receiving devices** section, including available records from other saved radios; the existing per-network device selectors still control the node list and actions.
+
+Saved assigned-node names accept newer timestamped radio reports and reject older or conflicting equal-time reports. Personal names and custom assignment labels remain unchanged. This protection survives saved contact data restoration. A remote MT cached node list has no name-specific timestamp: an unknown-age report can fill an empty name, but cannot overwrite an existing one. A later timestamped name report is needed to confirm a rename.
+
+### Connection and channel controls
+
+- **Config → My Nodes → Connect Selected** enables when at least one checked radio is disconnected and not already connecting. Selection is retained through radio-list refreshes. Checking a radio does not itself start a connection.
+- **Config → My Nodes → Manage → Copy channels between radios** copies one chosen channel at a time. Connect two radios of the same family, wait for loading to finish, open Manage on the source radio, then choose destination and channel, and confirm. The source must report its key; the destination must report an empty slot. Duplicate names, changed source data or changed connections stop the copy. Check the destination's **Manage → Channels** result: submission alone is not confirmation; matching radio read-back is required. This does not copy Contacts, node lists or radio presets.
+- **My Nodes → Manage → Channels → Remove** removes a secondary channel after confirmation and radio read-back. The primary/default slot is protected. Saved message history is retained. After an unconfirmed operation or timeout, reconnect and inspect the radio before retrying.
+- Own radios remain visible in Nodes. MeshCore self entries show available local statistics and a phone-local favorite; this is not a radio-synchronized favorite.
+- Composer **A− / A+** controls remain visible while typing on short screens. Timed notification silence now explicitly asks for the minutes in the editable field below.
+
+Physical MC/MT interoperability and Android gesture/three-button/keyboard inset checks remain pending. Node-list copying is not implemented.
 
 ## Changes in 0.10.36
 

@@ -15,9 +15,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
-/** User-initiated contact pickers. No address-book writes or broad contacts permission. */
+/** User-initiated contact pickers. Reads only the selected contact; never writes to the address book. */
 final class ContactActions {
     private static final int CONTACT=520,PHOTO=521,EXPORT=522,IMPORT=523;
+    private static final int CONTACT_PERMISSION=524;
+    private Uri permissionContact;
+    private String permissionTarget="";
     interface Callback {void result(String event,Object data);}
     private final Activity activity;
     private final Callback callback;
@@ -26,7 +29,7 @@ final class ContactActions {
     private int pending;
     private boolean closed;
     ContactActions(Activity activity,Callback callback){this.activity=activity;this.callback=callback;}
-    void close(){closed=true;worker.shutdown();}
+    void close(){closed=true;permissionContact=null;worker.shutdown();}
     private void emit(String event,Object value){activity.runOnUiThread(()->{if(!closed)callback.result(event,value);});}
     private void error(Exception e){emit("onContactError",e.getMessage()==null?"Contact action failed":e.getMessage());}
     private void pick(Intent intent,int request,String token) {
@@ -35,6 +38,26 @@ final class ContactActions {
         try{activity.startActivityForResult(intent,request);}catch(Exception e){pending=0;error(e);}
     }
     void pickContact(String id){pick(new Intent(Intent.ACTION_PICK,ContactsContract.Contacts.CONTENT_URI),CONTACT,id);}
+    private void importContact(Uri uri,String token,boolean mayRequestPermission){
+        try{emit("onAndroidContact",new JSONObject().put("target",token).put("contact",readContact(uri)));}
+        catch(SecurityException denied){
+            activity.runOnUiThread(()->{
+                if(closed)return;
+                if(!mayRequestPermission||activity.checkSelfPermission(android.Manifest.permission.READ_CONTACTS)==android.content.pm.PackageManager.PERMISSION_GRANTED){error(denied);return;}
+                if(pending!=0){emit("onContactError","Finish the open picker, then link the contact again");return;}
+                permissionContact=uri;permissionTarget=token;pending=CONTACT_PERMISSION;
+                activity.requestPermissions(new String[]{android.Manifest.permission.READ_CONTACTS},CONTACT_PERMISSION);
+            });
+        }catch(Exception e){error(e);}
+    }
+    boolean permissionResult(int request,int[] grants){
+        if(request!=CONTACT_PERMISSION)return false;
+        Uri uri=permissionContact;String token=permissionTarget;
+        permissionContact=null;permissionTarget="";pending=0;
+        if(closed||uri==null)return true;
+        if(grants.length==0||grants[0]!=android.content.pm.PackageManager.PERMISSION_GRANTED){emit("onContactError","Contacts permission is needed to import this contact's saved details. Nothing was changed; allow Contacts access and link again.");return true;}
+        worker.execute(()->importContact(uri,token,false));return true;
+    }
     void pickPhoto(String token){pick(new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"),PHOTO,token);}
     void exportContacts(String json){
         if(pending!=0){emit("onContactError","Finish the open picker first");return;}
@@ -74,7 +97,7 @@ final class ContactActions {
         if(result!=Activity.RESULT_OK||data==null||data.getData()==null)return true;
         Uri uri=data.getData();
         worker.execute(()->{try{
-            if(request==CONTACT)emit("onAndroidContact",new JSONObject().put("target",token).put("contact",readContact(uri)));
+            if(request==CONTACT)importContact(uri,token,true);
             else if(request==PHOTO){try(InputStream in=activity.getContentResolver().openInputStream(uri)){emit("onContactPhoto",new JSONObject().put("token",token).put("photo",thumbnail(readBytes(in,20000000))));}}
             else if(request==EXPORT){try(OutputStream out=activity.getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IllegalArgumentException("Cannot open export file");out.write(payload.getBytes(StandardCharsets.UTF_8));}emit("onContactNotice","Contacts exported");}
             else {JSONObject file;try(InputStream in=activity.getContentResolver().openInputStream(uri)){file=new JSONObject(new String(readBytes(in,50000000),StandardCharsets.UTF_8));}
@@ -107,8 +130,9 @@ final class ContactActions {
             out.put("androidLink",new JSONObject().put("uri",uri.toString()).put("lookup",field(c,ContactsContract.Contacts.LOOKUP_KEY)).put("refreshed",System.currentTimeMillis()));
         }
         // Query only the user-selected contact's subdirectory under the picker's grant.
-        try(Cursor c=activity.getContentResolver().query(Uri.withAppendedPath(uri,ContactsContract.Contacts.Entity.CONTENT_DIRECTORY),null,null,null,null)){
-            if(c!=null)while(c.moveToNext()){
+        try(Cursor c=activity.getContentResolver().query(Uri.withAppendedPath(uri,ContactsContract.Contacts.Data.CONTENT_DIRECTORY),null,null,null,null)){
+            if(c==null)throw new IllegalArgumentException("Android could not read this contact's saved details. Try selecting the contact again.");
+            while(c.moveToNext()){
                 String mime=field(c,ContactsContract.Data.MIMETYPE),value=field(c,ContactsContract.Data.DATA1),label=field(c,ContactsContract.Data.DATA3);
                 int type;try{type=Integer.parseInt(field(c,ContactsContract.Data.DATA2));}catch(Exception ignored){type=0;}
                 if(mime.equals(ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)){out.put("name",field(c,ContactsContract.CommonDataKinds.StructuredName.GIVEN_NAME));out.put("surname",field(c,ContactsContract.CommonDataKinds.StructuredName.FAMILY_NAME));}
@@ -119,7 +143,7 @@ final class ContactActions {
                 else if(mime.equals(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)){out.put("organization",value);out.put("role",field(c,ContactsContract.CommonDataKinds.Organization.TITLE));}
                 else if(mime.equals(ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)&&!value.isEmpty())notes.put(new JSONObject().put("id",java.util.UUID.randomUUID().toString()).put("date",System.currentTimeMillis()).put("text",value));
             }
-        }catch(RuntimeException unavailable){out.put("importNotice","Android shared only basic details. You can fill in the remaining fields manually.");}
+        }
         out.put("phones",phones).put("emails",emails).put("addresses",addresses).put("notes",notes);
         try(InputStream in=ContactsContract.Contacts.openContactPhotoInputStream(activity.getContentResolver(),uri,true)){if(in!=null)out.put("photo",thumbnail(readBytes(in,20000000)));}catch(Exception ignored){}
         return out;

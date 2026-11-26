@@ -16,12 +16,14 @@ const {pathToFileURL}=require('node:url');
    {id:'!44444444',name:'MQTT',role:'Client',hops:0,lastSignal:{...signal,mqtt:true}}];
   f.mc.nodes=[{id:'abcdefabcdef',name:'MC direct',role:'User',hops:3,lastSignal:{...signal,snr:0,rssi:undefined,settings:'869.618 MHz · BW 62.5 kHz · SF8 · CR4/8',timeSource:'message'}},
    {id:'eeeeeeeeeeee',name:'Outgoing route only',role:'User',hops:0}];
+  f.mt.nodes.push({id:'own-mt',name:'My own MT',role:'Client',hops:-1});
   onRadioState(f);switchTab('nodes');
   window.people=[{id:'p1',name:'Alice <friend>',nodes:[{radio:'mt',id:'!11111111'}]},
    {id:'p2',displayName:'Second contact',nodes:[{radio:'mt',id:'!11111111'}]},
    {id:'p3',name:'Deleted',deletedAt:1,nodes:[{radio:'mt',id:'!11111111'}]}];
   onContactsData({items:people,view:{}});
  });
+ assert.equal(await page.locator('[data-node-key="mt:own-mt"]').count(),1,'Own node is visible');
  const first=page.locator('[data-node-key="mt:!11111111"]');
  assert.equal(await first.locator('.node-contact-name').innerText(),'· Alice <friend> / Second contact');
  assert.equal(await first.locator('friend').count(),0);

@@ -1,6 +1,6 @@
 'use strict';
 // Extend this per-radio menu when owner and preset management are implemented.
-const nodeManagementSections=[{id:'channels',title:'Channels',description:'Add a channel to this radio'}];
+const nodeManagementSections=[{id:'channels',title:'Channels',description:'Add or remove channels on this radio'}];
 let managedNode=null,managedNodeInfo=null,managedNodeTimer=null;
 function openNodeManagement(item){
   if(state?.memberConfig?.enabled)return;
@@ -9,6 +9,9 @@ function openNodeManagement(item){
   el('node-channel-name').value='';el('node-channel-key').value='';el('node-key-show').checked=false;el('node-channel-key').type='password';
   const menu=el('node-management-menu');menu.replaceChildren();
   for(const section of nodeManagementSections){const button=node('button','');button.type='button';button.append(node('strong','',section.title),node('span','',section.description));button.onclick=()=>showNodeManagementSection(section.id);menu.append(button);}
+  const copy=node('button','');copy.id='node-channel-copy';copy.type='button';copy.disabled=true;
+  copy.append(node('strong','','Copy channels between radios'),node('span','','Copy from this radio to a connected radio of the same network · empty slots only'));
+  copy.onclick=()=>{if(managedNode&&managedNodeInfo?.ready&&!managedNodeInfo.blocked)AndroidBridge.copyRadioChannels(managedNode.radio,managedNode.id);};menu.append(copy);
   const modes=el('node-channel-mode');modes.replaceChildren();
   const choices=item.radio==='mc'?[['hashtag','Public hashtag (#name)'],['private','Private key']]:[['private','Private key'],['default','Public default key'],['none','No encryption']];
   for(const [value,label] of choices)modes.add(new Option(label,value));
@@ -38,7 +41,15 @@ function addNodeChannel(event){
 window.onNodeManagement=function(info){
   if(!managedNode||info.radio!==managedNode.radio||info.id!==managedNode.id||!el('settings-window-node-management').open)return;
   managedNodeInfo=info;const list=el('node-channel-list');list.replaceChildren();
-  for(const channel of info.channels)list.append(node('div','node-channel-row',channel.name));
+  el('node-channel-copy').disabled=!info.ready||info.blocked||!info.channels.length;
+  for(const channel of info.channels){
+    const row=node('div','node-channel-row',channel.name+' '),remove=node('button','','Remove');remove.type='button';
+    remove.disabled=!info.ready||info.blocked||channel.index===0;
+    remove.title=channel.index===0?'Primary/default channel is protected':'';
+    remove.onclick=()=>{if(!confirm('Remove '+channel.name+' from '+managedNode.name+'? This changes the radio.'))return;
+      remove.disabled=true;AndroidBridge.removeRadioChannel(managedNode.radio,managedNode.id,channel.index,channel.name);};
+    row.append(remove);list.append(row);
+  }
   if(!info.channels.length)list.append(node('p','help',info.ready?'No active channels reported.':'Connect this radio and wait for its channels.'));
   el('node-channel-slot').textContent=!info.ready?'Channel slots unavailable while disconnected or loading.':info.freeSlot<0?'No empty slots reported.':'An empty slot reported by this radio will be used.';
   el('node-channel-add').disabled=!info.ready||info.blocked||info.freeSlot<0;

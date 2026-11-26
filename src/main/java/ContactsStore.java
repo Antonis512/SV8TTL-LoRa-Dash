@@ -62,14 +62,60 @@ final class ContactsStore {
         try {
             for(int i=0;i<items.length();i++) {
                 JSONObject item=items.getJSONObject(i);String id=item.getString("id");
-                if(newerOnly)try(Cursor c=db.rawQuery("SELECT edited FROM contact_items WHERE id=?",new String[]{id})) {
-                    if(c.moveToFirst()&&c.getLong(0)>=item.optLong("edited"))continue;
+                try(Cursor c=db.rawQuery("SELECT edited,body FROM contact_items WHERE id=?",new String[]{id})) {
+                    if(c.moveToFirst()) {
+                        if(newerOnly&&c.getLong(0)>=item.optLong("edited"))continue;
+                        preserveNodeNames(item,new JSONObject(c.getString(1)));
+                    }
                 }
                 ContentValues row=new ContentValues();row.put("id",id);row.put("body",item.toString());row.put("edited",item.optLong("edited"));
                 if(db.insertWithOnConflict("contact_items",null,row,SQLiteDatabase.CONFLICT_REPLACE)==-1)throw new IllegalStateException("Could not save contact");
             }
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
+    }
+    private static boolean sameNode(String radio,String a,String b) {
+        if(a.equalsIgnoreCase(b))return true;
+        return radio.equals("mc")&&((a.length()==64&&b.length()==12&&a.substring(0,12).equalsIgnoreCase(b))
+                ||(b.length()==64&&a.length()==12&&b.substring(0,12).equalsIgnoreCase(a)));
+    }
+    private static void preserveNodeNames(JSONObject incoming,JSONObject saved) throws Exception {
+        JSONArray nodes=incoming.optJSONArray("nodes"),old=saved.optJSONArray("nodes");
+        if(nodes==null||old==null)return;
+        for(int i=0;i<nodes.length();i++) {
+            JSONObject n=nodes.getJSONObject(i);String radio=n.optString("radio");
+            for(int j=0;j<old.length();j++) {
+                JSONObject previous=old.getJSONObject(j);long time=previous.optLong("nameObservedAt");
+                if(time>0&&time>=n.optLong("nameObservedAt")&&radio.equals(previous.optString("radio"))
+                        &&sameNode(radio,n.optString("id"),previous.optString("id"))) {
+                    n.put("name",previous.optString("name")).put("nameObservedAt",time);
+                }
+            }
+        }
+    }
+    static void updateNodeName(ChatStore store,String radio,String id,String name,long observedAt) throws Exception {
+        if(name.trim().isEmpty()||observedAt<0||observedAt>System.currentTimeMillis()+300000)return;
+        SQLiteDatabase db=store.getWritableDatabase();db.beginTransaction();
+        try {
+        JSONArray changes=new JSONArray(),items=all(store);
+        for(int i=0;i<items.length();i++){
+            JSONObject person=items.getJSONObject(i);if(person.optLong("deletedAt")!=0)continue;
+            JSONArray nodes=person.optJSONArray("nodes");if(nodes==null)continue;boolean changed=false;
+            for(int j=0;j<nodes.length();j++){JSONObject n=nodes.getJSONObject(j);
+                boolean same=sameNode(radio,n.optString("id"),id);
+                long previous=n.optLong("nameObservedAt");
+                // Unknown-age snapshots can fill an empty assignment, never undo a name.
+                // Equal timestamps retain the first name; a later matching report advances freshness.
+                if(radio.equals(n.optString("radio"))&&same
+                        &&(observedAt>previous||(observedAt==0&&previous==0&&n.optString("name").isEmpty()))) {
+                    n.put("name",name).put("nameObservedAt",observedAt);changed=true;
+                }
+            }
+            if(changed)changes.put(person.put("edited",Math.max(System.currentTimeMillis(),person.optLong("edited")+1)));
+        }
+        if(changes.length()>0)merge(store,changes,false);
+        db.setTransactionSuccessful();
+        } finally {db.endTransaction();}
     }
     static void forgetNode(ChatStore store,String radio,String id) throws Exception {
         JSONArray changes=new JSONArray(),items=all(store);

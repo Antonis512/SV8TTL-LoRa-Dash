@@ -538,6 +538,7 @@ final class ChatStore extends SQLiteOpenHelper {
         }
         return result;
     }
+    void removeChannel(String radio,String nodeId,int index){getWritableDatabase().delete("channel_names","radio=? AND node_id=? AND channel=?",new String[]{radio,nodeId,String.valueOf(index)});}
     void saveChannel(String radio,String nodeId,int index,String name) {
         ContentValues v=new ContentValues(); v.put("radio",radio); v.put("node_id",nodeId);
         v.put("channel",index); v.put("name",name);

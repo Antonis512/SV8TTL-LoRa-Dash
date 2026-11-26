@@ -15,6 +15,28 @@ public class ChannelAdminSmoke {
     public static void main(String[] args){
         long[] clock={1000};List<String> results=new ArrayList<>(),channels=new ArrayList<>();
         RadioProtocol.Events events=(RadioProtocol.Events)Proxy.newProxyInstance(RadioProtocol.Events.class.getClassLoader(),new Class[]{RadioProtocol.Events.class},(p,m,v)->{if(m.getName().equals("channelSetupResult"))results.add((String)v[0]);if(m.getName().equals("channel"))channels.add(v[0]+":"+v[1]);return null;});
+        ChannelAdmin removal=new ChannelAdmin(true,()->clock[0]);removal.observeMc(1,"Test",new byte[]{1});
+        removal.remove(1,"Test");removal.receiveMc(mc(1,"Test",new byte[16]),events);
+        byte[] clear=removal.next();check(clear!=null&&clear[0]==32&&clear[1]==1,"Remove writes the selected slot");
+        for(int i=2;i<clear.length;i++)check(clear[i]==0,"Removal clears name and secret");
+        removal.receiveMc(new byte[]{0},events);check(removal.next()[0]==31,"Removal requires read-back");
+        removal.receiveMc(mc(1,"",new byte[16]),events);check(!removal.active()&&removal.freeSlot()==1,"Verified removal frees slot");
+        boolean primaryProtected=false;try{removal.remove(0,"Public");}catch(IllegalArgumentException expected){primaryProtected=true;}check(primaryProtected,"Primary protected");
+        results.clear();channels.clear();
+        ChannelAdmin mtRemoval=new ChannelAdmin(false,()->clock[0]);mtRemoval.ownNode(123);mtRemoval.observe(2,"Secondary");
+        byte[] removeRead=mtRemoval.remove(2,"Secondary");
+        mtRemoval.receiveMt(123,6,request(removeRead),new ProtoWire.Writer().bytes(2,channel(2,2,"Secondary",new byte[]{1})).bytes(101,new byte[]{9}).build(),events);
+        byte[] removeWrite=mtRemoval.next(),removedChannel=bytes(bytes(bytes(bytes(removeWrite,1),4),2),33);
+        check(number(removedChannel,1)==2&&number(removedChannel,3)==0,"MT removal disables only selected secondary slot");
+        check(results.isEmpty(),"MT removal write is not confirmation");
+        mtRemoval.receiveMt(123,5,request(removeWrite),new byte[0],events);byte[] removeVerify=mtRemoval.next();
+        check(removeVerify!=null&&results.isEmpty(),"MT removal ACK still requires read-back");
+        mtRemoval.receiveMt(123,6,request(removeVerify),new ProtoWire.Writer().bytes(2,channel(2,0,"",new byte[0])).build(),events);
+        check(!mtRemoval.active()&&mtRemoval.freeSlot()==2&&results.get(0).contains("removed and verified"),"MT removal verified disabled");
+        mtRemoval.observe(2,"Secondary");removeRead=mtRemoval.remove(2,"Secondary");
+        mtRemoval.receiveMt(123,6,request(removeRead),new ProtoWire.Writer().bytes(2,channel(2,1,"Secondary",new byte[]{1})).bytes(101,new byte[]{9}).build(),events);
+        check(mtRemoval.next()==null&&!mtRemoval.active(),"MT role changed to primary is protected even outside slot zero");
+        results.clear();channels.clear();
         MeshtasticProtocol mt=new MeshtasticProtocol(()->clock[0]);
         mt.receive(new ProtoWire.Writer().bytes(3,new ProtoWire.Writer().varint(1,123).build()).build(),events);
         mt.receive(new ProtoWire.Writer().bytes(10,channel(0,1,"Primary",new byte[]{1})).build(),events);

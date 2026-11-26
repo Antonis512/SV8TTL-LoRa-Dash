@@ -6,6 +6,8 @@ import java.security.SecureRandom;
 interface RadioProtocol {
     interface Events {
         void ownNode(String id, String name);
+        // Timestamp of the name-bearing report, in milliseconds; zero means unknown.
+        default void nodeName(String id,String name,long observedAt) {}
         void syncComplete();
         default void syncFailed(String reason) {status(reason);}
         default void loadingProgress(String stage,int nodes,int channels) {}
@@ -40,6 +42,7 @@ interface RadioProtocol {
         default void ignoreResult(String id,boolean value,boolean success,String message) {}
         default void usageSample(Float air,Float channel) {}
         default void channelSetupResult(String message) {}
+        default void channelRemoved(int index) {}
         default void ownRadioUsage(String label) {}
         default void channelMessage(int channel,String sender,String text,long receivedAt,int hops,long packetId,long replyId) { message(channel,sender,text,receivedAt,hops); }
         default void advertResult(String text,boolean success) { actionResult(text); }
@@ -369,6 +372,8 @@ final class MeshtasticProtocol implements RadioProtocol {
         if(num==0||num==0xffffffffL)return false;
         String id = "!" + String.format("%08x", num);
         if(configuring&&num!=0){configNodeIds.add(num);configNodes=configNodeIds.size();}
+        String suppliedName = name.trim().isEmpty() ? shortName.trim() : name.trim();
+        events.nodeName(id,suppliedName,num==myNode?System.currentTimeMillis():0);
         name = reportedName(id, name, shortName);
         double lat=position.lat,lon=position.lon;
         events.positionInfo(id,position.report("mt_snapshot"));
@@ -686,6 +691,7 @@ final class MeshtasticProtocol implements RadioProtocol {
                 else if (user.field == 7) role = roleName((int)user.number());
                 else user.skip();
             }
+            events.nodeName(sender,name.trim().isEmpty()?shortName.trim():name.trim(),receivedAt*1000);
             events.node(sender, reportedName(sender, name, shortName), role, model, channel, -1, Double.NaN, Double.NaN);
         } else if (port == 5 && body != null && requestId!=0) {
             ProtoWire.Reader routing=new ProtoWire.Reader(body); int error=0;
@@ -744,18 +750,20 @@ final class MeshtasticProtocol implements RadioProtocol {
     }
 
     private void readChannel(byte[] bytes, Events events) {
-        ProtoWire.Reader r = new ProtoWire.Reader(bytes); int index = 0; int role = 0; String name = "";
+        ProtoWire.Reader r = new ProtoWire.Reader(bytes); int index = 0; int role = 0; String name = "";byte[] channelSecret=new byte[0];
         while (r.next()) {
             if (r.field == 1) index = (int)r.number();
             else if (r.field == 2) {
                 ProtoWire.Reader settings = new ProtoWire.Reader(r.bytes());
                 while (settings.next()) {
-                    if (settings.field == 3) name = new String(settings.bytes(), StandardCharsets.UTF_8);
+                    if(settings.field==2)channelSecret=settings.bytes();
+                    else if (settings.field == 3) name = new String(settings.bytes(), StandardCharsets.UTF_8);
                     else settings.skip();
                 }
             } else if (r.field == 3) role = (int)r.number();
             else r.skip();
         }
+        if(name.isEmpty())channelAdmin.secrets.remove(index);else channelAdmin.secrets.put(index,channelSecret);
         channelAdmin.observe(index,role==0?"":name.isEmpty()?"Default":name);
         if (role != 0) {
             if(configuring){configChannelIds.add(index);configChannels=configChannelIds.size();}
@@ -1070,6 +1078,7 @@ final class MeshCoreProtocol implements RadioProtocol {
             if (packet.length >= 36) {
                 String name = packet.length > 58 ? new String(packet, 58, packet.length - 58, StandardCharsets.UTF_8).replace("\u0000", "").trim() : "MeshCore";
                 ownKey=hex(packet,4,32);
+                if(packet.length>58&&!name.isEmpty())events.nodeName(ownKey,name,System.currentTimeMillis());
                 events.ownNode(ownKey, name.isEmpty() ? "MeshCore" : name);
             }
             if(packet.length>=58){long freq=littleInt(packet,48)&0xffffffffL,bw=littleInt(packet,52)&0xffffffffL;int sf=packet[56]&255,cr=packet[57]&255;
@@ -1135,6 +1144,7 @@ final class MeshCoreProtocol implements RadioProtocol {
                 if (lat == 0 && lon == 0) { lat = Double.NaN; lon = Double.NaN; }
             }
             long advertTime=packet.length>=136?(littleInt(packet,132)&0xffffffffL)*1000:0;
+            events.nodeName(id.toString(),new String(packet,100,end-100,StandardCharsets.UTF_8),advertTime);
             events.positionInfo(id.toString(),new NodePosition(lat,lon,advertTime,0,System.currentTimeMillis(),0,type==0x8a?"mc_advert":"mc_snapshot"));
             events.node(id.toString(), new String(packet, 100, end - 100, StandardCharsets.UTF_8),
                     contactType(packet[33] & 255), "", 0, hops, lat, lon);

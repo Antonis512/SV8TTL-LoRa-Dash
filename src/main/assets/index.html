@@ -266,8 +266,8 @@
       <p class="help">Messages are still received and saved. Contact silencing covers all nodes assigned to that person. Node silencing covers that identity on all receiving radios. The radio connection service stays visible.</p>
       <label>Scope<select id="silence-scope" class="form-input" onchange="renderSilenceTargets()"><option value="all">Silence All</option><option value="contact">Silence Contact</option><option value="node">Silence Node</option></select></label>
       <label id="silence-target-label">Contact or node<select id="silence-target" class="form-input"></select></label>
-      <label>Duration<select id="silence-duration" class="form-input" onchange="el('silence-minutes-label').hidden=this.value!=='timed'"><option value="forever">Until restored</option><option value="timed">For … minutes</option></select></label>
-      <label id="silence-minutes-label" hidden>Minutes<input id="silence-minutes" class="form-input" type="number" min="1" max="525600" value="60"></label>
+      <label>Duration<select id="silence-duration" class="form-input" onchange="el('silence-minutes-label').hidden=this.value!=='timed'"><option value="forever">Until restored</option><option value="timed">For the minutes entered below</option></select></label>
+      <label id="silence-minutes-label" hidden>Silence for (minutes)<input id="silence-minutes" class="form-input" type="number" min="1" max="525600" value="60"></label>
       <button class="silence-action" type="button" onclick="applySilence()">Silence notifications</button>
       <p id="silence-status" class="help" role="status"></p><div id="silence-rules"></div>
     </fieldset>

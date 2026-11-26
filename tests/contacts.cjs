@@ -45,6 +45,23 @@ await page.locator('.contact-person').click();await page.locator('#contact-detai
 await page.locator('#contact-detail').getByRole('button',{name:'Export',exact:true}).click();await modal.getByRole('button',{name:'Choose export file',exact:true}).click();const exported=await page.evaluate(()=>JSON.parse(calls.at(-1)[1]));assert.equal(exported.items[0].photo,person.photo);assert.equal(exported.items[0].nodes.length,2);
 await page.evaluate(id=>onAndroidContact({target:id,contact:{name:'New Android name',phones:[{label:'Home',value:'12345'}],androidLink:{uri:'content://com.android.contacts/contacts/123',lookup:'123',refreshed:Date.now()}}}),person.id);
 assert.equal(await modal.getByLabel('Name · New Android name',{exact:true}).isChecked(),false);await modal.getByLabel('Name · New Android name',{exact:true}).check();await modal.getByRole('button',{name:'Review profile',exact:true}).click();assert.equal(await modal.getByLabel('Name',{exact:true}).inputValue(),'New Android name');await modal.getByRole('button',{name:'Save Contact',exact:true}).click();assert.equal(await page.evaluate(()=>people.find(c=>c.kind==='contact').phones[0].value),'+30 690 123 4567');
+assert.ok(await page.evaluate(()=>contactPeople()[0].phones.some(x=>x.value==='12345')),'Link adds the Android number alongside the existing number');
+const linkedId=person.id;
+const beforeLink=await page.evaluate(id=>structuredClone(contactById(id)),linkedId);
+for(let refresh=0;refresh<2;refresh++){
+  await page.evaluate(id=>onAndroidContact({target:id,contact:{phones:[{label:'Mobile',value:'+306901234567'},{label:'Home',value:'12345'}],emails:[{label:'Work',value:'link-test@example.org'}],addresses:[{label:'Home',value:'12 Test Street'}],organization:'Android club',androidLink:{uri:'content://com.android.contacts/contacts/123',lookup:'123',refreshed:Date.now()}}}),linkedId);
+  assert(await modal.getByLabel('Phone numbers · +306901234567, 12345',{exact:true}).isChecked());
+  assert(await modal.getByLabel('Email addresses · link-test@example.org',{exact:true}).isChecked());
+  await modal.getByRole('button',{name:'Review profile',exact:true}).click();
+  await modal.getByRole('button',{name:'Save Contact',exact:true}).click();
+}
+const afterLink=await page.evaluate(id=>contactById(id),linkedId);
+assert.equal(afterLink.phones.length,beforeLink.phones.length,'Repeated refresh deduplicates formatted phone numbers');
+assert.equal(afterLink.emails.filter(x=>x.value==='link-test@example.org').length,1);
+assert.equal(afterLink.addresses.filter(x=>x.value==='12 Test Street').length,1);
+assert.deepEqual(afterLink.nodes,beforeLink.nodes);assert.deepEqual(afterLink.notes,beforeLink.notes);
+assert.equal(afterLink.androidLink.lookup,'123');
+await page.locator('#contact-detail').getByRole('button',{name:'Call',exact:true}).last().click();assert.deepEqual(await page.evaluate(()=>calls.at(-1)),['contactCommunicate','call','12345']);
 await page.locator('#contact-detail').getByRole('button',{name:'Delete',exact:true}).click();await modal.getByRole('button',{name:'Delete Contact',exact:true}).click();assert.equal(await page.locator('.contact-person').count(),0);
 await page.locator('#contacts-tools summary').click();await page.getByRole('button',{name:'Deleted contacts / Undo',exact:true}).click();await modal.getByRole('button',{name:'Restore',exact:true}).click();await modal.getByRole('button',{name:'Close',exact:true}).click();assert.equal(await page.locator('.contact-person').count(),1);
 await page.evaluate(()=>{const original=people.find(c=>c.kind==='contact');const duplicate={...structuredClone(original),id:'person-duplicate',alias:'Other alias',notes:[{id:'n2',date:Date.now(),text:'Second note'}]};people.push(duplicate);onContactsData({items:people,view:savedView});});

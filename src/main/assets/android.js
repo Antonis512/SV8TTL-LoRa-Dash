@@ -633,6 +633,7 @@ function nodeButton(parent, label, action, radio, entry, handler) {
 }
 function nodeDetails(radio, entry) {
   const details = node('div', 'node-details');
+  if(window.nodeReceivingInfo)details.appendChild(nodeReceivingInfo(radioType(radio),entry.id));
   details.appendChild(node('div', 'node-facts', displayRole(radio,entry.role) + (entry.model ? ' · ' + entry.model : '') + ' · ' + entry.id));
   details.appendChild(node('div','node-facts',heardDescription(radioType(radio),entry.heardSettings)));
   details.appendChild(nodeSignalReport(radioType(radio),entry));
@@ -642,6 +643,11 @@ function nodeDetails(radio, entry) {
   nodeButton(details,'Enter Name','',radio,entry,()=>enterNodeName(radio,entry));
   nodeButton(details,'Assign to Contact','',radio,entry,()=>assignNodeToContact(radio,entry));
   if(entry.id!==state[radio].ownId) nodeButton(details,'Forget Node','',radio,entry,()=>forgetNode(radio,entry));
+  if(entry.ownRadio){
+    nodeButton(details,entry.favorite?'★ Favorited on phone':'☆ Favorite on phone','',radio,entry,()=>AndroidBridge.favoriteOwnRadio(state[radio].key));
+    details.appendChild(node('p','help','Own radio statistics: '+(entry.ownStats||'Waiting for radio statistics')));
+    return details;
+  }
   if (state[radio].connected && !entry.savedOnly) {
     const actions = node('div', 'node-actions');
     nodeButton(actions, entry.favorite ? '★ Favorited' : '☆ Add to Favorites', 'favorite', radio, entry);
@@ -882,6 +888,7 @@ function renderChannelsScreen() {
 }
 function renderMyNodes() {
   if (!state) return;
+  syncKnownSelection();
   const list = el('my-nodes-list'); clear(list);
   const known=state.myNodes.filter(item=>item.id);
   if(state.memberConfig?.enabled){
@@ -897,8 +904,9 @@ function renderMyNodes() {
   for (const item of known) {
     const card = node('section','radio-card'+(item.unread?' unread-node':''));
     const picker=node('label','known-node-picker');
-    const checked=node('input',''); checked.type='checkbox'; checked.checked=selectedKnown.has(item.radio+':'+item.id);
-    checked.onchange=()=>{const key=item.radio+':'+item.id; if(checked.checked) selectedKnown.add(key); else selectedKnown.delete(key); updateConnectSelected();};
+    const checked=node('input',''); checked.type='checkbox'; checked.dataset.knownKey=item.radio+':'+item.id;
+    checked.checked=selectedKnown.has(checked.dataset.knownKey);
+    checked.setAttribute('aria-label','Select '+(item.name||item.id));
     picker.append(checked,node('span','',item.connected?'Connected':'Select'));
     card.appendChild(picker);
     card.appendChild(node('span','radio-type-badge',(item.detectedRadio||item.radio).toUpperCase()));
@@ -1024,9 +1032,9 @@ function renderNodes() {
   let count = 0;
   const sortedRows=['mc','mt'].filter(id=>nodeFilter==='all'||nodeFilter===id).flatMap(id=>state[id].nodes.map(entry=>({id,entry}))).sort(compareNodeRows);
   for(const {id,entry} of sortedRows) {
-      if(isOwnNode(id,entry.id)) continue;
+
       const heard=Number(entry.lastHeard)||0;
-      if(!heard&&!el('nodes-show-unknown').checked) continue;
+      if(!heard&&!el('nodes-show-unknown').checked&&!isOwnNode(id,entry.id)) continue;
       if (favoritesOnly && !entry.favorite) continue;
       if(nodeKind==='infrastructure'&&!nodeInfrastructure(entry)) continue;
       if(nodeKind==='users'&&nodeInfrastructure(entry)) continue;
@@ -1178,18 +1186,31 @@ function clock() {
   el('hdr-time').textContent=two(now.getHours())+':'+two(now.getMinutes())+' - '+
     two(now.getDate())+'/'+two(now.getMonth()+1)+'/'+now.getFullYear();
 }
+function syncKnownSelection() {
+  for(const input of el('my-nodes-list').querySelectorAll('input[data-known-key]')) {
+    if(input.checked)selectedKnown.add(input.dataset.knownKey);
+    else selectedKnown.delete(input.dataset.knownKey);
+  }
+}
+for(const eventName of ['input','change'])el('my-nodes-list').addEventListener(eventName,event=>{
+  if(event.target.matches('input[data-known-key]'))updateConnectSelected();
+});
 function updateConnectSelected() {
+  if(!state)return;
+  syncKnownSelection();
   const pending=state.myNodes.filter(item=>!item.connected&&!item.connecting&&selectedKnown.has(item.radio+':'+item.id));
   el('connect-selected').disabled=!pending.length;
   el('disconnect-selected').disabled=!state.myNodes.some(item=>(item.connected||item.connecting)&&selectedKnown.has(item.radio+':'+item.id));
   el('disconnect-all').disabled=!(state.canDisconnectAll||state.devices.length||state.myNodes.some(item=>item.connecting));
 }
 function connectSelected() {
+  syncKnownSelection();
   const pending=state.myNodes.filter(item=>!item.connected&&!item.connecting&&selectedKnown.has(item.radio+':'+item.id));
   renderMyNodes();
   for(const item of pending) AndroidBridge.connectKnown(item.radio,item.id);
 }
 function disconnectSelected() {
+  syncKnownSelection();
   for(const item of state.myNodes.filter(item=>(item.connected||item.connecting)&&selectedKnown.has(item.radio+':'+item.id))) AndroidBridge.disconnectKnown(item.radio,item.id);
 }
 function renderBackupDevices() {

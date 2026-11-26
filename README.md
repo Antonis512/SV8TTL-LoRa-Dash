@@ -4,7 +4,11 @@ Standalone Android app for MeshCore and Meshtastic radios over Bluetooth or USB 
 
 User manuals: [English](USER-MANUAL.md) · [Ελληνικά](USER-MANUAL-el.md). Covers setup, Chat, presets, Map, sending options, backups and troubleshooting. The illustrated guides use fictional devices, users and nodes.
 
-Current version **0.10.36 (63)** adds DM position sharing, permanent/timed notification silencing for All/Contact/Node, full-size composer buttons, direct-only signal summaries, radio favorites, MT Ignore management and reversible geofence exclusions. Copernicus download setup is deferred. Physical phone/radio validation remains pending. See [build notes](BUILD-0.10.36.md).
+Current source **0.10.37 (64)** groups assigned Contact nodes across receiving radios, adds receiver details in Contacts and Nodes, protects saved node names against stale reports, and fixes Connect Selected synchronization. It also includes single-channel copying under each connected radio's Manage menu, verified secondary-channel removal, own-node visibility and short-screen composer font controls. Linking an Android contact imports saved details with duplicate-safe merging and a Contacts permission fallback. Node-list copying is not implemented. Physical phone/radio validation remains pending. See [build and source notes](BUILD-0.10.37.md).
+
+The 26 November update publishes source only. The downloadable APK and in-app update feed remain at **0.10.36 (63)** and do not include these source changes.
+
+Version **0.10.36 (63)** adds DM position sharing, permanent/timed notification silencing for All/Contact/Node, full-size composer buttons, direct-only signal summaries, radio favorites, MT Ignore management and reversible geofence exclusions. Copernicus download setup is deferred. Physical phone/radio validation remains pending. See [build notes](BUILD-0.10.36.md).
 
 Version **0.10.35 (62)** fixes switching Chat devices, direct-heard node filtering and missing MT receiver settings. Channel Chat adds Send position; template buttons appear when writing. Map search fits inside the filters, and grouped markers show a theme-coloured +N badge. Physical phone/radio validation remains pending. See [build notes](BUILD-0.10.35.md).
 

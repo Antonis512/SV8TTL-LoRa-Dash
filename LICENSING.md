@@ -1,5 +1,14 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 26 November 2026 — source update authorized
+
+The user authorized updating GitHub after the per-radio Manage menu and Android contact import changes. This publication updates source, tests and documentation only; the published APK and update feed remain unchanged. Contact-detail reading and permission fallback follow the official Android ContactsContract and common-intent documentation; no third-party code was copied. All existing attribution, application ID and signing configuration are retained. Phone/radio checks remain pending.
+
+## 25 November 2026 — 0.10.37 publication authorized
+
+The user authorized updating GitHub and the manuals. Assigned-node grouping and receiver details, name-report freshness protection, connection selection synchronization, channel copying/removal, own-node visibility and composer refinements are locally authored. No third-party code or assets were added. Existing MIT and dependency notices, application ID and signing configuration are retained. This remains an independent Android adaptation based on OverMesh Lite, not an official OverMesh release. Production signing and replacement licensing remain undecided; physical MC/MT validation remains pending.
+
+
 ## 21 November 2026 — 0.10.36 publication authorized
 
 The user authorized an APK build, English/Greek manual updates and GitHub publication, superseding the earlier source-only instruction. Notification silence rules, DM position sharing, direct signal visibility and composer layout changes are locally authored. This publication also includes the prepared radio favorites, MT Ignore and geofence exclusion changes described below. No third-party code or assets were copied for this update. Existing MIT attribution, provenance, application ID and debug signing configuration are preserved. Production signing and replacement licensing remain undecided. Physical phone/radio verification remains pending.

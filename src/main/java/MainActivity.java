@@ -1093,6 +1093,13 @@ public final class MainActivity extends Activity {
                 publishRadioUpdate();
             });
         }
+        @Override public void nodeName(String id,String name,long observedAt) {
+            int attempt=generation;
+            main.post(()->{
+                if(generation!=attempt)return;
+                storeUpdate(()->{try{ContactsStore.updateNodeName(chatStore,meshcore?"mc":"mt",id,name,observedAt);}catch(Exception error){debug("Contact node name update failed");}});
+            });
+        }
         @Override public void positionInfo(String id,NodePosition incoming) {
             int attempt=generation;
             main.post(()->{
@@ -1305,6 +1312,14 @@ public final class MainActivity extends Activity {
                 }
                 if (selected == this) refreshChannels(index);
                 publishRadioUpdate();
+            });
+        }
+        @Override public void channelRemoved(int index){
+            int attempt=generation;main.post(()->{if(generation!=attempt)return;
+                channelNames.remove(index);
+                String radio=meshcore?"mc":"mt",device=ownId;
+                storeUpdate(()->chatStore.removeChannel(radio,device,index));
+                if(selected==this)refreshChannels(-1);publishRadioUpdate();
             });
         }
         String channelSetupMessage="";
@@ -1868,6 +1883,9 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void nodeAction(String radio, String id, String action, String text) {
             main.post(() -> MainActivity.this.nodeAction(session(radio), id, action, text));
         }
+        @JavascriptInterface public void copyRadioChannels(String radio,String id){main.post(()->chooseChannelCopyTarget(radio,id));}
+        @JavascriptInterface public void favoriteOwnRadio(String key){main.post(()->{RadioSession s=session(key);if(s==null)return;
+            String pref="own_favorite:"+s.ownId;getPreferences(0).edit().putBoolean(pref,!getPreferences(0).getBoolean(pref,false)).apply();publish();});}
         @JavascriptInterface public void getNodeManagement(String radio,String id){main.post(()->sendNodeManagement(radio,id,""));}
         @JavascriptInterface public void getIgnoredNodes(){main.post(()->sendIgnoredNodes(""));}
         @JavascriptInterface public void setNodeIgnored(String device,String id,boolean ignored){main.post(()->setNodeIgnoredOnRadio(managedRadio("mt",device),id,ignored));}
@@ -1876,6 +1894,15 @@ public final class MainActivity extends Activity {
             if(!meshcore)return java.util.Base64.getEncoder().encodeToString(key);
             StringBuilder result=new StringBuilder();for(byte b:key)result.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return result.toString();
         }
+        @JavascriptInterface public void removeRadioChannel(String radio,String id,int index,String expectedName){main.post(()->{
+            RadioSession s=managedRadio(radio,id);
+            try{
+                if(new JSONObject(getPreferences(0).getString("member_config","{}")).optBoolean("enabled"))throw new IllegalArgumentException("Node management is unavailable in member mode");
+                if(s==null||!s.connected||s.loading||s.protocol==null)throw new IllegalArgumentException("Connect this radio and wait for its channels");
+                byte[] frame=s.protocol.channelAdmin().remove(index,expectedName);
+                s.channelSetupMessage="Removing channel… waiting for radio verification.";s.send(frame);sendNodeManagement(radio,id,"");
+            }catch(IllegalArgumentException|JSONException error){sendNodeManagement(radio,id,error.getMessage());}
+        });}
         @JavascriptInterface public void addRadioChannel(String radio,String id,String name,String mode,String secret){
             main.post(()->{
                 RadioSession s=managedRadio(radio,id);
@@ -2193,6 +2220,34 @@ public final class MainActivity extends Activity {
     private RadioSession managedRadio(String radio,String id){
         for(RadioSession s:sessions.values())if(s.connected&&s.ownId.equals(id)&&radio.equals(s.meshcore?"mc":"mt"))return s;
         return null;
+    }
+    private void chooseChannelCopyTarget(String radio,String id){
+        try{if(new JSONObject(getPreferences(0).getString("member_config","{}")).optBoolean("enabled"))return;}catch(JSONException invalid){return;}
+        RadioSession source=managedRadio(radio,id);
+        if(source==null||source.loading||source.protocol==null){nodeActionResult("Connect this radio and wait for loading to finish");return;}
+        if(source.channelNames.isEmpty()){nodeActionResult("No channels reported by this radio yet");return;}
+        List<RadioSession> targets=new ArrayList<>();
+        for(RadioSession s:sessions.values())if(s!=source&&s.connected&&!s.loading&&s.protocol!=null&&s.meshcore==source.meshcore)targets.add(s);
+        if(targets.isEmpty()){nodeActionResult("Connect a second radio of the same network first");return;}
+        String[] labels=new String[targets.size()];for(int j=0;j<labels.length;j++)labels[j]=targets.get(j).ownName;
+        new AlertDialog.Builder(this).setTitle("Destination radio").setItems(labels,(dd,t)->chooseChannelToCopy(source,targets.get(t))).setNegativeButton("Cancel",null).show();
+    }
+    private void chooseChannelToCopy(RadioSession source,RadioSession target){
+        List<Integer> slots=new ArrayList<>(source.channelNames.keySet());String[] labels=new String[slots.size()];
+        for(int i=0;i<labels.length;i++)labels[i]=source.channelNames.get(slots.get(i));
+        new AlertDialog.Builder(this).setTitle("Choose channel to copy").setItems(labels,(d,n)->{
+            int slot=slots.get(n);String title=source.channelNames.get(slot);byte[] secret=source.protocol.channelAdmin().secrets.get(slot);
+            if(secret==null){nodeActionResult("Channel key not reported. Reconnect the source radio first");return;}
+            final ChannelCopyPlan plan;
+            try{plan=new ChannelCopyPlan(source.protocol.channelAdmin(),target.protocol.channelAdmin(),slot,title,source.generation,target.generation);}
+            catch(IllegalArgumentException error){nodeActionResult(error.getMessage());return;}
+            new AlertDialog.Builder(this).setTitle("Copy "+title+"?").setMessage(source.ownName+" → "+target.ownName+". Only a reported empty slot will be used. Existing names are skipped; the primary channel and radio settings stay unchanged.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Copy",(dialog,which)->{
+                    try{
+                        target.send(plan.prepare(source.protocol.channelAdmin(),target.protocol.channelAdmin(),source.connected&&!source.loading,target.connected&&!target.loading,source.generation,target.generation,source.channelNames.get(slot)));nodeActionResult("Copy submitted. Check destination channel management for radio verification.");
+                    }catch(IllegalArgumentException error){nodeActionResult(error.getMessage());}
+                }).show();
+        }).setNegativeButton("Cancel",null).show();
     }
     private void sendNodeManagement(String radio,String id,String error){
         if(!pageReady||closing)return;
@@ -3361,6 +3416,12 @@ public final class MainActivity extends Activity {
                     item.put("latitude", node.latitude).put("longitude", node.longitude);
                 nodesJson.put(item);
             }
+        if(!session.ownId.isEmpty()&&!session.knownNodes.containsKey(session.ownId)){
+            nodesJson.put(new JSONObject().put("id",session.ownId).put("name",session.ownName).put("role","Own radio")
+                .put("ownRadio",true).put("hops",-1).put("lastHeard",0).put("savedOnly",!session.connected)
+                .put("favorite",getPreferences(0).getBoolean("own_favorite:"+session.ownId,false))
+                .put("ownStats",session.ownBattery+" · "+session.ownRadioUsage));
+        }
         // Browse saved discoveries without making them live radio contacts or send targets.
         String radio=session.meshcore?"mc":"mt";
         if(!session.loading)try(Cursor c=chatStore.getReadableDatabase().rawQuery("SELECT id,name,role,lat,lon FROM map_nodes WHERE radio=? AND device=?",new String[]{radio,session.ownId})) {
@@ -4671,6 +4732,7 @@ public final class MainActivity extends Activity {
     }
     @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grants) {
         super.onRequestPermissionsResult(requestCode,permissions,grants);
+        if(contactActions!=null&&contactActions.permissionResult(requestCode,grants))return;
         if(requestCode==MARK_LOCATION_PERMISSION){
             markPermissionPending=false;
             if(markLocationToken!=0){

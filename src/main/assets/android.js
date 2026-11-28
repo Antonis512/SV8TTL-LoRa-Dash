@@ -10,7 +10,7 @@ function updateTracerouteButton(button) {
   const seconds=Math.max(0,Math.ceil((mtTracerouteReadyAt-performance.now())/1000));
   button.disabled=seconds>0||button.dataset.traceUnavailable==='true';
   button.textContent=button.dataset.mtTraceroute+(seconds?` (${seconds}s)`:'');
-  button.title=seconds?'All Meshtastic destinations share a 30-second traceroute cooldown.':'';
+  button.title=seconds?tr('All Meshtastic destinations share a 30-second traceroute cooldown.'):'';
 }
 function updateTracerouteButtons() {
   for(const button of document.querySelectorAll('[data-mt-traceroute]'))updateTracerouteButton(button);
@@ -20,7 +20,7 @@ function updateMultiSendAvailability() {
   if(!state)return;
   const seconds=Math.max(0,Math.ceil((multiSendReadyAt-performance.now())/1000)),button=el('new-multi-send');
   button.disabled=state.multiSendEnabled && seconds>0;
-  button.textContent=seconds?`Send to multiple · ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`:'Send to multiple';
+  button.textContent=seconds?trTemplate("Send to multiple · ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}",[Math.floor(seconds/60),String(seconds%60).padStart(2,'0')]):tr('Send to multiple');
 }
 setInterval(updateMultiSendAvailability,1000);
 let network = 'left';
@@ -105,17 +105,17 @@ function finishHistoryView(host,context,radio,peer,ch,entries){
  host.scrollTop=keep?top:host.scrollHeight;
 }
 function insertUnreadDivider(host,view,entry){
- if(view.anchor&&entry.id===view.anchor)host.appendChild(node('div','unread-divider','Unread messages'));
+ if(view.anchor&&entry.id===view.anchor)host.appendChild(node('div','unread-divider',tr('Unread messages')));
 }
 function addHistoryLoader(host,radio,peer,ch,entries){
  const key=historyPageKey(radio,peer,ch),status=historyPages.get(key);
  if(!entries.length||status?.done)return;
- const button=node('button','history-older',status?.loading?'Loading older messages…':'Load older messages');
+ const button=node('button','history-older',status?.loading?tr('Loading older messages…'):tr('Load older messages'));
  button.disabled=!!status?.loading;
  button.onclick=()=>{
   if(historyPages.get(key)?.loading)return;
   historyPages.set(key,{loading:true,seeking:openHistory?.anchor&&!openHistory.positioned,host,height:host.scrollHeight,top:host.scrollTop});
-  button.disabled=true;button.textContent='Loading older messages…';
+  button.disabled=true;button.textContent=tr('Loading older messages…');
   AndroidBridge.loadOlder(state[radio].key,peer,ch,entries[0].id);
  };
  host.appendChild(button);
@@ -126,7 +126,7 @@ window.onHistoryPage=(key,peer,ch,count)=>{
  const done=count>=0&&count<100;historyPages.set(id,{done});
  const current=activeTab==='chat'&&openHistory?.key===id&&(peer?(dmSelection.peer===peer&&state?.[dmSelection.radio]?.key===key):(state?.[network]?.key===key&&channel[network]===ch));
  if(saved?.host&&current){if(count>=0&&!saved.seeking)saved.host.scrollTop=saved.top+saved.host.scrollHeight-saved.height;
-  const button=saved.host.querySelector('.history-older');if(button){button.disabled=false;button.textContent='Load older messages';if(done)button.remove();}
+  const button=saved.host.querySelector('.history-older');if(button){button.disabled=false;button.textContent=tr('Load older messages');if(done)button.remove();}
   if(count>0&&!done&&openHistory.anchor&&!openHistory.positioned)renderChat();}
 };
 let usersListVisible={left:true,right:true};
@@ -143,9 +143,9 @@ function changeChatFont(delta) {
   if(next!==chatFontStep) AndroidBridge.setChatFontStep(next);
 }
 function sideMagnifier(mode,radio) {
-  const button=node('button','side-magnifier','🔍 Enlarge');
+  const button=node('button','side-magnifier',tr('🔍 Enlarge'));
   button.type='button';
-  button.setAttribute('aria-label','Enlarge '+radioLabel(radio)+' '+(mode==='dm'?'direct messages':'channels')+' list');
+  button.setAttribute('aria-label',tr('Enlarge ')+radioLabel(radio)+' '+(mode==='dm'?'direct messages':'channels')+' list');
   button.onclick=()=>openSideZoom(mode,radio,button);
   return button;
 }
@@ -154,7 +154,7 @@ function openSideZoom(mode,radio,trigger) { radio=chatSlot(radio);
   const side=el((mode==='dm'?'dm':'channel')+'-'+sideId(radio)+'-side');
   const overlay=el('side-zoom');
   sideZoom={side,parent:side.parentNode,next:side.nextSibling,trigger,radio,step:sideFontSteps[radio]};
-  el('side-zoom-title').textContent=radioLabel(radio)+' '+(mode==='dm'?'DMs':'Channels');
+  el('side-zoom-title').textContent=radioLabel(radio)+' '+(mode==='dm'?'DMs':tr('Channels'));
   el('side-zoom-panel').style.setProperty('--side-zoom-extra',(sideZoom.step*2)+'px');
   overlay.classList.toggle('right',radio==='right');
   el('side-zoom-body').appendChild(side);
@@ -267,14 +267,14 @@ function messageTemplates(){return (state?.presetMessages||[]).map((item,index)=
 function renderPresetEditors(values) {
   values=messageTemplates();
   const list=el('preset-editor-list');clear(list);
-  if(!values.length)list.appendChild(node('p','help','No message templates saved.'));
+  if(!values.length)list.appendChild(node('p','help',tr('No message templates saved.')));
   values.forEach((value,index)=>{
     const row=node('div','preset-editor');
     const heading=node('div','preset-editor-heading');
     const label=node('strong','',value.title);
-    const edit=node('button','','Edit');edit.type='button';edit.onclick=()=>openMessageTemplateEditor(value.text,index,value.title);
-    const remove=node('button','','Remove');remove.type='button';remove.setAttribute('aria-label',`Remove message ${index+1}`);
-    remove.onclick=()=>{if(confirm('Delete this message template?'))AndroidBridge.savePresetMessages(JSON.stringify(values.filter((_,i)=>i!==index)));};
+    const edit=node('button','',tr('Edit'));edit.type='button';edit.onclick=()=>openMessageTemplateEditor(value.text,index,value.title);
+    const remove=node('button','',tr('Remove'));remove.type='button';remove.setAttribute('aria-label',trTemplate("Remove message ${index+1}",[index+1]));
+    remove.onclick=()=>{if(confirm(tr('Delete this message template?')))AndroidBridge.savePresetMessages(JSON.stringify(values.filter((_,i)=>i!==index)));};
     heading.append(label,edit,remove);row.append(heading,node('p','',value.text));list.appendChild(row);
   });
 }
@@ -289,18 +289,18 @@ function updateMessageTemplateBudget(){
   const used=new TextEncoder().encode(el('message-template-text').value.trim()).length;
   const mt=Number(state?.mt?.channelTextLimit)||200,mcDm=Number(state?.mc?.directTextLimit)||138;
   const mcChannel=Number(state?.mc?.channelTextLimit)||0;
-  el('message-template-budget').textContent=`UTF-8: ${used} used · MT ${mt-used} left of ${mt} · MC DM ${mcDm-used} left of ${mcDm}`+(mcChannel?` · MC channel ${mcChannel-used} left of ${mcChannel}`:' · MC channel limit needs a selected radio and channel');
+  el('message-template-budget').textContent=trTemplate("UTF-8: ${used} used · MT ${mt-used} left of ${mt} · MC DM ${mcDm-used} left of ${mcDm}",[used,mt-used,mt,mcDm-used,mcDm])+(mcChannel?` · MC channel ${mcChannel-used} left of ${mcChannel}`:tr(' · MC channel limit needs a selected radio and channel'));
 }
 function saveMessageTemplateEditor(){
   const value=el('message-template-text').value.trim(),title=el('message-template-title').value.trim(),items=messageTemplates();
-  if(!title||!value){el('message-template-status').textContent='Enter a name and message text.';return;}
-  if(editingMessageTemplate<0&&items.length>=50){el('message-template-status').textContent='Maximum 50 templates.';return;}
+  if(!title||!value){el('message-template-status').textContent=tr('Enter a name and message text.');return;}
+  if(editingMessageTemplate<0&&items.length>=50){el('message-template-status').textContent=tr('Maximum 50 templates.');return;}
   const item={title,text:value};if(editingMessageTemplate<0)items.push(item);else items[editingMessageTemplate]=item;
   AndroidBridge.savePresetMessages(JSON.stringify(items));closeMessageTemplateEditor();
 }
 function saveChatDraftAsTemplate(){const input=el(dmMode?'dm-input':'chat-input');openMessageTemplateEditor(input.value);}
 window.onPresetMessagesSaved=function(saved,message) {
-  el('preset-save-status').textContent=message;
+  el('preset-save-status').textContent=tr(message);
   if(saved)renderPresetEditors(state?.presetMessages||[]);
 };
 let presetTarget=null;
@@ -308,7 +308,7 @@ function openPresetPicker(inputId) {
   const input=el(inputId),choices=messageTemplates();
   presetTarget={inputId,position:input.selectionEnd};
   const list=el('preset-choice-list');clear(list);
-  if(!choices.length)list.appendChild(node('p','help','No message templates saved. Add them in Config → Message Templates.'));
+  if(!choices.length)list.appendChild(node('p','help',tr('No message templates saved. Add them in Config → Message Templates.')));
   choices.forEach((item,index)=>{
     const button=node('button','preset-choice');button.type='button';
     button.append(node('strong','',item.title),document.createTextNode(item.text));
@@ -347,14 +347,14 @@ function checkForUpdates() {
 }
 window.onUpdateStatus=function(status,message,offerUpdate=false) {
   if(offerUpdate && status==='available')openSettingsWindow('update');
-  el('update-message').textContent=message;
+  el('update-message').textContent=tr(message);
   el('update-confirm').hidden=status!=='available';
 };
 el('settings-window-history').addEventListener('cancel',()=>{pendingSavedView=null;resetMessageSearch('saved');});
 function viewSavedMessages(radio,id) {
   pendingSavedView={radio,id};savedNode=null;
   resetMessageSearch('saved');
-  clear(el('my-node-history'));el('my-node-history').appendChild(node('p','help','Loading saved messages…'));
+  clear(el('my-node-history'));el('my-node-history').appendChild(node('p','help',tr('Loading saved messages…')));
   openSettingsWindow('history');AndroidBridge.viewSaved(radio,id);
 }
 function setNetwork(id) {
@@ -396,7 +396,7 @@ function renderDeviceSelector(slot) {
   // Defer radio/unread updates until the user finishes with the picker.
   menu.onblur=()=>renderDeviceSelector(slot);
   if(document.activeElement===menu)return;
-  const options=[['','No device'],...devices.map(item=>[
+  const options=[['',tr('No device')],...devices.map(item=>[
     item.radio+'|'+item.key,
     (item.unread?'● ':'')+(item.name||item.id)+' · '+item.radio.toUpperCase()+
       (item.connected===false||item.key.startsWith('saved:')?' · offline':'')
@@ -442,12 +442,12 @@ function openDmScreen(saved=false) {
 }
 function showConversationDelete(slot,peer) {
   const key=state[slot].key,card=dialogCard(dmName(slot,peer));
-  dialogAction(card,'Delete this Conversation',()=>{
+  dialogAction(card,tr('Delete this Conversation'),()=>{
     dmDrafts.delete(dmDraftKey(slot,peer));
     el('dm-context').hidden=true;AndroidBridge.deleteConversation(key,peer);
     if(dmSelection.radio===slot&&dmSelection.peer===peer){dmSelection={radio:null,peer:null};el('dm-input').value='';renderChat();}
   });
-  dialogAction(card,'Cancel',()=>el('dm-context').hidden=true);
+  dialogAction(card,tr('Cancel'),()=>el('dm-context').hidden=true);
 }
 function selectDmPeer(radio,peer) {
   radio=chatSlot(radio);dmMode=true;
@@ -479,19 +479,19 @@ function showDmContext(radio,peer) {
   card.appendChild(node('strong','',dmName(radio,peer)+' · '+radioLabel(radio)));
   const contact=state[radio].nodes.find(item=>item.id===peer);
   if(contact) card.appendChild(nodeDetails(radio,contact));
-  const clearButton=node('button','','Clear DM history');
+  const clearButton=node('button','',tr('Clear DM history'));
   clearButton.onclick=()=>{overlay.hidden=true;AndroidBridge.clearDirect(radio,peer);};
   card.appendChild(clearButton);
-  const line=node('div','','Erase messages older than');
+  const line=node('div','',tr('Erase messages older than'));
   const days=node('input','form-input'); days.type='number'; days.min='1'; days.value='30';
   line.append(days,document.createTextNode(' days')); card.appendChild(line);
-  const erase=node('button','','Erase older messages');
+  const erase=node('button','',tr('Erase older messages'));
   erase.onclick=()=>{if(Number(days.value)>=1){overlay.hidden=true;AndroidBridge.eraseDirectOlder(radio,peer,Number(days.value));}};
   card.appendChild(erase);
-  const exportButton=node('button','','Export chat as CSV');
+  const exportButton=node('button','',tr('Export chat as CSV'));
   exportButton.onclick=()=>{overlay.hidden=true;AndroidBridge.exportDirectCsv(radio,peer);};
   card.appendChild(exportButton);
-  const cancel=node('button','','Cancel'); cancel.onclick=()=>overlay.hidden=true;
+  const cancel=node('button','',tr('Cancel')); cancel.onclick=()=>overlay.hidden=true;
   card.appendChild(cancel); overlay.appendChild(card);
   overlay.onclick=event=>{if(event.target===overlay) overlay.hidden=true;};
 }
@@ -501,15 +501,15 @@ function bindDmContact(button,radio,peer,allowExport=true) {
 function renderDmSide(radio) {
   const side=el('dm-'+sideId(radio)+'-side'); clear(side);
   side.appendChild(sideMagnifier('dm',radio));
-  if(state[radio].loading) side.appendChild(node('div','dm-side-empty','Loading '+radioLabel(radio)+' messages…'));
+  if(state[radio].loading) side.appendChild(node('div','dm-side-empty',tr('Loading ')+radioLabel(radio)+' messages…'));
   if(!state[radio].connected) {
-    side.appendChild(node('div','dm-side-empty','Offline history · reconnect in Config to send'));
+    side.appendChild(node('div','dm-side-empty',tr('Offline history · reconnect in Config to send')));
   }
   const directs=state[radio].directs;
   const received=Object.keys(directs).filter(peer=>directs[peer].some(m=>!m.reaction))
     .sort((a,b)=>dmName(radio,a).localeCompare(dmName(radio,b)));
-  side.appendChild(node('div','dm-section-title','Saved conversations'));
-  if(!received.length) side.appendChild(node('div','dm-side-empty',state[radio].loading?'Loading…':'None yet'));
+  side.appendChild(node('div','dm-section-title',tr('Saved conversations')));
+  if(!received.length) side.appendChild(node('div','dm-side-empty',state[radio].loading?tr('Loading…'):tr('None yet')));
   for(const peer of received) {
     const unread=conversationUnread(radio,peer,-1);
     const selected=dmSelection.radio===radio && dmSelection.peer===peer;
@@ -517,10 +517,10 @@ function renderDmSide(radio) {
     button.title=dmName(radio,peer); bindHold(button,()=>showConversationDelete(radio,peer),()=>selectDmPeer(radio,peer)); side.appendChild(button);
   }
   if(savedDmMode)return;
-  side.appendChild(node('div','dm-section-title','All contacts'));
+  side.appendChild(node('div','dm-section-title',tr('All contacts')));
   const contacts=state[radio].nodes.filter(item=>nodeMessageable(radio,item))
     .sort(compareContacts);
-  if(!contacts.length) side.appendChild(node('div','dm-side-empty',state[radio].loading?'Loading…':'No contacts'));
+  if(!contacts.length) side.appendChild(node('div','dm-side-empty',state[radio].loading?tr('Loading…'):tr('No contacts')));
   for(const contact of contacts) {
     const unread=conversationUnread(radio,contact.id,-1);
     const selected=dmSelection.radio===radio && dmSelection.peer===contact.id;
@@ -533,7 +533,7 @@ function appendMessageHops(bubble,radio,entry) {
   if(Number.isInteger(entry.hops)&&entry.hops>=0)
     bubble.appendChild(node('div','message-hops',entry.hops+(entry.hops===1?' hop':' hops')));
   else if(!entry.own&&radioType(radio)==='mt')
-    bubble.appendChild(node('div','message-hops','Hop count unknown'));
+    bubble.appendChild(node('div','message-hops',tr('Hop count unknown')));
 }
 function renderDmScreen() {
   renderDmSide('left'); renderDmSide('right');
@@ -542,10 +542,10 @@ function renderDmScreen() {
   if(!radio || !peer) {
     clear(history);openHistory=null;
     resetMessageSearch('dm');
-    el('dm-chat-title').textContent='Choose a contact';
-    history.appendChild(node('div','empty-panel','Select a name to view direct messages.'));
+    el('dm-chat-title').textContent=tr('Choose a contact');
+    history.appendChild(node('div','empty-panel',tr('Select a name to view direct messages.')));
     el('dm-reply').disabled=true; el('dm-position').disabled=true; el('dm-input').disabled=true;
-    el('dm-input').placeholder='Choose a conversation';
+    el('dm-input').placeholder=tr('Choose a conversation');
     updateMessageBudget(el('dm-input'));
     return;
   }
@@ -567,12 +567,12 @@ function renderDmScreen() {
     appendReactions(bubble,radio,entry,entries);
     history.appendChild(bubble);
   }
-  if(!entries.length) history.appendChild(node('div','empty-panel',state[radio].loading?'Loading messages…':'No messages yet. Start a conversation below.'));
+  if(!entries.length) history.appendChild(node('div','empty-panel',state[radio].loading?tr('Loading messages…'):tr('No messages yet. Start a conversation below.')));
   const searching=renderMessageSearchResults('dm',history);
   const canReply=state[radio].connected&&state[radio].nodes.some(item=>item.id===peer && nodeMessageable(radio,item));
   el('dm-reply').disabled=!canReply; el('dm-position').disabled=!canReply; el('dm-input').disabled=false;
   updateMessageBudget(el('dm-input'));
-  el('dm-input').placeholder=canReply?'Direct message…':!state[radio].connected?'Reconnect this radio in Config to send':'Wait for this contact to load';
+  el('dm-input').placeholder=canReply?tr('Direct message…'):!state[radio].connected?tr('Reconnect this radio in Config to send'):tr('Wait for this contact to load');
   if(!searching&&activeTab==='chat')finishHistoryView(history,context,radio,peer,-1,entries);
 }
 function setNodeFilter(id) {
@@ -586,9 +586,9 @@ function toggleFavorites() {
   renderNodes();
 }
 function setNodeKind(value) { nodeKind=value; renderNodes(); }
-function displayRole(radio,role){return radioType(radio)==='mc'&&role==='User'?'Companion':role;}
+function displayRole(radio,role){return tr(radioType(radio)==='mc'&&role==='User'?'Companion':role);}
 function populateRoleMenu(menu,rows,selected='all'){
-  clear(menu);const all=node('option','','All roles');all.value='all';menu.appendChild(all);
+  clear(menu);const all=node('option','',tr('All roles'));all.value='all';menu.appendChild(all);
   for(const radio of ['mc','mt']){
     const roles=[...new Set(rows.filter(row=>row.radio===radio).map(row=>row.role).filter(Boolean))]
       .sort((a,b)=>displayRole(radio,a).localeCompare(displayRole(radio,b)));
@@ -637,68 +637,68 @@ function nodeDetails(radio, entry) {
   details.appendChild(node('div', 'node-facts', displayRole(radio,entry.role) + (entry.model ? ' · ' + entry.model : '') + ' · ' + entry.id));
   details.appendChild(node('div','node-facts',heardDescription(radioType(radio),entry.heardSettings)));
   details.appendChild(nodeSignalReport(radioType(radio),entry));
-  if(entry.favoritePending)details.appendChild(node('div','node-facts','Favorite change pending radio confirmation'));
-  if(entry.ignored)details.appendChild(node('div','node-facts','Ignored on this radio'));
+  if(entry.favoritePending)details.appendChild(node('div','node-facts',tr('Favorite change pending radio confirmation')));
+  if(entry.ignored)details.appendChild(node('div','node-facts',tr('Ignored on this radio')));
   nodeButton(details,geofenceNodeActionLabel(radioType(radio),entry.id),'',radio,entry,()=>toggleNodeGeofence(radioType(radio),entry.id));
-  nodeButton(details,'Enter Name','',radio,entry,()=>enterNodeName(radio,entry));
-  nodeButton(details,'Assign to Contact','',radio,entry,()=>assignNodeToContact(radio,entry));
-  if(entry.id!==state[radio].ownId) nodeButton(details,'Forget Node','',radio,entry,()=>forgetNode(radio,entry));
+  nodeButton(details,tr('Enter Name'),'',radio,entry,()=>enterNodeName(radio,entry));
+  nodeButton(details,tr('Assign to Contact'),'',radio,entry,()=>assignNodeToContact(radio,entry));
+  if(entry.id!==state[radio].ownId) nodeButton(details,tr('Forget Node'),'',radio,entry,()=>forgetNode(radio,entry));
   if(entry.ownRadio){
-    nodeButton(details,entry.favorite?'★ Favorited on phone':'☆ Favorite on phone','',radio,entry,()=>AndroidBridge.favoriteOwnRadio(state[radio].key));
-    details.appendChild(node('p','help','Own radio statistics: '+(entry.ownStats||'Waiting for radio statistics')));
+    nodeButton(details,entry.favorite?tr('★ Favorited on phone'):tr('☆ Favorite on phone'),'',radio,entry,()=>AndroidBridge.favoriteOwnRadio(state[radio].key));
+    details.appendChild(node('p','help',tr('Own radio statistics: ')+(entry.ownStats||tr('Waiting for radio statistics'))));
     return details;
   }
   if (state[radio].connected && !entry.savedOnly) {
     const actions = node('div', 'node-actions');
-    nodeButton(actions, entry.favorite ? '★ Favorited' : '☆ Add to Favorites', 'favorite', radio, entry);
+    nodeButton(actions, entry.favorite ? tr('★ Favorited') : tr('☆ Add to Favorites'), 'favorite', radio, entry);
     if(nodeMessageable(radio,entry))
-      nodeButton(actions,'DM','dm',radio,entry,()=>openDmForNode(radio,entry));
+      nodeButton(actions,tr('DM'),'dm',radio,entry,()=>openDmForNode(radio,entry));
     if (radioType(radio) === 'mt') {
       if(entry.id!==state[radio].ownId){
-        const ignore=nodeButton(actions,entry.ignorePending?'Waiting for radio…':entry.ignored?'Unignore':'Ignore',entry.ignored?'unignore':'ignore',radio,entry);
+        const ignore=nodeButton(actions,entry.ignorePending?tr('Waiting for radio…'):entry.ignored?tr('Unignore'):tr('Ignore'),entry.ignored?'unignore':'ignore',radio,entry);
         ignore.disabled=!!entry.ignorePending;
-        ignore.title='Stop receiving and relaying packets originating from this node on this radio';
+        ignore.title=tr('Stop receiving and relaying packets originating from this node on this radio');
       }
       nodeButton(actions, 'TR', 'tr', radio, entry);
-      nodeButton(actions, 'Req info', 'req', radio, entry);
-      nodeButton(actions, 'Req position', 'pos', radio, entry);
+      nodeButton(actions, tr('Req info'), 'req', radio, entry);
+      nodeButton(actions, tr('Req position'), 'pos', radio, entry);
 
     } else {
-      if(['Repeater','Room server'].includes(entry.role))nodeButton(actions,'Ping','ping',radio,entry,()=>showPingOptions(radio,entry));
+      if(['Repeater','Room server'].includes(entry.role))nodeButton(actions,tr('Ping'),'ping',radio,entry,()=>showPingOptions(radio,entry));
       if(entry.id!==state[radio].ownId && /^[a-f0-9]{12}$/i.test(entry.id)){
-        nodeButton(actions,'Path Discovery','tr',radio,entry);
-        nodeButton(actions,'Reset Path','reset-path',radio,entry);
+        nodeButton(actions,tr('Path Discovery'),'tr',radio,entry);
+        nodeButton(actions,tr('Reset Path'),'reset-path',radio,entry);
       }
-      if(entry.hops>0)nodeButton(actions, 'Trace learned repeaters', 'trace-path', radio, entry);
+      if(entry.hops>0)nodeButton(actions, tr('Trace learned repeaters'), 'trace-path', radio, entry);
       if (entry.role === 'Repeater' || entry.role === 'Sensor')
-        nodeButton(actions, 'Req status', 'req', radio, entry);
+        nodeButton(actions, tr('Req status'), 'req', radio, entry);
     }
-    nodeButton(actions, 'Share', 'share', radio, entry);
+    nodeButton(actions, tr('Share'), 'share', radio, entry);
     details.appendChild(actions);
-    if(radioType(radio)==='mc' && entry.hops>0)details.appendChild(node('p','help','Trace learned repeaters tests the saved repeater path for this contact and reports signal quality on the return trip.'));
+    if(radioType(radio)==='mc' && entry.hops>0)details.appendChild(node('p','help',tr('Trace learned repeaters tests the saved repeater path for this contact and reports signal quality on the return trip.')));
   }
-  const mapButton=nodeButton(details,'Show on map','map',radio,entry,()=>openMapNode(radioType(radio),entry.id,state[radio].ownId));
+  const mapButton=nodeButton(details,tr('Show on map'),'map',radio,entry,()=>openMapNode(radioType(radio),entry.id,state[radio].ownId));
   mapButton.disabled=!mapHasPosition({lat:entry.latitude,lon:entry.longitude});
-  if(mapButton.disabled)mapButton.title='Position unavailable';
-  if(radioType(radio)==='mt')nodeButton(details,'Signal Quality','',radio,entry,()=>openSignalHistory(state[radio].key,entry.id));
-  if(state[radio].lastTrace?.target===entry.id) nodeButton(details,state[radio].lastTrace.action==='discovery'?'Last path discovery':'Last trace','',radio,entry,()=>onTraceResult(state[radio].lastTrace));
+  if(mapButton.disabled)mapButton.title=tr('Position unavailable');
+  if(radioType(radio)==='mt')nodeButton(details,tr('Signal Quality'),'',radio,entry,()=>openSignalHistory(state[radio].key,entry.id));
+  if(state[radio].lastTrace?.target===entry.id) nodeButton(details,state[radio].lastTrace.action==='discovery'?tr('Last path discovery'):tr('Last trace'),'',radio,entry,()=>onTraceResult(state[radio].lastTrace));
   return details;
 }
 function localNodeName(radio,id) { return state?.nodeNames?.[radioType(radio)+':'+id]||''; }
 function namedNode(radio,id,name) {const label=localNodeName(radio,id);return (name||id)+(label?' · '+label:'');}
 function enterNodeName(radio,entry) {
-  const card=dialogCard('Enter Name · '+(entry.name||entry.id));
-  card.appendChild(node('p','help','A private name on this phone. Leave blank to remove it.'));
-  if(entry.id.startsWith('heard-name:'))card.appendChild(node('p','help','Only the sender’s advertised name is available in this message. This label applies to messages using that name.'));
-  const input=node('input','form-input');input.type='text';input.maxLength=80;input.value=localNodeName(radio,entry.id);input.setAttribute('aria-label','Node name');card.appendChild(input);
-  dialogAction(card,'Save',()=>{AndroidBridge.setNodeName(radioType(radio),entry.id,input.value.trim());el('dm-context').hidden=true;});
+  const card=dialogCard(tr('Enter Name · ')+(entry.name||entry.id));
+  card.appendChild(node('p','help',tr('A private name on this phone. Leave blank to remove it.')));
+  if(entry.id.startsWith('heard-name:'))card.appendChild(node('p','help',tr('Only the sender’s advertised name is available in this message. This label applies to messages using that name.')));
+  const input=node('input','form-input');input.type='text';input.maxLength=80;input.value=localNodeName(radio,entry.id);input.setAttribute('aria-label',tr('Node name'));card.appendChild(input);
+  dialogAction(card,tr('Save'),()=>{AndroidBridge.setNodeName(radioType(radio),entry.id,input.value.trim());el('dm-context').hidden=true;});
   cancelDialog(card);input.focus();
 }
 function forgetNode(radio,entry) {
   const key=state[radio].key;
-  const card=dialogCard('Forget Node · '+(entry.name||entry.id));
-  card.appendChild(node('p','help','Delete this node’s local name, messages, heard history, map/position details and contact assignments from this app across all '+radioType(radio).toUpperCase()+' devices? People’s profiles are kept. The node can reappear when heard or loaded from a radio again.'));
-  dialogAction(card,'Forget Node',()=>{AndroidBridge.forgetNode(key,entry.id,entry.name||'');el('dm-context').hidden=true;});
+  const card=dialogCard(tr('Forget Node · ')+(entry.name||entry.id));
+  card.appendChild(node('p','help',tr('Delete this node’s local name, messages, heard history, map/position details and contact assignments from this app across all ')+radioType(radio).toUpperCase()+tr(' devices? People’s profiles are kept. The node can reappear when heard or loaded from a radio again.')));
+  dialogAction(card,tr('Forget Node'),()=>{AndroidBridge.forgetNode(key,entry.id,entry.name||'');el('dm-context').hidden=true;});
   cancelDialog(card);
 }
 function showMessageNodeActions(radio,id) {
@@ -712,7 +712,7 @@ function showMessageNodeActions(radio,id) {
   card.dataset.actionKey=state[radio].key;
   const detail=nodeDetails(radio,entry);
   card.appendChild(detail);
-  const close=node('button','','Close'); close.onclick=()=>overlay.hidden=true;
+  const close=node('button','',tr('Close')); close.onclick=()=>overlay.hidden=true;
   card.appendChild(close);
   card.tabIndex=-1; card.focus();
   overlay.onclick=event=>{if(event.target===overlay) overlay.hidden=true;};
@@ -727,10 +727,10 @@ function renderSoundConfig() {
   el('disconnect-audio').checked=state.disconnectAudioEnabled!==false;
   for(const kind of [...(mode==='shared'?['shared']:['mc','mt','dm']),'disconnect','geofence']) {
     const row=node('div','sound-row');
-    row.appendChild(node('strong','',kind==='geofence'?'Geofence alert':kind==='disconnect'?'Device disconnected':kind==='shared'?'All messages':kind.toUpperCase()));
-    const choose=node('button','',state.sound[kind]?.selected?'Change system sound':'Select system sound');
+    row.appendChild(node('strong','',kind==='geofence'?tr('Geofence alert'):kind==='disconnect'?tr('Device disconnected'):kind==='shared'?tr('All messages'):kind.toUpperCase()));
+    const choose=node('button','',state.sound[kind]?.selected?tr('Change system sound'):tr('Select system sound'));
     choose.onclick=()=>AndroidBridge.pickSound(kind); row.appendChild(choose);
-    const label=node('label','',' Play ');
+    const label=node('label','',tr(' Play '));
     const repeats=node('select','form-input');
     for(let i=1;i<=3;i++){const option=node('option','',i+' time'+(i>1?'s':''));option.value=i;repeats.appendChild(option);}
     repeats.value=String(state.sound[kind]?.repeats||1);
@@ -739,6 +739,7 @@ function renderSoundConfig() {
   }
 }
 function renderChat() {
+  window.renderPersistentJobs?.();
   if(state?.memberConfig?.enabled){renderMemberChat();return;}
   el(dmMode?'dm-center':'channels-center').prepend(el('chat-font-bar'));
   if (!state) return;
@@ -746,7 +747,7 @@ function renderChat() {
     const button=el('chat-advert-'+side);
     button.hidden=radioType(side)!=='mc'||!state[side].ownId;
     button.disabled=!state[side].connected;
-    button.setAttribute('aria-label','Send advert from '+side+' device');
+    button.setAttribute('aria-label',tr('Send advert from ')+side+' device');
   }
   const listsVisible=Number(usersListVisible.left)+Number(usersListVisible.right);
   el('chat-font-size').textContent=(listsVisible===2?13:listsVisible===1?16:18)+chatFontStep+' px';
@@ -775,7 +776,7 @@ function renderChat() {
     renderHeaderChannelSelector(id);
     renderDeviceSelector(id);
     const toggle=el('toggle-'+sideId(id)+'-users');
-    toggle.textContent=usersListVisible[id]?'Users ▾':'Users ▸';
+    toggle.textContent=usersListVisible[id]?tr('Users ▾'):tr('Users ▸');
     toggle.classList.toggle('active',usersListVisible[id]);
     toggle.setAttribute('aria-expanded',String(usersListVisible[id]));
   }
@@ -796,7 +797,7 @@ function renderHeaderChannelSelector(id) {
   const available=state[id].channels;
   if(!available.some(c=>c.index===channel[id]) && available.length) channel[id]=available[0].index;
   if(!available.length) {
-    const option=node('option','',state[id].loading?'Loading…':'No channels');
+    const option=node('option','',state[id].loading?tr('Loading…'):tr('No channels'));
     option.value=''; select.appendChild(option); select.disabled=true;
   } else {
     select.disabled=false;
@@ -809,20 +810,20 @@ function renderHeaderChannelSelector(id) {
 function renderChannelSide(id) {
   const side=el('channel-'+sideId(id)+'-side'); clear(side);
   side.appendChild(sideMagnifier('channel',id));
-  if(state[id].loading) side.appendChild(node('div','dm-side-empty','Loading '+radioLabel(id)+' messages…'));
+  if(state[id].loading) side.appendChild(node('div','dm-side-empty',tr('Loading ')+radioLabel(id)+' messages…'));
   const available=state[id].channels;
-  side.appendChild(node('div','dm-section-title','New messages in:'));
+  side.appendChild(node('div','dm-section-title',tr('New messages in:')));
   const channels=available.filter(item=>conversationUnread(id,'',item.index));
-  if(!channels.length) side.appendChild(node('div','dm-side-empty',state[id].loading?'Loading…':'None'));
+  if(!channels.length) side.appendChild(node('div','dm-side-empty',state[id].loading?tr('Loading…'):tr('None')));
   for(const item of channels) {
     const button=node('button','channel-choice unread'+
       (network===id && channel[id]===item.index?' active':''),item.name);
     button.onclick=()=>selectChannel(id,item.index); side.appendChild(button);
   }
-  side.appendChild(node('div','dm-section-title','Messageable users'));
+  side.appendChild(node('div','dm-section-title',tr('Messageable users')));
   const contacts=state[id].nodes.filter(item=>nodeMessageable(id,item))
     .sort(compareContacts);
-  if(!contacts.length) side.appendChild(node('div','dm-side-empty',state[id].loading?'Loading contacts…':'No users available'));
+  if(!contacts.length) side.appendChild(node('div','dm-side-empty',state[id].loading?tr('Loading contacts…'):tr('No users available')));
   for(const contact of contacts) {
     const button=node('button','dm-contact'+(conversationUnread(id,contact.id,-1)?' unread':''),contact.name||contact.id);
     button.title=(contact.name||contact.id)+' · '+contact.id;
@@ -837,7 +838,7 @@ function renderChannelsScreen() {
   const chatTitle=el('channel-chat-title');
   chatTitle.textContent='';
   if(selectedChannel) chatTitle.appendChild(node('span','channel-name',selectedChannel.name));
-  else chatTitle.appendChild(document.createTextNode('Choose a channel'));
+  else chatTitle.appendChild(document.createTextNode(tr('Choose a channel')));
   chatTitle.appendChild(document.createTextNode(' · '+radioLabel(network)+(radio.ownName?' · '+radio.ownName:'')));
   const messages = el('chat-messages');
   const entries=selectedChannel?chronologicalHistory(radio.chats[String(channel[network])]||[]):[];
@@ -852,7 +853,7 @@ function renderChannelsScreen() {
     const body = node('div', 'body');
     if(entry.replyId) {
       const original=entries.find(item=>item.packetId===entry.replyId);
-      bubble.appendChild(node('div','message-quote',original?'↪ '+messageIdentity(network,original).name+': '+messageIdentity(network,original).text:'↪ Reply to an unavailable message'));
+      bubble.appendChild(node('div','message-quote',original?'↪ '+messageIdentity(network,original).name+': '+messageIdentity(network,original).text:tr('↪ Reply to an unavailable message')));
     }
     const identity=messageIdentity(network,entry);
     if(!appendLocationPreview(body,identity))appendLinkedText(body,identity.text);
@@ -860,8 +861,8 @@ function renderChannelsScreen() {
     appendMessageDelivery(bubble,network,entry,true);
     if(radioType(network)==='mc'&&entry.own) {
       const count=Number.isInteger(entry.heardRepeats)?entry.heardRepeats:-1;
-      const repeats=node('button','message-repeats',count<0?'Heard repeats: unavailable':'Heard repeats: '+count);
-      repeats.title='Copies of this channel message heard being rebroadcast by your radio. This is not recipient delivery or a count of distinct repeaters.';
+      const repeats=node('button','message-repeats',count<0?tr('Heard repeats: unavailable'):tr('Heard repeats: ')+count);
+      repeats.title=tr('Copies of this channel message heard being rebroadcast by your radio. This is not recipient delivery or a count of distinct repeaters.');
       repeats.type='button';repeats.onclick=event=>{event.stopPropagation();showMessagePath(entry,true,network);};
       bubble.appendChild(repeats);
     }
@@ -874,11 +875,11 @@ function renderChannelsScreen() {
   const searching=renderMessageSearchResults('channel',messages);
   const empty = el('chat-empty');
   empty.hidden = searching||entries.length > 0;
-  if (radio.loading) empty.textContent = 'Messages are still loading from this radio…';
-  else if (!radio.connected) empty.textContent = 'Offline history · reconnect this device to send.';
-  else empty.textContent = 'No messages in this channel.';
+  if (radio.loading) empty.textContent = tr('Messages are still loading from this radio…');
+  else if (!radio.connected) empty.textContent = tr('Offline history · reconnect this device to send.');
+  else empty.textContent = tr('No messages in this channel.');
   const canSend=radio.connected && !!selectedChannel;
-  el('chat-input').placeholder=canSend?'Message '+selectedChannel.name+'…':!radio.connected?'Reconnect this device to send':'Wait for channel names…';
+  el('chat-input').placeholder=canSend?tr('Message ')+selectedChannel.name+'…':!radio.connected?tr('Reconnect this device to send'):tr('Wait for channel names…');
   el('chat-input').disabled = false;
   el('chat-send').disabled = !canSend;
   el('chat-position').disabled = !canSend;
@@ -900,36 +901,36 @@ function renderMyNodes() {
     }
     return;
   }
-  if (!known.length) list.appendChild(node('div','empty-panel','No saved radios yet. Scan and connect one to add it here.'));
+  if (!known.length) list.appendChild(node('div','empty-panel',tr('No saved radios yet. Scan and connect one to add it here.')));
   for (const item of known) {
     const card = node('section','radio-card'+(item.unread?' unread-node':''));
     const picker=node('label','known-node-picker');
     const checked=node('input',''); checked.type='checkbox'; checked.dataset.knownKey=item.radio+':'+item.id;
     checked.checked=selectedKnown.has(checked.dataset.knownKey);
-    checked.setAttribute('aria-label','Select '+(item.name||item.id));
-    picker.append(checked,node('span','',item.connected?'Connected':'Select'));
+    checked.setAttribute('aria-label',tr('Select ')+(item.name||item.id));
+    picker.append(checked,node('span','',item.connected?tr('Connected'):tr('Select')));
     card.appendChild(picker);
     card.appendChild(node('span','radio-type-badge',(item.detectedRadio||item.radio).toUpperCase()));
-    if(item.connecting) {const progress=node('progress','known-progress');progress.setAttribute('aria-label','Connecting radio');card.append(progress,node('div','node-facts',item.connectionStatus||'Connecting…'));}
+    if(item.connecting) {const progress=node('progress','known-progress');progress.setAttribute('aria-label',tr('Connecting radio'));card.append(progress,node('div','node-facts',item.connectionStatus||tr('Connecting…')));}
     const heading=node('div','known-node-heading');
     heading.appendChild(node('strong','',item.name || item.id));
-    if(item.connected) heading.appendChild(node('strong','connected-label','Connected'));
+    if(item.connected) heading.appendChild(node('strong','connected-label',tr('Connected')));
     card.appendChild(heading);
     if(item.connected) {
       const missing=item.radio==='mc'?'TX airtime · RX airtime':'AirUtil TX · ChUtil';
-      card.appendChild(node('div','node-facts',(item.radioUsage || missing+' · Not reported')+' · Battery: '+(item.battery||'—')));
+      card.appendChild(node('div','node-facts',(item.radioUsage || missing+tr(' · Not reported'))+tr(' · Battery: ')+(item.battery||'—')));
     }
-    if(item.unread) card.appendChild(node('span','unread-badge',item.dmUnread?'Unread direct messages':'Unread messages'));
-    card.appendChild(node('div','node-facts',(item.detectedRadio||item.radio).toUpperCase() + (item.id ? ' · ' + (item.radio==='mc'?'Public key: ':'Node ID: ') + item.id : '') +
-      (item.connected ? ' · Connected' : '') + (item.lastSeen ? ' · Last connected ' + new Date(item.lastSeen).toLocaleString(undefined,{hourCycle:'h23'}) : ' · From an older app version')));
+    if(item.unread) card.appendChild(node('span','unread-badge',item.dmUnread?tr('Unread direct messages'):tr('Unread messages')));
+    card.appendChild(node('div','node-facts',(item.detectedRadio||item.radio).toUpperCase() + (item.id ? ' · ' + (item.radio==='mc'?tr('Public key: '):tr('Node ID: ')) + item.id : '') +
+      (item.connected ? tr(' · Connected') : '') + (item.lastSeen ? tr(' · Last connected ') + new Date(item.lastSeen).toLocaleString(undefined,{hourCycle:'h23'}) : tr(' · From an older app version'))));
     const actions = node('div','actions');
-    const view = node('button','','View messages');
+    const view = node('button','',tr('View messages'));
     view.onclick = () => viewSavedMessages(item.radio,item.id);
-    const remove = node('button','disconnect-btn','Remove');
+    const remove = node('button','disconnect-btn',tr('Remove'));
     remove.onclick = () => AndroidBridge.removeKnown(item.radio,item.id);
-    const connect=node('button','',item.connected||item.connecting?'Disconnect':'Connect');
+    const connect=node('button','',item.connected||item.connecting?tr('Disconnect'):tr('Connect'));
     connect.onclick=()=>item.connected||item.connecting?AndroidBridge.disconnectKnown(item.radio,item.id):AndroidBridge.connectKnown(item.radio,item.id);
-    const manage=node('button','','Manage');
+    const manage=node('button','',tr('Manage'));
     manage.onclick=()=>openNodeManagement(item);
     actions.append(connect,manage,view,remove); card.appendChild(actions); list.appendChild(card);
   }
@@ -952,12 +953,12 @@ window.onSavedNode = function (data) {
 function renderSavedHistory() {
   const host=el('my-node-history'); clear(host);
   if (!savedNode) return;
-  host.appendChild(node('div','section-heading','Saved messages · '+savedNode.radio.toUpperCase()+' · '+savedNode.id));
+  host.appendChild(node('div','section-heading',tr('Saved messages · ')+savedNode.radio.toUpperCase()+' · '+savedNode.id));
   const actions=node('div','actions');
-  const older=node('button','','Open in Chat');older.onclick=()=>AndroidBridge.openSavedChat(savedNode.radio,savedNode.id,savedChannel);actions.appendChild(older);
-  const previewHelp=node('p','help','Messages are shown newest first. Load more to browse older saved messages. Search checks the full stored conversation, including messages not loaded on screen. Open Chat to reply.');
+  const older=node('button','',tr('Open in Chat'));older.onclick=()=>AndroidBridge.openSavedChat(savedNode.radio,savedNode.id,savedChannel);actions.appendChild(older);
+  const previewHelp=node('p','help',tr('Messages are shown newest first. Load more to browse older saved messages. Search checks the full stored conversation, including messages not loaded on screen. Open Chat to reply.'));
   previewHelp.id='saved-history-help';previewHelp.hidden=true;
-  const info=node('button','info-toggle','i');info.type='button';info.setAttribute('aria-label','Saved history information');
+  const info=node('button','info-toggle','i');info.type='button';info.setAttribute('aria-label',tr('Saved history information'));
   info.setAttribute('aria-controls',previewHelp.id);info.setAttribute('aria-expanded','false');info.onclick=()=>toggleInformation(info);
   host.append(info,previewHelp);
   for (const [label,format] of [['Export backup','json'],['Export CSV','csv']]) {
@@ -967,13 +968,13 @@ function renderSavedHistory() {
   }
   host.appendChild(actions);
   const cleanup=node('div','my-node-cleanup');
-  cleanup.appendChild(node('span','','Erase messages older than'));
+  cleanup.appendChild(node('span','',tr('Erase messages older than')));
   const days=node('input','form-input');
   days.type='number'; days.min='1'; days.max='36500'; days.value='30';
-  days.setAttribute('aria-label','Days');
+  days.setAttribute('aria-label',tr('Days'));
   cleanup.appendChild(days);
   cleanup.appendChild(node('span','','days'));
-  const erase=node('button','','Erase');
+  const erase=node('button','',tr('Erase'));
   erase.onclick=()=>AndroidBridge.eraseOlder(savedNode.radio,savedNode.id,Number(days.value));
   cleanup.appendChild(erase); host.appendChild(cleanup);
   const tabs=node('div','my-node-channels');
@@ -982,7 +983,7 @@ function renderSavedHistory() {
     button.onclick=()=>{savedChannel=c.index;renderSavedHistory();};
     tabs.appendChild(button);
   }
-  const dm=node('button','cpill'+(savedChannel===-1?' active':''),'Direct');
+  const dm=node('button','cpill'+(savedChannel===-1?' active':''),tr('Direct'));
   dm.onclick=()=>{savedChannel=-1;renderSavedHistory();}; tabs.appendChild(dm);
   host.appendChild(tabs);
   const messages=node('div','my-node-messages');
@@ -995,7 +996,7 @@ function renderSavedHistory() {
     appendReactions(entry,savedNode.radio,m,selected);
     messages.appendChild(entry);
   }
-  if(!selected.length) messages.appendChild(node('div','empty-panel','No saved messages in this conversation.'));
+  if(!selected.length) messages.appendChild(node('div','empty-panel',tr('No saved messages in this conversation.')));
   renderMessageSearchResults('saved',messages);
   host.appendChild(messages);
 }
@@ -1014,17 +1015,17 @@ function renderNodes() {
   const roleMenu=el('nodes-role');
   nodeRole=populateRoleMenu(roleMenu,['mc','mt'].flatMap(radio=>state[radio].nodes.map(entry=>({radio,role:entry.role}))),nodeRole);
   const rfMenu=el('nodes-rf'),oldRf=rfMenu.value;clear(rfMenu);
-  const allRf=node('option','','All settings');allRf.value='all';rfMenu.appendChild(allRf);
+  const allRf=node('option','',tr('All settings'));allRf.value='all';rfMenu.appendChild(allRf);
   const rfValues=[...new Set(['mc','mt'].flatMap(id=>state[id].nodes.map(entry=>heardProfile(id,entry.heardSettings))))].sort();
-  for(const value of rfValues){const option=node('option','',value||'Unknown');option.value=value;rfMenu.appendChild(option);}
+  for(const value of rfValues){const option=node('option','',value||tr('Unknown'));option.value=value;rfMenu.appendChild(option);}
   rfMenu.value=rfValues.includes(oldRf)?oldRf:'all';
   for(const id of ['mc','mt']) {
     const menu=el('nodes-'+id+'-device');clear(menu);
     const devices=state.devices.filter(item=>item.radio===id);
     for(const saved of state.myNodes||[])if(saved.radio===id&&!devices.some(d=>d.id===saved.id))
       devices.push({...saved,key:'saved:'+saved.id,connected:false});
-    if(!devices.length){const option=node('option','','No device');option.value='';menu.appendChild(option);menu.disabled=true;}
-    else {menu.disabled=false;for(const item of devices){const option=node('option','',(item.unread?'● ':'')+(item.name||item.id)+(item.connected===false?' · offline':''));option.value=item.key;menu.appendChild(option);}}
+    if(!devices.length){const option=node('option','',tr('No device'));option.value='';menu.appendChild(option);menu.disabled=true;}
+    else {menu.disabled=false;for(const item of devices){const option=node('option','',(item.unread?'● ':'')+(item.name||item.id)+(item.connected===false?tr(' · offline'):''));option.value=item.key;menu.appendChild(option);}}
     const selected=devices.find(d=>d.id===state[id].ownId||d.key===(id==='mc'?state.selectedMc:state.selectedMt));
     menu.value=selected?.key||'';
   }
@@ -1067,9 +1068,9 @@ function renderNodes() {
       if (openedNode === id + ':' + entry.id) row.appendChild(nodeDetails(id, entry));
       list.appendChild(row); count++;
   }
-  el('nodes-summary').textContent = count + ' known nodes · saved and live discoveries';
+  el('nodes-summary').textContent = count + tr(' known nodes · saved and live discoveries');
   if (!count && !Object.keys(state.mc.directs).length && !Object.keys(state.mt.directs).length)
-    list.appendChild(node('div', 'empty-panel', favoritesOnly ? 'No favorite nodes in this view.' : 'No known nodes match this view. Select a remembered device or connect a radio in Config.'));
+    list.appendChild(node('div', 'empty-panel', favoritesOnly ? tr('No favorite nodes in this view.') : tr('No known nodes match this view. Select a remembered device or connect a radio in Config.')));
   if(scrollToOpenedNode&&openedNode){
     const row=[...list.querySelectorAll('.android-node')].find(item=>item.dataset.nodeKey===openedNode);
     if(row) requestAnimationFrame(()=>row.scrollIntoView({block:'center',behavior:'smooth'}));
@@ -1079,10 +1080,10 @@ function renderNodes() {
 window.onNodeActionResult = function (message,key=null) {
   pendingCompose=null;
   if(/^Direct message sent to radio/.test(message)) return;
-  if(activeTab==='nodes')el('nodes-action-status').textContent=message;
+  if(activeTab==='nodes')el('nodes-action-status').textContent=tr(message);
   if(el('dm-context').hidden && /failed|error|first|wait|choose|limit|shorten|remove|permission|unavailable/i.test(message)) onActionNotice('Action result',message);
   const popup=el('dm-context');
-  if(!popup.hidden&&key&&popup.firstChild?.dataset.actionKey===key) { let status=el('popup-action-status'); if(!status){status=node('p','','');status.id='popup-action-status';popup.firstChild.appendChild(status);} status.textContent=message; }
+  if(!popup.hidden&&key&&popup.firstChild?.dataset.actionKey===key) { let status=el('popup-action-status'); if(!status){status=node('p','','');status.id='popup-action-status';popup.firstChild.appendChild(status);} status.textContent=tr(message); }
 };
 function sendMsg() {
   if (!state || pendingCompose || !state[network].connected || dmMode ||
@@ -1120,6 +1121,7 @@ window.onRadioState = function (next) {
   if(state&&['left','right'].some(slot=>state[slot]?.historyRevision!==next[slot]?.historyRevision))historyPages.clear();
   const memberChanged=!!state?.memberConfig?.enabled!==!!next.memberConfig?.enabled;
   state = next;
+  applyAppLanguage(next.appLanguage??next.memberLanguage??'en');
   if(newNodeTarget && state.mt.ownId===newNodeTarget.device){
     const target=newNodeTarget;newNodeTarget=null;
     showMessageNodeActions('mt',target.id);
@@ -1150,8 +1152,8 @@ window.onRadioState = function (next) {
     openChannelsScreen(); return;
   }
   for(const kind of ['signal','ping','trace'])if(document.activeElement!==el('timeout-'+kind))el('timeout-'+kind).value=next.requestTimeouts?.[kind]??60;
-  el('mc-status').textContent = next.mc.state;
-  el('mt-status').textContent = next.mt.state;
+  el('mc-status').textContent = tr(next.mc.state);
+  el('mt-status').textContent = tr(next.mt.state);
   for (const id of ['mc', 'mt']) {
     const progress = el(id + '-progress');
     progress.hidden = !next[id].scanning;
@@ -1165,9 +1167,9 @@ window.onRadioState = function (next) {
   window.renderSilenceRules?.(next.notificationSilences||{});
   el('background-message-notifications').checked = !!next.backgroundMessageNotifications;
   el('message-notifications-status').textContent = !next.messageNotificationsAllowed
-    ? 'Android notifications are blocked. Enable them in Android notification settings to receive background previews.'
-    : next.backgroundMessageNotifications ? 'Background message notifications are on.' : 'Background message notifications are off.';
-  el('hdr-radio-name').textContent = next.devices.length+' '+(next.memberConfig?.enabled?mtWord('connected'):'connected');
+    ? tr('Android notifications are blocked. Enable them in Android notification settings to receive background previews.')
+    : next.backgroundMessageNotifications ? tr('Background message notifications are on.') : tr('Background message notifications are off.');
+  el('hdr-radio-name').textContent = next.devices.length+' '+(next.memberConfig?.enabled?mtWord('connected'):tr('connected'));
   el('nav-chat').classList.toggle('unread',next.myNodes.some(item=>item.unread));
   renderActiveRadioViews();
 };
@@ -1252,7 +1254,7 @@ function navigateBack() {
   if(!el('dm-context').hidden) { el('dm-context').hidden=true; return; }
   if(el('contacts-dialog')?.open){window.closeContactDialog?.();return;}
   if(activeTab==='contacts'&&window.contactDetailBack?.())return;
-  const locationDialog=document.querySelector('#member-location-dialog[open],#member-map-dialog[open]');
+  const locationDialog=document.querySelector('#persistent-dialog[open],#member-location-dialog[open],#member-map-dialog[open]');
   if(locationDialog){locationDialog.close();return;}
   const dialog=document.querySelector('dialog.settings-window[open]');
   if(dialog){closeSettingsWindow(dialog.id.replace('settings-window-',''));return;}
@@ -1302,10 +1304,10 @@ function renderConnectAllState(busy){
   const member=!!state?.memberConfig?.enabled;
   const label=member?mtWord('connect'):'Connect All Available';
   el('config-connect-all').firstElementChild.textContent=label;
-  el('connect-all-available').textContent=busy?(member?mtWord('connecting'):'Connecting…'):label;
-  el('nodes-title').textContent=member?mtWord('myNodes'):'My Nodes';
-  el('nodes-back').textContent='← '+(member?mtWord('config'):'Config');
-  el('connect-available-status').querySelector('span').textContent=member?mtWord('discovering'):'Discovering and connecting available radios…';
+  el('connect-all-available').textContent=busy?(member?mtWord('connecting'):tr('Connecting…')):label;
+  el('nodes-title').textContent=member?mtWord('myNodes'):tr('My Nodes');
+  el('nodes-back').textContent='← '+(member?mtWord('config'):tr('Config'));
+  el('connect-available-status').querySelector('span').textContent=member?mtWord('discovering'):tr('Discovering and connecting available radios…');
   el('member-connect').textContent=mtWord(busy?'connecting':'connect');
 }
 function connectAllAvailable() {

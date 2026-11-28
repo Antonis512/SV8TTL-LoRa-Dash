@@ -8,7 +8,7 @@ try {
 } catch(unavailable){}
 let singleNodePopup=null;
 let mapContactGroups=[];
-let mapSelected=null,mapFocusWaiting=false,mapAlertPin=null;
+let mapSelected=null,mapFocusWaiting=false,mapAlertPin=null,mapAlertTime=0;
 let mapProtocol=null,mapDisplayStyle='full';
 const mapUrl=id=>location.origin+'/packs/'+id+'.pmtiles';
 const mapAsset=path=>location.origin+'/assets/'+path;
@@ -26,7 +26,7 @@ function mapChoices(menu,entries){
   if(entries.some(([value])=>value===previous))menu.value=previous;
 }
 function mapSelect(parent,title,choices){const e=document.createElement('select');e.className='form-input';for(const [value,label] of choices){const o=mapText('option',label);o.value=value;e.appendChild(o);}return mapLabel(parent,title,e);}
-function mapNotice(message,error=false){const status=el('map-status');status.textContent=message;status.classList.toggle('map-error',error);status.setAttribute('role',error?'alert':'status');}
+function mapNotice(message,error=false){const status=el('map-status');status.textContent=tr(message);status.classList.toggle('map-error',error);status.setAttribute('role',error?'alert':'status');}
 function mapPackSource(url){return {
       getKey:()=>url,
       getBytes:async(offset,length,signal)=>{
@@ -46,10 +46,11 @@ function initMap(){
   mapView.addControl(new maplibregl.AttributionControl({compact:true}),'bottom-right');
   mapView.on('error',event=>{
     const detail=event.error?.message||'Unknown map loading error';
-    mapNotice((mapMode==='offline'?'Offline':'Online')+' map could not load: '+detail,true);
+    mapNotice((mapMode==='offline'?tr('Offline'):tr('Online'))+' map could not load: '+detail,true);
   });
   mapView.on('load',()=>renderMap());
   mapView.on('style.load',()=>{mapStyleReady=true;renderMap();});
+  mapView.on('moveend',()=>drawDirectionalTracks());
   mapView.on('click',event=>{
     if(!mapDrawing||event.originalEvent?.target?.closest?.('.map-draft-handle'))return;
     if(mapDrawing==='geofence'&&insertFenceMidpoint(event.point))return;
@@ -57,7 +58,7 @@ function initMap(){
     const point=event.lngLat.wrap();
     mapDraft.push([point.lng,point.lat]);
     refreshDraft();
-    mapNotice(mapDrawing==='geofence'?'Tap another corner or tap the first circle to close the fence.':mapDraft.length+' points chosen.');
+    mapNotice(mapDrawing==='geofence'?tr('Tap another corner or tap the first circle to close the fence.'):mapDraft.length+' points chosen.');
   });
 }
 window.mapShown=()=>{
@@ -74,7 +75,7 @@ function setMapMaximized(expanded){
   tab.classList.toggle('expanded-map-tab',expanded);
   button.parentElement.classList.toggle('map-maximized',expanded);
   button.setAttribute('aria-pressed',String(expanded));
-  button.textContent=expanded?'Restore map':'Maximize map';
+  button.textContent=expanded?tr('Restore map'):tr('Maximize map');
   if(!expanded)tab.scrollTop=mapScrollBeforeMaximize;
   requestAnimationFrame(()=>mapView?.resize());
 }
@@ -83,8 +84,8 @@ function setMapMode(mode){
   if(mode!=='online'&&mode!=='offline')return;
   if(mapMode!==mode)mapStyleKey='';
   mapMode=mode;
-  const button=el('map-source-switch');button.textContent=mode==='online'?'Online ⇄':'Offline ⇄';
-  button.setAttribute('aria-label','Switch to '+(mode==='online'?'offline':'online')+' map');
+  const button=el('map-source-switch');button.textContent=mode==='online'?tr('Online ⇄'):tr('Offline ⇄');
+  button.setAttribute('aria-label',tr('Switch to ')+(mode==='online'?'offline':'online')+' map');
   setMapStyle();renderMapPacks();mapView?.resize();
 }
 function toggleMapMode(){setMapMode(mapMode==='online'?'offline':'online');}
@@ -122,12 +123,15 @@ function setMapStyle(preserveView=false){
   if(pack?.kind==='street'&&pack.schema==='shortbread'&&mapDisplayStyle==='full')style.layers=fullShortbreadLayers();
   mapStyleReady=false;mapView.setStyle(style);
   el('map-empty-pack').hidden=mapMode==='online'||!!pack;
-  el('map-source').textContent=mapMode==='online'?'Online map · © OpenStreetMap contributors':pack?'Offline map: '+pack.title+' · '+(pack.kind==='street'?'© OpenStreetMap contributors · ':'Imagery: ')+(pack.source||pack.schema)+(pack.captureDate?' · captured '+pack.captureDate:'')+(pack.requestedRange?' · requested '+pack.requestedRange:'')+' · native zoom '+pack.maxZoom:'No offline map selected';
+  el('map-source').textContent=mapMode==='online'?tr('Online map · © OpenStreetMap contributors'):pack?tr('Offline map: ')+pack.title+' · '+(pack.kind==='street'?tr('© OpenStreetMap contributors · '):'Imagery: ')+(pack.source||pack.schema)+(pack.captureDate?tr(' · captured ')+pack.captureDate:'')+(pack.requestedRange?tr(' · requested ')+pack.requestedRange:'')+tr(' · native zoom ')+pack.maxZoom:tr('No offline map selected');
   if(!preserveView&&mapMode==='offline'&&pack?.bounds?.length===4&&!mapFocus){const [west,south,east,north]=pack.bounds;if(east>west&&north>south)setTimeout(()=>mapView?.fitBounds([[west,south],[east,north]],{padding:35,maxZoom:Math.min(11,pack.maxZoom||11)}),80);}
 }
 window.onMapData=data=>{
   if(data.displayStyle==='dark'||data.displayStyle==='full')mapDisplayStyle=data.displayStyle;
-  mapData={nodes:data.nodes||[],positions:data.positions||[],heard:data.heard||[],items:data.items||[],packs:data.packs||[],alerts:data.alerts||[],geofenceNodes:data.geofenceNodes||[]};
+  const cutoff=Date.now()-mapHistoryAge;
+  if(mapAlertPin&&mapAlertTime<cutoff){mapAlertPin.remove();mapAlertPin=null;}
+  mapData={nodes:data.nodes||[],positions:(data.positions||[]).filter(p=>p.time>=cutoff),sharedPositions:(data.sharedPositions||[]).filter(p=>p.time>=cutoff),heard:(data.heard||[]).filter(p=>p.time>=cutoff),items:(data.items||[]).filter(i=>i.kind!=='mark'||!i.radio||i.edited>=cutoff),packs:data.packs||[],alerts:(data.alerts||[]).filter(a=>a.time>=cutoff),geofenceNodes:data.geofenceNodes||[]};
+  if(mapSelected&&!mapData.nodes.some(n=>sameMapNode(n,mapSelected)&&mapHasPosition(n))){singleNodePopup?.remove();singleNodePopup=null;mapSelected=null;el('map-node-dialog').close();}
   if(!mapData.packs.some(p=>p.id===mapPackId)){
     const saved=mapData.packs.find(p=>p.id===data.selectedPackId);
     mapPackId=saved?.id||'';if(saved)mapLayerKind=saved.kind;
@@ -141,7 +145,7 @@ window.onMapData=data=>{
     if(mapFocus.device)el('map-device').value=mapFocus.radio+':'+mapFocus.device;
   }
   if(draftSaveId&&mapData.items.some(item=>item.id===draftSaveId)){
-    resetDraft();mapNotice('Map item saved.');
+    resetDraft();mapNotice(tr('Map item saved.'));
   }
   if(el('map-search-dialog').open)renderMapSearch();
   renderGeofenceHistory();
@@ -202,16 +206,17 @@ function mapPreferredObservation(a,b){
 function mapHasPosition(n){return Number.isFinite(n.lat)&&Number.isFinite(n.lon)&&Math.abs(n.lat)<=90&&Math.abs(n.lon)<=180&&!(n.lat===0&&n.lon===0);}
 function renderMapFilters(){
   renderMapContactFilters();
-  const device=el('map-device'),old=device.value;device.replaceChildren();const all=mapText('option','All devices');all.value='all';device.appendChild(all);
+  const device=el('map-device'),old=device.value;device.replaceChildren();const all=mapText('option',tr('All devices'));all.value='all';device.appendChild(all);
   const devices=new Map();
   for(const n of mapData.nodes)devices.set(n.radio+':'+n.device,{radio:n.radio,id:n.device,connected:false});
+  for(const p of mapData.sharedPositions||[])devices.set(p.radio+':'+p.device,{radio:p.radio,id:p.device,connected:false});
   for(const d of state?.myNodes||[])devices.set(d.radio+':'+d.id,d);
   for(const d of state?.devices||[])devices.set(d.radio+':'+d.id,{...d,connected:true});
-  for(const d of devices.values()){const option=mapText('option',(d.radio||'').toUpperCase()+' · '+(d.name||d.id)+(d.connected?'':' · offline'));option.value=d.radio+':'+d.id;device.appendChild(option);}
+  for(const d of devices.values()){const option=mapText('option',(d.radio||'').toUpperCase()+' · '+(d.name||d.id)+(d.connected?'':tr(' · offline')));option.value=d.radio+':'+d.id;device.appendChild(option);}
   if([...device.options].some(o=>o.value===old))device.value=old;
   const roles=el('map-role');populateRoleMenu(roles,mapData.nodes,roles.value);
-  const rf=el('map-rf'),oldRf=rf.value;rf.replaceChildren();const anyRf=mapText('option','All settings');anyRf.value='all';rf.appendChild(anyRf);
-  for(const value of [...new Set(mapData.nodes.map(n=>heardProfile(n.radio,n.receivingRf)))].sort()){const option=mapText('option',value||'Unknown');option.value=value;rf.appendChild(option);}
+  const rf=el('map-rf'),oldRf=rf.value;rf.replaceChildren();const anyRf=mapText('option',tr('All settings'));anyRf.value='all';rf.appendChild(anyRf);
+  for(const value of [...new Set(mapData.nodes.map(n=>heardProfile(n.radio,n.receivingRf)))].sort()){const option=mapText('option',value||tr('Unknown'));option.value=value;rf.appendChild(option);}
   if([...rf.options].some(o=>o.value===oldRf))rf.value=oldRf;
 }
 function clearMapFilters(){mapContactGroups=[];renderMapContactFilters();for(const id of ['map-network','map-device','map-role','map-rf','map-contact'])el(id).value='all';el('map-from').value='';el('map-to').value='';renderMap();}
@@ -291,7 +296,7 @@ function renderMap(){
 
   }
   drawMapPrecision(placed);
-  const missing=rows.filter(n=>!mapHasPosition(n));el('map-counts').textContent=placed.length+' positioned · '+missing.length+' without position';
+  const missing=rows.filter(n=>!mapHasPosition(n));el('map-counts').textContent=placed.length+tr(' positioned · ')+missing.length+' without position';
   const list=el('map-no-position-list');list.replaceChildren();for(const n of missing)list.appendChild(mapText('div',n.radio.toUpperCase()+' · '+(n.name||n.id)+' · '+n.id));
   if(mapFocus&&!mapFocusWaiting){
     const requested=mapFocus;mapFocus=null;
@@ -300,32 +305,34 @@ function renderMap(){
       if(nearby.length>1)showMapNodeGroup(nearby,n);
       else showSingleMapNode(n);
       mapView.flyTo({center:[n.lon,n.lat],zoom:Math.max(mapView.getZoom(),13)});mapNotice('');}
-    else {mapSelected=null;mapNotice('No saved position for '+requested.id+' on this receiving device.',true);}
+    else {mapSelected=null;mapNotice(tr('No saved position for ')+requested.id+' on this receiving device.',true);}
   }
-  for(const item of mapData.items.filter(i=>i.kind==='mark'&&i.enabled)){
+  const sharedStreams=new Set((mapData.sharedPositions||[]).map(p=>p.stream));
+  for(const item of mapData.items.filter(i=>i.kind==='mark'&&i.enabled&&!sharedStreams.has(i.id))){
     const [lon,lat]=item.geometry.coordinates;if(!Number.isFinite(lon)||!Number.isFinite(lat))continue;
-    const pin=mapText('span','📍');pin.style.fontSize='23px';const popup=document.createElement('div');popup.appendChild(mapText('strong',item.title));popup.appendChild(mapText('div',item.description||'Saved mark'));
+    const pin=mapText('span','📍');pin.style.fontSize='23px';const popup=document.createElement('div');popup.appendChild(mapText('strong',item.title));popup.appendChild(mapText('div',item.description||tr('Saved mark')));
     mapMarkers.push(new maplibregl.Marker({element:pin}).setLngLat([lon,lat]).setPopup(new maplibregl.Popup({offset:15}).setDOMContent(popup)).addTo(mapView));
   }
-  drawMapItems();
+  const sharedCount=renderSharedTrackMarkers();if(sharedCount)el('map-counts').textContent+=' · '+sharedCount+tr(' shared location track')+(sharedCount===1?'':'s');
+  drawMapItems();drawDirectionalTracks();
 }
-function mapFitVisible(){if(!mapView)return;const rows=mapFilterRows().filter(mapHasPosition);if(!rows.length){mapNotice('No positioned nodes match these filters.');return;}const bounds=new maplibregl.LngLatBounds();for(const n of rows)bounds.extend([n.lon,n.lat]);mapView.fitBounds(bounds,{padding:45,maxZoom:15});}
+function mapFitVisible(){if(!mapView)return;const rows=[...mapFilterRows().filter(mapHasPosition),...visibleSharedTracks().flat()];if(!rows.length){mapNotice(tr('No positions match these filters.'));return;}const bounds=new maplibregl.LngLatBounds();for(const n of rows)bounds.extend([n.lon,n.lat]);mapView.fitBounds(bounds,{padding:45,maxZoom:15});}
 window.openMapNode=(radio,id,device='')=>{mapSelected=null;mapFocus={radio,id,device};mapFocusWaiting=true;mapAlertPin?.remove();mapAlertPin=null;switchTab('map');AndroidBridge.loadMap();};
 function geofenceNodeKey(radio,id){const key=String(id).toLowerCase();return radio==='mc'&&/^[0-9a-f]{64}$/.test(key)?key.slice(0,12):key;}
 function geofenceNodeSettings(){return state?.geofenceNodes||mapData.geofenceNodes||[];}
 function nodeGeofenceExcluded(radio,id){return geofenceNodeSettings().some(n=>n.radio===radio&&n.node===geofenceNodeKey(radio,id)&&n.excluded);}
-function geofenceNodeActionLabel(radio,id){return nodeGeofenceExcluded(radio,id)?'Allow geofence alerts for this node':'Exclude from geofence alerts';}
+function geofenceNodeActionLabel(radio,id){return nodeGeofenceExcluded(radio,id)?tr('Allow geofence alerts for this node'):tr('Exclude from geofence alerts');}
 function toggleNodeGeofence(radio,id){AndroidBridge.setGeofenceNodeExcluded(radio,id,!nodeGeofenceExcluded(radio,id));}
 window.onMapAlert=(message,radio,id)=>{
   mapNotice('Geofence: '+message);
   if(radio&&id){const actions=mapText('div','','map-item-actions');const button=mapButton(actions,geofenceNodeActionLabel(radio,id),()=>toggleNodeGeofence(radio,id));button.id='map-alert-node-action';button.dataset.radio=radio;button.dataset.node=id;el('map-status').appendChild(actions);}
 };
 function showMapTrail(n){
-  const points=mapData.positions.filter(p=>p.radio===n.radio&&p.node===n.id&&p.device===n.device);
-  mapNotice(points.length+' saved position reports for '+(n.name||n.id)+(points.length?' · newest '+mapDate(points.at(-1).time):'')+'. Gaps over 30 minutes are not connected.');
+  selectedMapTrail=n;
+  const points=orderedTrackPoints(mapData.positions.filter(p=>p.radio===n.radio&&p.node===n.id&&p.device===n.device));
+  mapNotice(points.length+tr(' saved position reports for ')+(n.name||n.id)+(points.length?tr(' · newest ')+mapDate(points.at(-1).time):'')+tr('. Gaps over 30 minutes are not connected.'));
   if(mapView.getSource('map-trail')){mapView.removeLayer('map-trail-line');mapView.removeSource('map-trail');}
-  const lines=[];let segment=[];for(const p of points){if(segment.length&&p.time-segment.at(-1).time>1800000){if(segment.length>1)lines.push(segment.map(v=>[v.lon,v.lat]));segment=[];}segment.push(p);}if(segment.length>1)lines.push(segment.map(v=>[v.lon,v.lat]));
-  if(lines.length){mapView.addSource('map-trail',{type:'geojson',data:{type:'Feature',geometry:{type:'MultiLineString',coordinates:lines}}});mapView.addLayer({id:'map-trail-line',type:'line',source:'map-trail',paint:{'line-color':'#fbbf24','line-width':3,'line-dasharray':[2,2]}});}
+  drawDirectionalTracks();
 }
 function openMapDisplayStyle(){
   el('map-offline-dialog').close();
@@ -356,7 +363,7 @@ window.onMapPackImportStatus=(message,busy=false,percent=-1)=>{
     el('map-import-dialog').showModal();
   }
   el('map-pack-import-feedback').hidden=!message;
-  el('map-pack-import-status').textContent=message;
+  el('map-pack-import-status').textContent=tr(message);
   const progress=el('map-pack-import-progress');
   progress.hidden=!busy;
   progress.max=100;
@@ -373,16 +380,16 @@ function viewMapPack(pack,persist=true){
 window.onMapPackInstalled=pack=>{
   viewMapPack(pack,false);
   onMapPackImportStatus('');
-  mapNotice('Offline map installed: '+pack.title);
+  mapNotice(tr('Offline map installed: ')+pack.title);
 };
 function renderMapPacks(){
   const host=el('map-pack-list'),activeId=mapMode==='offline'?activePack()?.id:null;host.replaceChildren();
-  if(!mapData.packs.length)host.appendChild(mapText('p','No maps installed yet. Open Import maps to add an offline map file.'));
+  if(!mapData.packs.length)host.appendChild(mapText('p',tr('No maps installed yet. Open Import maps to add an offline map file.')));
   for(const p of mapData.packs){const row=document.createElement('div');if(p.id===activeId)row.className='map-pack-selected';row.appendChild(mapText('strong',p.title));
-    if(p.id===activeId)row.appendChild(mapText('span','Currently shown on Map','map-pack-active'));
-    row.appendChild(mapText('small',p.kind+' · '+(p.size/1048576).toFixed(1)+' MB · zoom '+p.minZoom+'–'+p.maxZoom+(p.source?' · '+p.source:'')+(p.captureDate?' · imagery '+p.captureDate:'')+(p.requestedRange?' · requested '+p.requestedRange:'')));
-    if(p.id!==activeId)mapButton(row,'Use on Map',()=>viewMapPack(p));
-    mapButton(row,'Remove',()=>{if(confirm('Remove '+p.title+' from this phone?'))AndroidBridge.removeMapPack(p.id);});host.appendChild(row);
+    if(p.id===activeId)row.appendChild(mapText('span',tr('Currently shown on Map'),'map-pack-active'));
+    row.appendChild(mapText('small',p.kind+' · '+(p.size/1048576).toFixed(1)+tr(' MB · zoom ')+p.minZoom+'–'+p.maxZoom+(p.source?' · '+p.source:'')+(p.captureDate?tr(' · imagery ')+p.captureDate:'')+(p.requestedRange?tr(' · requested ')+p.requestedRange:'')));
+    if(p.id!==activeId)mapButton(row,tr('Use on Map'),()=>viewMapPack(p));
+    mapButton(row,tr('Remove'),()=>{if(confirm(tr('Remove ')+p.title+tr(' from this phone?')))AndroidBridge.removeMapPack(p.id);});host.appendChild(row);
   }
 }
 function resetDraft(){
@@ -412,7 +419,7 @@ function insertFenceMidpoint(tap){
   const midpoint=mapView.unproject([(a.x+b.x)/2,(a.y+b.y)/2]).wrap();
   mapDraft.splice(nearest+1,0,[midpoint.lng,midpoint.lat]);
   refreshDraft();
-  mapNotice(draftClosed?'Corner added at the midpoint. Drag its circle to adjust it.':'Corner added at the midpoint. Tap the first circle to close the fence.');
+  mapNotice(draftClosed?tr('Corner added at the midpoint. Drag its circle to adjust it.'):tr('Corner added at the midpoint. Tap the first circle to close the fence.'));
   return true;
 }
 function refreshDraft(){
@@ -421,12 +428,12 @@ function refreshDraft(){
   if(mapDrawing==='geofence')mapDraft.forEach((point,index)=>{
     const button=mapText('button','','map-draft-handle');
     button.type='button';
-    button.setAttribute('aria-label',index===0&&!draftClosed?'Close fence at first corner':'Corner '+(index+1));
+    button.setAttribute('aria-label',index===0&&!draftClosed?tr('Close fence at first corner'):tr('Corner ')+(index+1));
     button.onclick=event=>{
       event.stopPropagation();
       if(draftClosed||index!==0)return;
-      if(mapDraft.length<3){mapNotice('Add at least three corners before closing the fence.');return;}
-      draftClosed=true;refreshDraft();mapNotice('Fence closed. Tap an edge to add a midpoint or drag a corner, then Save.');
+      if(mapDraft.length<3){mapNotice(tr('Add at least three corners before closing the fence.'));return;}
+      draftClosed=true;refreshDraft();mapNotice(tr('Fence closed. Tap an edge to add a midpoint or drag a corner, then Save.'));
     };
     const marker=new maplibregl.Marker({element:button,draggable:draftClosed}).setLngLat(point).addTo(mapView);
     marker.on('drag',()=>{
@@ -494,14 +501,14 @@ function drawMapItems(){
     if(segments.length){mapView.addSource('map-radio-path',{type:'geojson',data:{type:'FeatureCollection',features:segments}});mapView.addLayer({id:'map-radio-path-line',type:'line',source:'map-radio-path',paint:{'line-color':'#b49eff','line-width':3,'line-dasharray':[2,3]}});}
   }
 }
-function renderMapItems(){const host=el('map-items');host.replaceChildren();if(!mapData.items.length)return;host.appendChild(mapText('h3','Saved map items'));
+function renderMapItems(){const host=el('map-items');host.replaceChildren();if(!mapData.items.length)return;host.appendChild(mapText('h3',tr('Saved map items')));
   for(const item of mapData.items){const row=document.createElement('div');row.className='map-item';row.appendChild(mapText('strong',item.title));row.appendChild(mapText('small',' · '+item.kind));
-    const actions=mapText('div','','map-item-actions');mapButton(actions,'View',()=>viewMapItem(item));
-    if(item.kind==='geofence')mapButton(actions,hiddenFences.has(item.id)?'Show on map':'Hide on map',()=>setFenceVisible(item.id,hiddenFences.has(item.id)));
-    if(item.kind==='mark')mapButton(actions,'Send by radio',()=>{mapTool('mark');el('map-send-mark').value=item.id;});
-    if(item.kind!=='mark')mapButton(actions,item.kind==='geofence'?(item.enabled?'Disable alerts':'Enable alerts'):(item.enabled?'Turn off':'Turn on'),()=>AndroidBridge.toggleMapItem(item.id,!item.enabled));
-    mapButton(actions,'Save file',()=>AndroidBridge.exportMapItem(item.id));
-    mapButton(actions,'Delete',()=>{if(confirm('Delete '+item.title+'?'))AndroidBridge.deleteMapItem(item.id);});row.appendChild(actions);host.appendChild(row);
+    const actions=mapText('div','','map-item-actions');mapButton(actions,tr('View'),()=>viewMapItem(item));
+    if(item.kind==='geofence')mapButton(actions,hiddenFences.has(item.id)?tr('Show on map'):tr('Hide on map'),()=>setFenceVisible(item.id,hiddenFences.has(item.id)));
+    if(item.kind==='mark')mapButton(actions,tr('Send by radio'),()=>{mapTool('mark');el('map-send-mark').value=item.id;});
+    if(item.kind!=='mark')mapButton(actions,item.kind==='geofence'?(item.enabled?tr('Disable alerts'):tr('Enable alerts')):(item.enabled?tr('Turn off'):tr('Turn on')),()=>AndroidBridge.toggleMapItem(item.id,!item.enabled));
+    mapButton(actions,tr('Save file'),()=>AndroidBridge.exportMapItem(item.id));
+    mapButton(actions,tr('Delete'),()=>{if(confirm(tr('Delete ')+item.title+'?'))AndroidBridge.deleteMapItem(item.id);});row.appendChild(actions);host.appendChild(row);
   }
 }
 let markPhoneSequence=0, markPhonePending=0, markMapClick=null;
@@ -516,7 +523,7 @@ window.onMarkPhonePosition=(token,latitude,longitude,message)=>{
   const form=el('map-mark-position');
   if(!form)return;
   if(Number.isFinite(latitude)&&Number.isFinite(longitude))form.fill(latitude,longitude,message);
-  else form.textContent=message;
+  else form.textContent=tr(message);
 };
 function markInput(host,label,type){
   const input=mapInput(host,label,'',type);
@@ -526,7 +533,7 @@ function markInput(host,label,type){
   const clear=mapButton(wrapper,'×',()=>{
     input.value='';input.dispatchEvent(new Event('input'));input.focus();
   });
-  clear.setAttribute('aria-label','Clear '+label.toLowerCase());
+  clear.setAttribute('aria-label',tr('Clear ')+label.toLowerCase());
   return input;
 }
 function mapTool(name){
@@ -536,12 +543,12 @@ function mapTool(name){
   const instruction=text=>host.appendChild(mapText('p',text));
   if(name==='passive'){
     instruction('1. Connect a radio. 2. Leave it listening. 3. Incoming messages and position reports build this phone’s history without transmitting. Use Heard from/to above to review it.');
-    host.appendChild(mapText('p',mapData.heard.length+' saved hearing events · '+mapData.positions.length+' saved positions shown. Position updates can be less frequent than radio contact.'));
+    host.appendChild(mapText('p',mapData.heard.length+tr(' saved hearing events · ')+mapData.positions.length+tr(' saved positions shown. Position updates can be less frequent than radio contact.')));
   }else if(name==='active'){
     instruction('Choose a connected MT device and one of its channels, then tap Ask for positions. The radio broadcasts one position request with a hop limit of 3.');
-    const device=mapSelect(host,'Connected MT device',[]);device.id='map-sense-device';
-    const channel=mapSelect(host,'Channel',[]);
-    const button=mapButton(host,'Ask for positions',()=>AndroidBridge.senseMesh(device.value,Number(channel.value)));
+    const device=mapSelect(host,tr('Connected MT device'),[]);device.id='map-sense-device';
+    const channel=mapSelect(host,tr('Channel'),[]);
+    const button=mapButton(host,tr('Ask for positions'),()=>AndroidBridge.senseMesh(device.value,Number(channel.value)));
     function refresh(){
       const devices=(state?.devices||[]).filter(d=>d.radio==='mt');
       mapChoices(device,[['',devices.length?'Choose an MT device':'No connected MT devices'],...devices.map(d=>[d.key,(d.name||'MT')+' · '+d.id])]);
@@ -556,16 +563,16 @@ function mapTool(name){
     device.refreshTargets=refresh;
     device.onchange=channel.onchange=refresh;
     refresh();
-    host.appendChild(mapText('p','The app allows one mesh-wide request every three minutes. Nodes may decline or be out of range.'));
+    host.appendChild(mapText('p',tr('The app allows one mesh-wide request every three minutes. Nodes may decline or be out of range.')));
   }else if(name==='route'){
     instruction('Choose a connected device, then one of its nodes. MT uses traceroute. MC uses path discovery.');
-    const device=mapSelect(host,'Connected device',[]);device.id='map-route-device';
-    const target=mapSelect(host,'Destination node',[]);
-    const button=mapButton(host,'Request radio path',()=>AndroidBridge.mapNodeAction(device.value,target.value,'tr'));
+    const device=mapSelect(host,tr('Connected device'),[]);device.id='map-route-device';
+    const target=mapSelect(host,tr('Destination node'),[]);
+    const button=mapButton(host,tr('Request radio path'),()=>AndroidBridge.mapNodeAction(device.value,target.value,'tr'));
     const result=mapText('p','');host.appendChild(result);
     function refresh(){
       const devices=state?.devices||[];
-      mapChoices(device,[['','Choose a connected device'],...devices.map(d=>[d.key,d.radio.toUpperCase()+' · '+(d.name||d.id)+' · '+d.id])]);
+      mapChoices(device,[['',tr('Choose a connected device')],...devices.map(d=>[d.key,d.radio.toUpperCase()+' · '+(d.name||d.id)+' · '+d.id])]);
       const selected=devices.find(d=>d.key===device.value);
       const nodes=selected?.pathNodes||[];
       const prompt=selected?.loading?'Loading nodes…':selected&&!nodes.length?'No nodes available':'Choose a node';
@@ -573,7 +580,7 @@ function mapTool(name){
       if(target.dataset.device!==device.value){target.value='';target.dataset.device=device.value;}
       target.disabled=!nodes.length;
       button.disabled=!selected||!target.value;
-      button.textContent='Request radio path';button.title='';
+      button.textContent=tr('Request radio path');button.title='';
       if(selected?.radio==='mt'){
         button.dataset.mtTraceroute='Request radio path';button.dataset.traceUnavailable=String(!selected||!target.value);updateTracerouteButtons();
       }else {delete button.dataset.mtTraceroute;delete button.dataset.traceUnavailable;}
@@ -594,25 +601,25 @@ function mapTool(name){
       cancelMarkPosition();lat.value=latitude.toFixed(6);lon.value=longitude.toFixed(6);position.textContent=source;
     };
     lat.oninput=lon.oninput=()=>{cancelMarkPosition();position.textContent='';};
-    mapButton(host,'Tap map to choose position',()=>{
-      cancelMarkPosition();position.textContent='Tap a position on the map.';
+    mapButton(host,tr('Tap map to choose position'),()=>{
+      cancelMarkPosition();position.textContent=tr('Tap a position on the map.');
       markMapClick=e=>position.fill(e.lngLat.lat,e.lngLat.lng,'Position selected on map');
       mapView.on('click',markMapClick);
     });
-    mapButton(host,'Fetch my position from phone',()=>{
+    mapButton(host,tr('Fetch my position from phone'),()=>{
       cancelMarkPosition();markPhonePending=++markPhoneSequence;
-      position.textContent='Waiting for phone location…';
+      position.textContent=tr('Waiting for phone location…');
       AndroidBridge.fetchMarkPosition(markPhonePending);
     });
     host.appendChild(position);
-    mapButton(host,'Save mark',()=>{const latitude=Number(lat.value),longitude=Number(lon.value);if(!title.value.trim()||!lat.value||!lon.value||!Number.isFinite(latitude)||!Number.isFinite(longitude)||latitude<-90||latitude>90||longitude<-180||longitude>180){mapNotice('Enter a name and valid latitude/longitude.');return;}
+    mapButton(host,tr('Save mark'),()=>{const latitude=Number(lat.value),longitude=Number(lon.value);if(!title.value.trim()||!lat.value||!lon.value||!Number.isFinite(latitude)||!Number.isFinite(longitude)||latitude<-90||latitude>90||longitude<-180||longitude>180){mapNotice(tr('Enter a name and valid latitude/longitude.'));return;}
       AndroidBridge.saveMapItem(JSON.stringify({id:crypto.randomUUID(),kind:'mark',title:title.value.trim(),description:desc.value.trim(),geometry:{type:'Point',coordinates:[longitude,latitude]},enabled:true,created:Date.now(),edited:Date.now()}));});
-    const mark=mapSelect(host,'Saved mark',[]);mark.id='map-send-mark';
-    const radio=mapSelect(host,'Sending radio',[]);
-    const mode=mapSelect(host,'Destination',[['channel','Channel'],['direct','Direct message']]);
-    const channel=mapSelect(host,'Channel',[]);
-    const peer=mapSelect(host,'Recipient',[]);
-    const button=mapButton(host,'Send mark',()=>{
+    const mark=mapSelect(host,tr('Saved mark'),[]);mark.id='map-send-mark';
+    const radio=mapSelect(host,tr('Sending radio'),[]);
+    const mode=mapSelect(host,tr('Destination'),[['channel',tr('Channel')],['direct',tr('Direct message')]]);
+    const channel=mapSelect(host,tr('Channel'),[]);
+    const peer=mapSelect(host,tr('Recipient'),[]);
+    const button=mapButton(host,tr('Send mark'),()=>{
       const direct=mode.value==='direct';
       AndroidBridge.sendMapMark(mark.value,radio.value,direct?-1:Number(channel.value),direct?peer.value:'');
     });
@@ -630,8 +637,8 @@ function mapTool(name){
       channel.parentElement.hidden=direct;
       peer.parentElement.hidden=!direct;
       const contacts=direct&&selected?selected.nodes.filter(n=>nodeMessageable(selected.radio,n)):[];
-      mapChoices(peer,[['','Choose a recipient'],...contacts.map(n=>[n.id,(n.name||n.id)+(n.name&&n.name!==n.id?' · '+n.id:'')])]);
-      button.textContent=selected?.radio==='mc'?'Send MC marker message':'Send waypoint by radio';
+      mapChoices(peer,[['',tr('Choose a recipient')],...contacts.map(n=>[n.id,(n.name||n.id)+(n.name&&n.name!==n.id?' · '+n.id:'')])]);
+      button.textContent=selected?.radio==='mc'?tr('Send MC marker message'):tr('Send waypoint by radio');
       button.disabled=!mark.value||!selected||(direct?!peer.value:channel.value==='');
     }
     radio.onchange=mode.onchange=peer.onchange=updateTargets;
@@ -639,15 +646,15 @@ function mapTool(name){
     updateTargets();
   }else if(name==='overlay'||name==='geofence'){
     instruction(name==='overlay'?'1. Choose a line or area. 2. Tap points on the map. 3. Name and save it. Share it as a file when needed.':'Tap at least three corners, then tap the first circle to close the fence. Tap an edge to add a midpoint. Drag circles to adjust the boundary before saving.');
-    const title=mapInput(host,'Name');const desc=mapInput(host,'Description');const shape=name==='overlay'?mapSelect(host,'Shape',[['LineString','Line'],['Polygon','Area']]):null;
-    mapButton(host,'Start drawing',()=>{resetDraft();mapDrawing=name==='geofence'?'geofence':shape.value==='Polygon'?'area':'overlay';refreshDraft();el('offline-map').scrollIntoView({block:'center'});mapNotice('Tap the map to place corners.');});
-    mapButton(host,'Undo last point',()=>{if(draftClosed)draftClosed=false;else mapDraft.pop();refreshDraft();});
-    mapButton(host,'Save',()=>{const polygon=name==='geofence'||shape.value==='Polygon',needed=polygon?3:2;if(!title.value.trim()||mapDraft.length<needed){mapNotice('Enter a name and tap at least '+needed+' points.');return;}
-      if(name==='geofence'&&!draftClosed){mapNotice('Tap the first circle to close the fence before saving.');return;}
+    const title=mapInput(host,tr('Name'));const desc=mapInput(host,tr('Description'));const shape=name==='overlay'?mapSelect(host,tr('Shape'),[['LineString',tr('Line')],['Polygon',tr('Area')]]):null;
+    mapButton(host,tr('Start drawing'),()=>{resetDraft();mapDrawing=name==='geofence'?'geofence':shape.value==='Polygon'?'area':'overlay';refreshDraft();el('offline-map').scrollIntoView({block:'center'});mapNotice(tr('Tap the map to place corners.'));});
+    mapButton(host,tr('Undo last point'),()=>{if(draftClosed)draftClosed=false;else mapDraft.pop();refreshDraft();});
+    mapButton(host,tr('Save'),()=>{const polygon=name==='geofence'||shape.value==='Polygon',needed=polygon?3:2;if(!title.value.trim()||mapDraft.length<needed){mapNotice(tr('Enter a name and tap at least ')+needed+' points.');return;}
+      if(name==='geofence'&&!draftClosed){mapNotice(tr('Tap the first circle to close the fence before saving.'));return;}
       draftSaveId=draftSaveId||crypto.randomUUID();
       const geometry=polygon?{type:'Polygon',coordinates:[mapDraft.concat([mapDraft[0]])]}:{type:'LineString',coordinates:mapDraft};
       AndroidBridge.saveMapItem(JSON.stringify({id:draftSaveId,kind:name,title:title.value.trim(),description:desc.value.trim(),geometry,enabled:true,created:Date.now(),edited:Date.now()}));});
-    mapButton(host,'Import shared map item',()=>AndroidBridge.importMapItem());
+    mapButton(host,tr('Import shared map item'),()=>AndroidBridge.importMapItem());
   }
 }
 mapTool('passive');
@@ -675,7 +682,7 @@ function showMapNodeGroup(nodes,selected){
     summary.append(mapText('strong',n.name||n.id),mapText('small',n.radio.toUpperCase()+' · '+n.id));
     details.append(summary,mapNodePopup(n));details.open=!!selected&&sameMapNode(n,selected);
     if(el('map-show-precision').checked && mapPrecisionRadius(n)>0){
-      mapButton(details,'Zoom to proximity circle',()=>{
+      mapButton(details,tr('Zoom to proximity circle'),()=>{
         dialog.close();
         const ring=mapPrecisionFeatures([n])[0].geometry.coordinates[0];
         const bounds=new maplibregl.LngLatBounds();
@@ -696,20 +703,20 @@ function mapNodePopup(n){
   popup.appendChild(mapText('div',n.radio.toUpperCase()+' · '+n.id));
   popup.appendChild(mapText('div','Receiver: '+n.device));
   popup.appendChild(mapText('div',displayRole(n.radio,n.role)+' · '+heardDescription(n.radio,n.receivingRf)));
-  popup.appendChild(mapText('div','Last heard: '+mapDate(n.lastHeard)));
+  popup.appendChild(mapText('div',tr('Last heard: ')+mapDate(n.lastHeard)));
   popup.appendChild(mapText('div','Coordinates: '+n.lat.toFixed(7)+', '+n.lon.toFixed(7)));
   const time=mapPositionTime(n),received=Number(n.receivedAt)||Number(n.positionAt)||0;
-  if(!time)popup.appendChild(mapText('div','Position time: unknown (saved coordinates)'));
-  if(n.positionTime)popup.appendChild(mapText('div',(n.radio==='mc'?'Advertised: ':'Position report: ')+mapDate(n.positionTime)));
-  if(n.fixTime)popup.appendChild(mapText('div','GPS fix: '+mapDate(n.fixTime)));
-  if(received)popup.appendChild(mapText('div','Received by this phone: '+mapDate(received)));
-  popup.appendChild(mapText('div','Position source: '+({mt_live:'live position packet',mt_snapshot:'radio node list',mt_preserved:'previously known precise position',mc_advert:'received advertisement',mc_snapshot:'radio contact list',mc_self:'connected radio configuration',legacy:'saved coordinates'}[n.positionSource]||'saved coordinates')));
+  if(!time)popup.appendChild(mapText('div',tr('Position time: unknown (saved coordinates)')));
+  if(n.positionTime)popup.appendChild(mapText('div',(n.radio==='mc'?'Advertised: ':tr('Position report: '))+mapDate(n.positionTime)));
+  if(n.fixTime)popup.appendChild(mapText('div',tr('GPS fix: ')+mapDate(n.fixTime)));
+  if(received)popup.appendChild(mapText('div',tr('Received by this phone: ')+mapDate(received)));
+  popup.appendChild(mapText('div',tr('Position source: ')+({mt_live:'live position packet',mt_snapshot:'radio node list',mt_preserved:'previously known precise position',mc_advert:'received advertisement',mc_snapshot:'radio contact list',mc_self:'connected radio configuration',legacy:'saved coordinates'}[n.positionSource]||'saved coordinates')));
   const radius=mapPrecisionRadius(n);
-  popup.appendChild(mapText('div',radius?(mapCellPrecision(n)?'Estimated from the shared coordinate grid: ± ':'Shared position precision: ± ')+(radius>=1000?(radius/1000).toFixed(2)+' km':Math.round(radius)+' m'):
-    n.radio==='mc'?'Advertised location (may be manually configured)':n.precisionBits===32?'Full shared precision':n.precisionBits>0?'Reported sharing precision: '+n.precisionBits+' bits':'Position precision not reported'));
-  if(n.positionSource==='mt_preserved')popup.appendChild(mapText('div','Previously known precise position retained within the newly reported approximate area.'));
-  if(!time)popup.appendChild(mapText('div','The age of these coordinates is unknown.'));
-  mapButton(popup,'Show saved positions',()=>{
+  popup.appendChild(mapText('div',radius?(mapCellPrecision(n)?tr('Estimated from the shared coordinate grid: ± '):tr('Shared position precision: ± '))+(radius>=1000?(radius/1000).toFixed(2)+' km':Math.round(radius)+' m'):
+    n.radio==='mc'?tr('Advertised location (may be manually configured)'):n.precisionBits===32?tr('Full shared precision'):n.precisionBits>0?tr('Reported sharing precision: ')+n.precisionBits+' bits':tr('Position precision not reported')));
+  if(n.positionSource==='mt_preserved')popup.appendChild(mapText('div',tr('Previously known precise position retained within the newly reported approximate area.')));
+  if(!time)popup.appendChild(mapText('div',tr('The age of these coordinates is unknown.')));
+  mapButton(popup,tr('Show saved positions'),()=>{
     if(el('map-node-dialog').open)el('map-node-dialog').close();
     showMapTrail(n);
   });
@@ -724,35 +731,36 @@ function renderGeofenceHistory(){
   const action=el('map-alert-node-action');
   if(action)action.textContent=geofenceNodeActionLabel(action.dataset.radio,action.dataset.node);
   const alerts=mapData.alerts||[],host=el('map-alerts-list');host.replaceChildren();
-  el('map-alerts-button').textContent='Geofence alerts ('+alerts.length+')';
-  if(!alerts.length)host.appendChild(mapText('p','No saved geofence alerts. New alerts stay here until you delete them.'));
+  el('map-alerts-button').textContent=tr('Geofence alerts (')+alerts.length+')';
+  if(!alerts.length)host.appendChild(mapText('p',tr('No saved geofence alerts. Alerts are kept for 30 days unless deleted sooner.')));
   const excluded=geofenceNodeSettings().filter(n=>n.excluded);
   if(excluded.length){
-    host.appendChild(mapText('h3','Nodes excluded from geofence alerts'));
+    host.appendChild(mapText('h3',tr('Nodes excluded from geofence alerts')));
     for(const n of excluded){const row=mapText('article','','map-alert-record');
       row.appendChild(mapText('strong',n.radio.toUpperCase()+' · '+n.node));
-      mapButton(row,'Allow geofence alerts for this node',()=>toggleNodeGeofence(n.radio,n.node));host.appendChild(row);
+      mapButton(row,tr('Allow geofence alerts for this node'),()=>toggleNodeGeofence(n.radio,n.node));host.appendChild(row);
     }
   }
   for(const a of alerts){
     const row=mapText('article','','map-alert-record');
     row.appendChild(mapText('strong',(a.name||a.node)+' '+a.event+' '+a.title));
     row.appendChild(mapText('div',mapDate(a.time)));
-    row.appendChild(mapText('div',a.radio.toUpperCase()+' · '+a.node+' · Receiver: '+a.device));
-    row.appendChild(mapText('div','Reported location: '+a.lat+', '+a.lon));
-    if(a.uncertaintyRadius>0)row.appendChild(mapText('div','Uncertainty radius: '+Math.round(a.uncertaintyRadius)+' m · possible location, not confirmed entry'));
-    mapButton(row,'Alert location',()=>{
+    row.appendChild(mapText('div',a.radio.toUpperCase()+' · '+a.node+tr(' · Receiver: ')+a.device));
+    row.appendChild(mapText('div',tr('Reported location: ')+a.lat+', '+a.lon));
+    if(a.uncertaintyRadius>0)row.appendChild(mapText('div',tr('Uncertainty radius: ')+Math.round(a.uncertaintyRadius)+tr(' m · possible location, not confirmed entry')));
+    mapButton(row,tr('Alert location'),()=>{
       el('map-alerts-dialog').close();mapFocus=null;mapFocusWaiting=false;mapSelected=null;initMap();
-      if(!mapView){mapNotice('Map is unavailable. The reported coordinates are saved in the alert.',true);return;}
+      if(!mapView){mapNotice(tr('Map is unavailable. The reported coordinates are saved in the alert.'),true);return;}
       mapAlertPin?.remove();
+      mapAlertTime=a.time;
       const popup=mapText('div',(a.name||a.node)+' · '+a.node+' · '+a.event+' '+a.title+' · '+mapDate(a.time));
       mapAlertPin=new maplibregl.Marker({color:'#fbbf24'}).setLngLat([a.lon,a.lat]).setPopup(new maplibregl.Popup().setDOMContent(popup)).addTo(mapView);
       mapAlertPin.togglePopup();mapView.flyTo({center:[a.lon,a.lat],zoom:Math.max(mapView.getZoom(),15)});
-      mapNotice('Historical alert location · '+mapDate(a.time));
+      mapNotice(tr('Historical alert location · ')+mapDate(a.time));
     });
-    mapButton(row,'Latest node position',()=>{el('map-alerts-dialog').close();openMapNode(a.radio,a.node,a.device);});
+    mapButton(row,tr('Latest node position'),()=>{el('map-alerts-dialog').close();openMapNode(a.radio,a.node,a.device);});
     mapButton(row,geofenceNodeActionLabel(a.radio,a.node),()=>toggleNodeGeofence(a.radio,a.node));
-    mapButton(row,'Delete alert',()=>{if(confirm('Delete this saved geofence alert?'))AndroidBridge.deleteGeofenceAlert(a.id);});
+    mapButton(row,tr('Delete alert'),()=>{if(confirm(tr('Delete this saved geofence alert?')))AndroidBridge.deleteGeofenceAlert(a.id);});
     host.appendChild(row);
   }
 }
@@ -760,10 +768,10 @@ function renderGeofenceHistory(){
 function renderMapContactFilters(){
   const groups=typeof contactCategories==='function'?contactCategories():[];
   mapContactGroups=mapContactGroups.filter(id=>groups.some(g=>g.id===id));
-  const select=el('map-group');mapChoices(select,[['all','All groups / all nodes'],...(mapContactGroups.length?[['','Add another group…']]:[]),...groups.filter(g=>!mapContactGroups.includes(g.id)).map(g=>[g.id,g.title])]);select.value=mapContactGroups.length?'':'all';
+  const select=el('map-group');mapChoices(select,[['all',tr('All groups / all nodes')],...(mapContactGroups.length?[['',tr('Add another group…')]]:[]),...groups.filter(g=>!mapContactGroups.includes(g.id)).map(g=>[g.id,g.title])]);select.value=mapContactGroups.length?'':'all';
   const selected=el('map-selected-groups');selected.replaceChildren();
-  for(const g of groups.filter(g=>mapContactGroups.includes(g.id))){const row=mapText('div','','contact-group-row');row.appendChild(mapText('span',g.title));const remove=mapButton(row,'×',()=>{mapContactGroups=mapContactGroups.filter(id=>id!==g.id);renderMapContactFilters();renderMap();});remove.setAttribute('aria-label','Remove group filter '+g.title);selected.appendChild(row);}
-  mapChoices(el('map-contact'),[['all','All contacts / all nodes'],...(typeof contactPeople==='function'?contactPeople():[]).map(c=>[c.id,contactName(c)])]);
+  for(const g of groups.filter(g=>mapContactGroups.includes(g.id))){const row=mapText('div','','contact-group-row');row.appendChild(mapText('span',g.title));const remove=mapButton(row,'×',()=>{mapContactGroups=mapContactGroups.filter(id=>id!==g.id);renderMapContactFilters();renderMap();});remove.setAttribute('aria-label',tr('Remove group filter ')+g.title);selected.appendChild(row);}
+  mapChoices(el('map-contact'),[['all',tr('All contacts / all nodes')],...(typeof contactPeople==='function'?contactPeople():[]).map(c=>[c.id,contactName(c)])]);
 }
 function selectMapGroup(id){if(id==='all')mapContactGroups=[];else if(id&&!mapContactGroups.includes(id))mapContactGroups.push(id);renderMapContactFilters();renderMap();}
 window.mapContactsChanged=()=>{renderMapContactFilters();if(activeTab==='map')renderMap();};
@@ -773,6 +781,6 @@ function renderMapSearch(){
   const query=el('map-node-search').value.trim().toLocaleLowerCase(),host=el('map-search-results');host.replaceChildren();
   const unique=new Map();for(const n of mapData.nodes){const key=n.radio+':'+n.id,old=unique.get(key);unique.set(key,old?mapPreferredObservation(old,n):n);}
   const matches=[...unique.values()].filter(n=>[n.name,n.id].some(value=>String(value||'').toLocaleLowerCase().includes(query))).sort((a,b)=>(a.name||a.id).localeCompare(b.name||b.id));
-  if(!matches.length)host.appendChild(mapText('p','No matching nodes.','help'));
-  for(const n of matches){const positioned=mapHasPosition(n),button=mapButton(host,(n.name||n.id)+' · '+n.radio.toUpperCase()+' · '+n.id+(positioned?'':' · Position unavailable'),()=>{el('map-search-dialog').close();openMapNode(n.radio,n.id,n.device);});button.disabled=!positioned;}
+  if(!matches.length)host.appendChild(mapText('p',tr('No matching nodes.'),'help'));
+  for(const n of matches){const positioned=mapHasPosition(n),button=mapButton(host,(n.name||n.id)+' · '+n.radio.toUpperCase()+' · '+n.id+(positioned?'':tr(' · Position unavailable')),()=>{el('map-search-dialog').close();openMapNode(n.radio,n.id,n.device);});button.disabled=!positioned;}
 }

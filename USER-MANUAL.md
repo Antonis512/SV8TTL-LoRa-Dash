@@ -1,7 +1,7 @@
 # SV8TTL LoRa Dash
 
 **Beta · User manual**  
-For version **0.10.37 (64)** · 26 November 2026
+Current source manual · 28 November 2026 · application version **0.10.37 (64)**
 
 Language: **English** · [Ελληνικά](USER-MANUAL-el.md)
 
@@ -12,6 +12,41 @@ SV8TTL LoRa Dash is a standalone Android app for connecting to MeshCore and Mesh
 This is an independent Android adaptation based on OverMesh Lite, incorporating original OverMesh assets. It is not an official OverMesh release. Credits and notices are available in **Config → About** and [LICENSE](LICENSE).
 
 The pictures show the app interface rendered at phone size with fictional names, IDs, messages and readings. Physical radio and phone checks are tracked in [PHONE-TESTS.md](PHONE-TESTS.md).
+
+## Language and recent features
+
+### Select the interface language
+
+Open **Config → Language (Γλώσσα) → Select Language (Επιλογή γλώσσας)**. Select **English** or **Ελληνικά**, then **Apply / Εφαρμογή**. Cancel leaves the current choice unchanged. The white Language heading and its button sit above Check for Updates, separated by a blank line.
+
+The choice is saved on the phone and applies to normal and member mode. Leaving member mode does not reset it. Names, channel names, message bodies, drafts and technical identifiers remain unchanged. Unmapped text falls back to English. The existing member-mode flags use the same language preference.
+
+### Persistent messages and locations
+
+**P. Msg** and **P. Location** sit above the message box, before **Send position**. Member mode places them before **Send my location**. Choose a connected node and destination first.
+
+For **P. Msg**, enter the message, an interval of at least **2 minutes**, and an optional expiry or maximum retry count. The maximum counts retries after the first transmission. Each message must fit one radio packet. Confirmation is automatic: MT mesh/relay/delivery evidence or matching MC channel-repeat/direct-delivery evidence stops retries, as does a linked reply. A later unlinked direct message offers **Mark answered / Stop**; it does not silently mark the message answered. Mesh acceptance and recipient delivery remain distinct outcomes. MC direct messages require recipient acknowledgment; repeater hearing alone is not treated as direct delivery.
+
+For **P. Location**, the first qualifying phone position is sent, then another is sent only after both **100 m** of movement from the last sent position and the configured interval of at least **2 minutes**. A fix must be no more than **30 seconds** old with Android-reported horizontal accuracy of **25 m or better**. Inadequate fixes wait; an acknowledgment does not stop ongoing location sharing. Stop it explicitly or set an expiry.
+
+Automatic sends yield to manual sending and composition. While you are composing, a due job waits **45 seconds** before checking again; this does not consume a retry. Restarted jobs return paused and require **Resume**. Reconnection does not send a catch-up burst. Android background scheduling can delay checks. The foreground notification offers **Stop all persistent** while jobs are active.
+
+### Shared-location trails and map retention
+
+Incoming tracked positions show a named marker at the newest report and APRS-style arrows from older to newer reports. Duplicate or stationary samples do not add movement segments, and gaps over **30 minutes** are not connected. MT groups repeated Location waypoints by sender and waypoint ID. New MC persistent channel reports include a sender identifier; older untagged MC channel markers remain separate because names alone are ambiguous. Channel-supplied identity is identified in the popup.
+
+Received positions, tracks, received marks, heard events and geofence alert history older than **30 days** are removed. Stale node coordinates are cleared while node identities remain. Cleanup runs when the app starts, each minute while running, and during map reads and backup processing. Saved manual marks, geofences, overlays and offline maps remain. Restoring an old backup does not revive expired map history.
+
+### Contacts, signal and refresh timing
+
+Contacts uses a **Group** dropdown: **All groups**, **No group**, or one saved group. This controls which contact profiles are shown; it does not change their group assignments or the separate Map group filters.
+
+Signal Quality graphs, statistics and reception details show only confirmed **0-hop RF reports**. Relayed, unknown-hop and MQTT reports are excluded from this view. Received RF signal reports update the sender's **Last heard** record.
+
+While visible, Nodes refreshes after incoming events, batched by about **200 ms**, with no fixed polling interval. Map refreshes after relevant events, batched by about **300 ms**, and additionally every **60 seconds**. Storage and rendering add latency. These refreshes do not request new radio transmissions.
+
+The sections below retain earlier version notes and illustrations. Current behavior described here takes precedence. Physical MC/MT, GPS and Android inset tests remain pending.
+
 
 ## Android contact linking
 
@@ -89,7 +124,7 @@ Contacts categories are now named **Groups**; existing memberships are preserved
 
 Per-radio channel management and MeshCore utilization history are available. A geofence can issue a **possible entrance** notification as soon as any part of a Meshtastic shared-position uncertainty circle overlaps it; the whole circle need not enter. Continuous overlap does not repeatedly trigger the same entrance alert.
 
-These changes still require physical MC/MT radio and phone testing. In particular, check connection/reconnection, initial nodes/channels and Chat selection, simultaneous connections, Contacts scrolling, and Android gesture/three-button navigation and keyboard insets. Automatic location sharing is not implemented. Signal history is not included in Full App Backup.
+These changes still require physical MC/MT radio and phone testing. In particular, check connection/reconnection, initial nodes/channels and Chat selection, simultaneous connections, Contacts scrolling, and Android gesture/three-button navigation and keyboard insets. For automatic sharing, use P. Location as described above. Signal history is not included in Full App Backup.
 
 
 ## Contents

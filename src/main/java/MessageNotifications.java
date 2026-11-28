@@ -9,7 +9,7 @@ final class MessageNotifications {
     static final int ID=202;
     static final String CHANNEL="background_messages";
     static void createChannel(Context context) {
-        NotificationChannel channel=new NotificationChannel(CHANNEL,"Background messages",NotificationManager.IMPORTANCE_HIGH);
+        NotificationChannel channel=new NotificationChannel(CHANNEL,AppLanguage.text(context,"Background messages"),NotificationManager.IMPORTANCE_HIGH);
         // Message sounds are controlled by the existing MC/MT/DM sound settings.
         channel.setSound(null,null);
         context.getSystemService(NotificationManager.class).createNotificationChannel(channel);
@@ -17,7 +17,7 @@ final class MessageNotifications {
     private static final String NEW_NODES="mt_new_nodes";
     static void showNewNode(Context context,String device,String id,String name) {
         NotificationManager manager=context.getSystemService(NotificationManager.class);
-        manager.createNotificationChannel(new NotificationChannel(NEW_NODES,"New Node Seen",NotificationManager.IMPORTANCE_DEFAULT));
+        manager.createNotificationChannel(new NotificationChannel(NEW_NODES,AppLanguage.text(context,"New Node Seen"),NotificationManager.IMPORTANCE_DEFAULT));
         if(!manager.areNotificationsEnabled() || manager.getNotificationChannel(NEW_NODES).getImportance()==NotificationManager.IMPORTANCE_NONE)return;
         Intent open=new Intent(context,MainActivity.class)
                 .setData(new android.net.Uri.Builder().scheme("loradash").authority("node").appendPath(device).appendPath(id).build())
@@ -25,7 +25,7 @@ final class MessageNotifications {
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent pending=PendingIntent.getActivity(context,0,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification alert=new Notification.Builder(context,NEW_NODES).setSmallIcon(R.drawable.ic_radio)
-                .setContentTitle("New Node Seen").setContentText(name.equals(id)?id:name+" · "+id)
+                .setContentTitle(AppLanguage.text(context,"New Node Seen")).setContentText(name.equals(id)?id:name+" · "+id)
                 .setContentIntent(pending).setAutoCancel(true).setCategory(Notification.CATEGORY_STATUS).build();
         try{manager.notify("new-node:"+device+":"+id,204,alert);}catch(SecurityException denied){}
     }
@@ -38,7 +38,7 @@ final class MessageNotifications {
     static void show(Context context,String title,String text) {
         show(context,title,text,false);
     }
-    static void showGeofence(Context context,String text,String radio,String node){show(context,"Map geofence",text,true,radio,node);}
+    static void showGeofence(Context context,String text,String radio,String node){show(context,AppLanguage.text(context,"Map geofence"),text,true,radio,node);}
     private static void show(Context context,String title,String text,boolean geofence){show(context,title,text,geofence,"","");}
     private static void show(Context context,String title,String text,boolean geofence,String radio,String node){
         createChannel(context);
@@ -57,7 +57,7 @@ final class MessageNotifications {
                 .putExtra("excludeGeofenceNode",node).putExtra("geofenceRadio",radio).putExtra("geofenceHistory",true)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
             PendingIntent action=PendingIntent.getActivity(context,0,exclude,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-            builder.addAction(new Notification.Action.Builder(null,"Exclude node",action).build());
+            builder.addAction(new Notification.Action.Builder(null,AppLanguage.text(context,"Exclude node"),action).build());
         }
         Notification notification=builder.build();
         try {context.getSystemService(NotificationManager.class).notify(notificationId,notification);}

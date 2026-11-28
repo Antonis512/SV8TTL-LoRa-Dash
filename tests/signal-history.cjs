@@ -12,15 +12,18 @@ const path=require('node:path');
   await page.evaluate(()=>{
    openSignalHistory('MT-Device1','!12345678');const now=Date.now();
    window.fixture={key:'MT-Device1',peer:'!12345678',name:'MT-Node32',receiver:'MT-Device1',connected:true,rows:[
-    {time:now,snr:0,rssi:-98,hops:0,stats:'',phoneTime:false},
+    {time:now,snr:0,rssi:-98,hops:0,stats:'Direct statistics fixture',phoneTime:false},
     {time:now-60000,snr:-8,rssi:-112,hops:0,stats:''},
     {time:now-120000,snr:15,rssi:-55,hops:2,stats:'Node statistics\nNoise floor: -110 dBm\nPackets received: 18',requested:true},
-    {time:now-180000,snr:9,hops:-1,stats:''},
+    {time:now-180000,snr:9,hops:-1,stats:'Unknown-hop statistics fixture'},
+    {time:now-200000,snr:25,rssi:-20,hops:0,mqtt:true,stats:'MQTT statistics fixture'},
     {time:now-86400000*2,snr:2,rssi:-100,hops:0,stats:''}
    ]};onSignalHistory(fixture);
   });
   assert.equal(await page.locator('.signal-plot svg circle').count(),4,'Graphs include only recent direct receptions');
-  assert((await page.locator('#signal-history').innerText()).includes('Last-hop reception · 2 hops'));
+  const shown=await page.locator('#signal-history').textContent();
+  assert(shown.includes('Direct statistics fixture'));
+  for(const hidden of ['Last-hop reception · 2 hops','Noise floor: -110','Unknown-hop statistics fixture','MQTT statistics fixture','SNR: 9 dB','SNR: 15 dB','SNR: 25 dB'])assert(!shown.includes(hidden),hidden+' must be hidden');
   assert(!/\b(?:AM|PM)\b/.test(await page.locator('#signal-history').innerText()));
   await page.getByRole('button',{name:'Request node statistics',exact:true}).click();
   assert.deepEqual(await page.evaluate(()=>calls.at(-1)),['nodeAction','MT-Device1','!12345678','signal','']);

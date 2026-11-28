@@ -9,7 +9,7 @@ const page=await browser.newPage({viewport:{width:390,height:780}});
 await page.addInitScript(()=>{window.calls=[];window.AndroidBridge=new Proxy({},{get:(_,n)=>(...args)=>calls.push([n,...args])});});
 await page.goto(pathToFileURL(path.resolve('src/main/assets/index.html')).href);
 await page.evaluate(()=>{
- window.fixture={nodes:[{radio:'mt',device:'rx',id:'one',name:'First',lat:38,lon:23,positionAt:1},{radio:'mt',device:'rx',id:'two',name:'Second',lat:38,lon:23,positionAt:1},{radio:'mt',device:'other',id:'one',name:'Stale name',lat:39,lon:24,positionAt:2}],alerts:[{id:'alert',radio:'mt',device:'rx',node:'one',name:'First',event:'entered',title:'Home',lat:38,lon:23,time:1000}]};
+ window.fixture={nodes:[{radio:'mt',device:'rx',id:'one',name:'First',lat:38,lon:23,positionAt:1},{radio:'mt',device:'rx',id:'two',name:'Second',lat:38,lon:23,positionAt:1},{radio:'mt',device:'other',id:'one',name:'Stale name',lat:39,lon:24,positionAt:2}],alerts:[{id:'alert',radio:'mt',device:'rx',node:'one',name:'First',event:'entered',title:'Home',lat:38,lon:23,time:Date.now()}]};
  // Exercise selection and marker contents without network tiles or GPU requirements.
  window.maplibregl.Marker=class{constructor(){this.popup=null;}setLngLat(){return this;}setPopup(p){this.popup=p;return this;}addTo(){return this;}remove(){}togglePopup(){}getPopup(){return this.popup;}};
  window.maplibregl.Popup=class{setDOMContent(el){this.el=el;return this;}addTo(){return this;}};

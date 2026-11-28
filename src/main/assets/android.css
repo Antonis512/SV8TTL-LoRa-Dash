@@ -464,6 +464,17 @@ body.member-mode #tab-chat > :not(#member-chat),body.member-mode #bottom-nav but
 #member-people .member-check:not(:first-child){margin-inline-start:12px}
 
 #settings-home h2{font-size:16px;margin:10px 0 0}
+#language-frame{border:1px solid var(--border);border-radius:10px;padding:12px;margin:3px 0 23px;background:var(--bg2);min-width:0}
+#language-frame legend{color:var(--text);font-size:15px;font-weight:700;padding:0 7px}
+#language-frame button{background:var(--bg);min-height:62px}
+#language-picker{width:min(350px,calc(100% - 28px));box-sizing:border-box;border:1px solid var(--accent);border-radius:12px;background:var(--bg2);color:var(--text);padding:18px;margin:auto;max-height:calc(100dvh - 32px);overflow:auto}
+#language-picker::backdrop{background:#0009}
+#language-picker h2{font-size:17px;color:var(--accent);margin:0 0 18px}
+#language-picker label{display:flex;align-items:center;gap:12px;padding:16px 12px;margin:8px 0;border:1px solid var(--border);border-radius:8px;font-size:16px}
+#language-picker input{accent-color:var(--accent);width:18px;height:18px}
+#language-picker .actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:20px}
+#language-picker button{padding:10px;border:1px solid var(--accent);border-radius:7px;background:var(--bg);color:var(--text);min-height:44px}
+body.member-mode #settings-home #select-language{display:flex!important}
 #member-recipients .settings-window-footer{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 #member-recipient-warning{grid-column:1/-1;margin:0;color:var(--text)}
 

@@ -1,5 +1,17 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 28 November 2026 — source and manual publication authorized
+
+The user authorized updating the manuals and GitHub. This publishes the persistent-send, map-trail, signal-history, Contacts dropdown and Greek-interface source, tests and documentation. The published APK and update feed remain unchanged. README now describes app capabilities; its previous history and notices are preserved in PROJECT-HISTORY.md. Existing MIT attribution, dependency notices, application ID and signing configuration remain unchanged. Physical phone/radio verification remains pending.
+
+## 27 November 2026 — Greek interface
+
+Greek UI text is imported from the user-supplied `SV8TTL_Greek_Translation_COMPLETE.xlsx`. The spreadsheet is treated only as translation data; none of its commentary is executed. The language selector and translation helpers are locally authored. Existing source and dependency attribution remains unchanged. Radio identifiers, protocol values, user names and message contents are not translated. No new third-party implementation is included.
+
+## 27 November 2026 — persistent sends, local preview
+
+Persistent-message/location scheduling, composer controls, foreground location handling and tests are locally authored. Protocol behavior uses the existing MT acknowledgement and MC exact-payload repeat trackers; references consulted were the official [Meshtastic mesh protobuf](https://github.com/meshtastic/protobufs/blob/master/meshtastic/mesh.proto), [MeshCore companion protocol](https://github.com/meshcore-dev/MeshCore/blob/main/docs/companion_protocol.md), and [Android Location API](https://developer.android.com/reference/android/location/Location). No third-party implementation or assets were copied. Existing MIT attribution, application ID and signing configuration remain unchanged. This is an independent Android adaptation based on OverMesh Lite, not an official OverMesh release. No new publication is performed by this change; production signing and replacement licensing remain undecided.
+
 ## 26 November 2026 — APK publication authorized
 
 The user subsequently requested building and publishing the APK, superseding the source-only instruction below. Version 0.10.37 (64) includes the latest Manage-menu and Android contact-import changes. assembleDebug passed, the package identity is unchanged, and the verified signing certificate matches the previous published APK. Existing MIT attribution and dependency notices are retained. Production signing and replacement licensing remain undecided; physical phone/radio verification remains pending.

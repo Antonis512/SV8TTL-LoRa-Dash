@@ -13,14 +13,17 @@ public final class RadioConnectionService extends Service {
     static final String CHANNEL="radio_connections";
     static Notification notification(android.content.Context context,String text,int unread) {
         NotificationManager manager=context.getSystemService(NotificationManager.class);
-        manager.createNotificationChannel(new NotificationChannel(CHANNEL,"Radio connections",NotificationManager.IMPORTANCE_LOW));
+        manager.createNotificationChannel(new NotificationChannel(CHANNEL,AppLanguage.text(context,"Radio connections"),NotificationManager.IMPORTANCE_LOW));
         Intent open=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent pending=PendingIntent.getActivity(context,0,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        return new Notification.Builder(context,CHANNEL).setSmallIcon(unread>0?R.drawable.ic_radio_unread:R.drawable.ic_radio)
+        Notification.Builder builder=new Notification.Builder(context,CHANNEL).setSmallIcon(unread>0?R.drawable.ic_radio_unread:R.drawable.ic_radio)
                 .setColor(unread>0?0xff219653:0xff17695c).setColorized(unread>0)
                 .setLargeIcon(unread>0?unreadIcon():null).setNumber(unread)
-                .setContentTitle(unread>0?context.getString(R.string.app_name)+" · "+unread+" unread message"+(unread==1?"":"s"):context.getString(R.string.app_name)+" running").setContentText(text).setContentIntent(pending)
-                .setOngoing(true).setOnlyAlertOnce(true).setCategory(Notification.CATEGORY_SERVICE).build();
+                .setContentTitle(unread>0?context.getString(R.string.app_name)+" · "+unread+" unread message"+(unread==1?"":"s"):context.getString(R.string.app_name)+" running").setContentText(text).setContentIntent(pending);
+        MainActivity activity=owner.get();
+        if(activity!=null&&activity.hasActivePersistent())builder.addAction(new Notification.Action.Builder(null,AppLanguage.text(context,"Stop all persistent"),PendingIntent.getService(context,1,
+                    new Intent(context,RadioConnectionService.class).setAction("stop_persistent"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE)).build());
+        return builder.setOngoing(true).setOnlyAlertOnce(true).setCategory(Notification.CATEGORY_SERVICE).build();
     }
     private static android.graphics.Bitmap unreadIcon() {
         android.graphics.Bitmap image=android.graphics.Bitmap.createBitmap(96,96,android.graphics.Bitmap.Config.ARGB_8888);
@@ -32,9 +35,12 @@ public final class RadioConnectionService extends Service {
         canvas.drawLine(25,32,48,49,paint);canvas.drawLine(48,49,71,32,paint);return image;
     }
     @Override public int onStartCommand(Intent intent,int flags,int id) {
+        if(intent!=null&&"stop_persistent".equals(intent.getAction())){MainActivity activity=owner.get();if(activity!=null)activity.stopAllPersistent();return START_NOT_STICKY;}
         String text=intent==null?"Radio connections active":intent.getStringExtra("text");
         Notification notification=notification(this,text,intent==null?0:intent.getIntExtra("unread",0));
-        if(Build.VERSION.SDK_INT>=29) startForeground(NOTIFICATION_ID,notification,ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+        int types=ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;
+        if(intent!=null&&intent.getBooleanExtra("location",false))types|=ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+        if(Build.VERSION.SDK_INT>=29) startForeground(NOTIFICATION_ID,notification,types);
         else startForeground(NOTIFICATION_ID,notification);
         getSystemService(NotificationManager.class).cancel(201);
         return START_NOT_STICKY;

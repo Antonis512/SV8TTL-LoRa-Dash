@@ -86,6 +86,145 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 
 public final class MainActivity extends Activity {
+    private String ui(String text){return AppLanguage.text(this,text);}
+    private static final int PERSISTENT_LOCATION_PERMISSION=497;
+    private PersistentJobs persistentJobs;
+    private boolean persistentComposing,persistentNativeComposer;
+    private Location persistentFix;
+    private LocationListener persistentLocationListener;
+    private final Runnable persistentRunner=new Runnable(){public void run(){
+        if(closing)return;
+        if(persistentJobs!=null)persistentJobs.tick();
+        main.postDelayed(this,1000);
+    }};
+    private void initPersistentJobs(){
+        try {
+            persistentJobs=new PersistentJobs(new PersistentJobs.Host(){
+                public long elapsed(){return SystemClock.elapsedRealtime();}
+                public long wall(){return System.currentTimeMillis();}
+                public void save(String json)throws Exception{
+                    if(!getSharedPreferences("persistent_jobs",0).edit().putString("jobs",json).commit())throw new IOException("Cannot save persistent jobs");
+                }
+                public String waitReason(JSONObject job)throws Exception{
+                    RadioSession s=chainRadio(job);if(s==null||s.protocol==null)return "Disconnected — waiting for original radio";
+                    try{validatePersistentTarget(job,s,false);}catch(Exception e){return "Destination unavailable — check original radio and channel";}
+                    if(job.optBoolean("location")&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED)return "Precise location permission required";
+                    return "";
+                }
+                public boolean busy(JSONObject job){
+                    if(resumed&&(persistentComposing||persistentNativeComposer))return true;
+                    if(sendChain!=null&&!sendChain.data.optBoolean("paused",true)&&chainUnfinished())return true;
+                    for(RadioSession s:sessions.values()){
+                        if(!s.splitSends.isEmpty()||!s.pendingSends.isEmpty()||!s.outgoingWrites.isEmpty())return true;
+                        if(s.protocol instanceof MeshCoreProtocol&&s.connected&&((MeshCoreProtocol)s.protocol).busyForSend())return true;
+                        for(ChatEntry e:s.trackedMessages.values())if(e.delivery.equals("queued")||e.delivery.equals("sent_to_radio")||e.delivery.equals("accepted")||e.delivery.startsWith("sending:"))return true;
+                    }
+                    return false;
+                }
+                public double[] location(){
+                    Location f=persistentFix;
+                    if(f==null||!f.hasAccuracy()||!PersistentPolicy.fresh(SystemClock.elapsedRealtime(),f.getElapsedRealtimeNanos()/1000000,f.getAccuracy())||!MapData.valid(f.getLatitude(),f.getLongitude()))return null;
+                    return new double[]{f.getLatitude(),f.getLongitude()};
+                }
+                public long send(JSONObject job,String text,double[] fix)throws Exception{return dispatchPersistent(job,text,fix);}
+                public void stopAttempts(JSONObject job){stopPersistentAttempts(job);}
+                public void changed(){syncPersistentLocation();notificationText="";publish();}
+            },getSharedPreferences("persistent_jobs",0).getString("jobs","[]"));
+            main.postDelayed(persistentRunner,1000);
+        }catch(Exception e){debug("Cannot restore persistent jobs: "+e.getClass().getSimpleName());}
+    }
+    private void validatePersistentTarget(JSONObject dest,RadioSession s,boolean creating)throws Exception{
+        String peer=dest.optString("peer");int channel=dest.optInt("channel",-1);
+        if(peer.isEmpty()){
+            String name=s.channelNames.get(channel);if(name==null)throw new IllegalArgumentException("Wait for the radio's channel names");
+            byte[] secret=s.protocol.channelAdmin().secrets.get(channel);
+            if(secret==null)throw new IllegalArgumentException("Wait for the radio's channel configuration");
+            String fingerprint=android.util.Base64.encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(secret),android.util.Base64.NO_WRAP);
+            if(creating)dest.put("channelName",name).put("channelFingerprint",fingerprint);
+            else if(!name.equals(dest.optString("channelName"))||!fingerprint.equals(dest.optString("channelFingerprint")))throw new IllegalArgumentException("Channel changed");
+        }else{
+            if(channel!=-1||peer.equals(s.ownId)||!s.knownNodes.containsKey(peer))throw new IllegalArgumentException("Recipient unavailable");
+            if(s.meshcore&&!((MeshCoreProtocol)s.protocol).hasContactKey(peer))throw new IllegalArgumentException("Recipient key unavailable");
+        }
+        JSONObject config=new JSONObject(getPreferences(0).getString("member_config","{}"));
+        if(config.optBoolean("enabled")){
+            boolean allowed=false;
+            if(peer.isEmpty()){
+                JSONArray channels=config.getJSONObject("channels").optJSONArray(dest.optString("radio")+":"+s.ownId);
+                if(channels!=null)for(int i=0;i<channels.length();i++){JSONObject c=channels.getJSONObject(i);if(c.optInt("index",-1)==channel&&c.optString("name").equals(s.channelNames.get(channel)))allowed=true;}
+            }else{
+                JSONArray contacts=ContactsStore.all(chatStore),ids=config.getJSONArray("contacts");
+                for(int i=0;i<contacts.length();i++){
+                    JSONObject c=contacts.getJSONObject(i);boolean selected=false;
+                    for(int n=0;n<ids.length();n++)if(ids.getString(n).equals(c.optString("id")))selected=true;
+                    if(!selected||c.optLong("deletedAt")!=0)continue;
+                    JSONArray nodes=c.optJSONArray("nodes");if(nodes!=null)for(int n=0;n<nodes.length();n++){
+                        JSONObject node=nodes.getJSONObject(n);if(node.optString("radio").equals(dest.optString("radio"))&&node.optString("id").equals(peer))allowed=true;
+                    }
+                }
+            }
+            // The member UI also permits answering a specific received message.
+            if(!allowed&&dest.optLong("sourceId")>0){
+                List<ChatEntry> history=peer.isEmpty()?s.chats.get(channel):s.directs.get(peer);
+                if(history!=null)for(ChatEntry e:history)if(e.id==dest.optLong("sourceId")&&!e.own&&!e.reaction)allowed=true;
+            }
+            if(!allowed)throw new IllegalArgumentException("Choose an approved member destination");
+        }
+    }
+    private long dispatchPersistent(JSONObject job,String text,double[] fix)throws Exception{
+        RadioSession s=chainRadio(job);if(s==null||s.protocol==null)throw new IllegalArgumentException("Original radio disconnected");
+        validatePersistentTarget(job,s,false);
+        String peer=job.optString("peer");int channel=job.optInt("channel");
+        byte[] payload;
+        if(fix!=null&&s.meshcore)text=String.format(java.util.Locale.ROOT,"m:%.6f,%.6f|Location @%s|poi",fix[0],fix[1],s.ownId.substring(0,Math.min(12,s.ownId.length())));
+        if(fix!=null&&!s.meshcore)payload=((MeshtasticProtocol)s.protocol).waypointCommand("persistent-"+job.getString("id"),"Location","SV8TTL P.Location",fix[0],fix[1],peer.isEmpty()?channel:Math.max(0,s.knownNodes.get(peer).channel),peer);
+        else payload=peer.isEmpty()?s.protocol.sendChannel(channel,text):s.protocol.nodeCommand("dm",peer,text,s.knownNodes.get(peer).channel);
+        long token=s.protocol.lastRequestId();
+        // The persistent scheduler owns retry timing, including on older MC firmware.
+        if(s.protocol instanceof MeshCoreProtocol)((MeshCoreProtocol)s.protocol).stopFutureAttempts(token);
+        ChatEntry entry=new ChatEntry("You",text,true);
+        entry.id=chatStore.save(s.meshcore?"mc":"mt",s.ownId,channel,entry.sender,text,entry.time,entry.receivedAt,true,entry.delivery,peer);
+        entry.packetId=s.meshcore?0:token;chatStore.setReferences(entry.id,entry.packetId,0);
+        entry.heardRepeats=s.protocol.tracksRepeats(token)?0:-1;chatStore.setHeardRepeats(entry.id,entry.heardRepeats);
+        PersistentJobs.remember(job.getJSONArray("messageIds"),entry.id);persistentJobs.persist();
+        if(peer.isEmpty())s.chats.computeIfAbsent(channel,k->new ArrayList<>()).add(entry);else s.directs.computeIfAbsent(peer,k->new ArrayList<>()).add(entry);
+        s.track(entry,token);s.sendTracked(payload);return entry.packetId;
+    }
+    private void stopPersistentAttempts(JSONObject job){
+        JSONArray ids=job.optJSONArray("messageIds");if(ids==null)return;
+        for(RadioSession s:sessions.values())if(s.matches(job.optString("radio"),job.optString("nodeId"))&&s.protocol instanceof MeshCoreProtocol)
+            for(Map.Entry<Long,ChatEntry> e:s.trackedMessages.entrySet())for(int i=0;i<ids.length();i++)if(ids.optLong(i)==e.getValue().id)((MeshCoreProtocol)s.protocol).stopFutureAttempts(e.getKey());
+    }
+    void stopAllPersistent(){main.post(()->{try{if(persistentJobs!=null)persistentJobs.stopAll();}catch(Exception e){debug("Cannot save stopped jobs");}});}
+    boolean hasActivePersistent(){return persistentJobs!=null&&persistentJobs.activeCount()>0;}
+    private void persistentResult(ChatEntry entry,boolean meshcore){
+        try{if(persistentJobs!=null)persistentJobs.result(entry.id,entry.delivery,meshcore,entry.heardRepeats);}catch(Exception e){debug("Cannot save persistent delivery");}
+    }
+    private void persistentIncoming(RadioSession s,int channel,String peer,ChatEntry entry,boolean historical){
+        try{if(persistentJobs!=null&&!entry.reaction)persistentJobs.incoming(s.meshcore?"mc":"mt",s.ownId,channel,peer,entry.receivedAt*1000,entry.replyId,historical);}catch(Exception e){debug("Cannot save persistent reply");}
+    }
+    private void stopPersistentLocation(){
+        if(persistentLocationListener!=null)try{getSystemService(LocationManager.class).removeUpdates(persistentLocationListener);}catch(SecurityException ignored){}
+        persistentLocationListener=null;persistentFix=null;
+    }
+    private void syncPersistentLocation(){
+        if(persistentJobs==null||!persistentJobs.needsLocation()){stopPersistentLocation();return;}
+        if(persistentLocationListener!=null||!resumed)return;
+        if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED)return;
+        try{
+            // Promote to a location foreground service while this Activity is visible.
+            Intent service=new Intent(this,RadioConnectionService.class).putExtra("text","Persistent location active").putExtra("location",true);
+            startForegroundService(service);radioServiceRunning=true;
+            persistentLocationListener=new LocationListener(){
+                public void onLocationChanged(Location fix){persistentFix=new Location(fix);}
+                public void onProviderDisabled(String provider){persistentFix=null;}
+                public void onProviderEnabled(String provider){}
+                public void onStatusChanged(String provider,int status,Bundle extras){}
+            };
+            LocationManager manager=getSystemService(LocationManager.class);
+            manager.requestLocationUpdates(LocationManager.GPS_PROVIDER,10000,0,persistentLocationListener,Looper.getMainLooper());
+        }catch(SecurityException|IllegalArgumentException e){stopPersistentLocation();debug("Persistent location unavailable");}
+    }
     private static final String USB_PERMISSION = "org.overmesh.android.USB_PERMISSION";
     private static final String APP_URL = "https://appassets.androidplatform.net/assets/index.html";
     private static final int GREEN = 0xff17695c;
@@ -146,7 +285,7 @@ public final class MainActivity extends Activity {
                 mapSnapshotInFlight=false;mapSnapshotAgain=false;
                 boolean loading=false;
                 for(RadioSession s:sessions.values())if(s.loading){loading=true;s.storageFailed=true;s.syncFailed("Could not save radio data. Reconnect to retry.");}
-                if(!loading)nodeActionResult("Could not save radio data: "+error.getMessage());
+                if(!loading)nodeActionResult(ui("Could not save radio data: ")+error.getMessage());
             });}
         });
     }
@@ -289,10 +428,10 @@ public final class MainActivity extends Activity {
             catch(JSONException error){debug("Could not read member settings for disconnect warning");}
         }
         String name=connectionWarnings.remove();
-        new AlertDialog.Builder(this).setTitle(greek?"Αποσύνδεση ασυρμάτου":"Radio disconnected")
+        new AlertDialog.Builder(this).setTitle(greek?"Αποσύνδεση κόμβου":ui("Radio disconnected"))
             .setMessage(greek?"Η συσκευή "+name+" αποσυνδέθηκε απροσδόκητα. Το πρόχειρο μήνυμά σας διατηρήθηκε. Επανασυνδέστε τη συσκευή για αποστολή.":
-                name+" disconnected unexpectedly. Your draft is kept. Reconnect the radio to send.")
-            .setCancelable(false).setPositiveButton(greek?"Εντάξει":"OK",(dialog,which)->{}).setOnDismissListener(dialog->{
+                name+ui(" disconnected unexpectedly. Your draft is kept. Reconnect the radio to send."))
+            .setCancelable(false).setPositiveButton(greek?"Εντάξει":ui("OK"),(dialog,which)->{}).setOnDismissListener(dialog->{
                 disconnectDialogVisible=false;
                 if(pageReady&&!closing)web.evaluateJavascript("window.afterConnectionWarning&&window.afterConnectionWarning()",null);
                 displayConnectionWarning();
@@ -327,7 +466,7 @@ public final class MainActivity extends Activity {
         }
     }
     @Override protected void onResume() {
-        super.onResume();debug("Lifecycle resume");if(closing)return;resumed=true;reconcileBleState();notificationText="";updateRunningNotification();displayConnectionWarning();publish();
+        super.onResume();debug("Lifecycle resume");if(closing)return;resumed=true;syncPersistentLocation();reconcileBleState();notificationText="";updateRunningNotification();displayConnectionWarning();publish();
         requestInitialNotificationPermission();
         if(awaitingInstallPermission){awaitingInstallPermission=false;if(Build.VERSION.SDK_INT<26||getPackageManager().canRequestPackageInstalls())installDownloadedUpdate();else updateStatus("error","Allow installs from this app in Android settings, then check for updates again.");}
     }
@@ -353,13 +492,15 @@ public final class MainActivity extends Activity {
         if(closing)return;
         int count=0;for(RadioSession session:sessions.values())if(session.connected)count++;
         String text=count>0?count+" radio connection"+(count==1?"":"s")+" active · tap to return":"App open · no radios connected · tap to return";
+        int activeJobs=persistentJobs==null?0:persistentJobs.activeCount();
+        if(activeJobs>0)text=activeJobs+" persistent job"+(activeJobs==1?"":"s")+" · "+text;
         int unread=chatStore==null?0:chatStore.unreadCount();
         if(unread>0)text=unread+" unread · "+text;
         if(historyTransferRunning)text="Backup transfer in progress · keep the app open until completion";
         if(text.equals(notificationText))return;
         try {
-            if(count>0) {
-                Intent intent=new Intent(this,RadioConnectionService.class).putExtra("text",text).putExtra("unread",unread);
+            if(count>0||activeJobs>0) {
+                Intent intent=new Intent(this,RadioConnectionService.class).putExtra("text",text).putExtra("unread",unread).putExtra("location",persistentLocationListener!=null);
                 if(radioServiceRunning)startService(intent);
                 else if(resumed){startForegroundService(intent);radioServiceRunning=true;}
                 else notifyRunningStatus(text,unread);
@@ -447,7 +588,7 @@ public final class MainActivity extends Activity {
             Long token=outgoingWrites.remove(payload); if(token==null) return;
             ChatEntry entry=trackedMessages.get(token);
             if(!success) {
-                if(meshcore && protocol instanceof MeshCoreProtocol && ((MeshCoreProtocol)protocol).manualResetPending(token))nodeActionResult("Path reset write failed: "+reason,key);
+                if(meshcore && protocol instanceof MeshCoreProtocol && ((MeshCoreProtocol)protocol).manualResetPending(token))nodeActionResult(ui("Path reset write failed: ")+reason,key);
                 if(!meshcore)mtTracerouteAllowance.submissionFailed(key,token);
                 if(entry!=null) delivery(token,"failed: "+reason);
                 else if(pendingTrace==token||pendingMtTraces.containsKey(token)) {
@@ -494,7 +635,7 @@ public final class MainActivity extends Activity {
                 if((entry.delivery.equals("delivered")||entry.delivery.equals("delivered_mesh")) && !status.equals("delivered")) return;
                 if(status.equals("accepted")&&!entry.delivery.equals("queued")&&!entry.delivery.equals("sent_to_radio")) return;
                 if(status.equals("sent_to_radio")&&!entry.delivery.equals("queued")) return;
-                entry.delivery=status; chatStore.setDelivery(entry.id,status); publish();
+                entry.delivery=status; chatStore.setDelivery(entry.id,status); persistentResult(entry,meshcore);publish();
             });
         }
         final Map<String,JSONArray> pendingPaths=new java.util.LinkedHashMap<>();
@@ -536,7 +677,7 @@ public final class MainActivity extends Activity {
                 ChatEntry entry=trackedMessages.get(token);
                 if(entry==null||entry.heardRepeats<0||entry.heardRepeats==Integer.MAX_VALUE) return;
                 entry.heardRepeats++;
-                chatStore.setHeardRepeats(entry.id,entry.heardRepeats);publish();
+                chatStore.setHeardRepeats(entry.id,entry.heardRepeats);persistentResult(entry,meshcore);publish();
             });
         }
         @Override public void trace(TraceResult result) {
@@ -700,7 +841,7 @@ public final class MainActivity extends Activity {
 
         void markPendingUnconfirmed() {
             if(!ignoreInFlight.isEmpty()){
-                ignoreInFlight="";nodeActionResult("Ignore update interrupted. Reconnect to check the radio.",key);
+                ignoreInFlight="";nodeActionResult(ui("Ignore update interrupted. Reconnect to check the radio."),key);
                 sendIgnoredNodes("Ignore update interrupted. Reconnect to check the radio.");
             }
             if(protocol!=null && protocol.channelAdmin().active())channelSetupMessage="Channel setup interrupted. Reconnect to check the radio before trying again.";
@@ -789,8 +930,8 @@ public final class MainActivity extends Activity {
                         text.startsWith("BLE notification setup failed") || text.startsWith("USB permission or device open failed")) {close();loading = false;}
                 debug(key+" "+text);
                 state = text;
-                if (this == mt && mtStatus != null) mtStatus.setText("Meshtastic · " + text);
-                if (this == mc && mcStatus != null) mcStatus.setText("MeshCore · " + text);
+                if (this == mt && mtStatus != null) mtStatus.setText(ui("Meshtastic · ") + text);
+                if (this == mc && mcStatus != null) mcStatus.setText(ui("MeshCore · ") + text);
                 if (selected == this && activeLabel != null) activeLabel.setText(name + " · " + text);
                 publish();
             });
@@ -992,6 +1133,7 @@ public final class MainActivity extends Activity {
                         if(closing||generation!=attempt||!device.equals(ownId))return;
                         if(peer.isEmpty())chats.computeIfAbsent(channel,ignored->new ArrayList<>()).add(entry);
                         else directs.computeIfAbsent(peer,ignored->new ArrayList<>()).add(entry);
+                        persistentIncoming(this,channel,peer,entry,startup);
                         if(!reaction){
                             unread=true;showMessageNotification(this,sender,text);
                             if(!notificationsSilenced("mt",sender))messageSound(peer.isEmpty()?"mt":"dm",startup);
@@ -1001,7 +1143,7 @@ public final class MainActivity extends Activity {
                 }catch(Exception error){main.post(()->{
                     if(closing||generation!=attempt)return;
                     if(loading)syncFailed("Could not save Meshtastic message. Reconnect to retry.");
-                    else nodeActionResult("Could not save Meshtastic message: "+error.getMessage());
+                    else nodeActionResult(ui("Could not save Meshtastic message: ")+error.getMessage());
                 });}
             });
         }
@@ -1027,9 +1169,14 @@ public final class MainActivity extends Activity {
                         .put("settings",observedSettings(seconds)).put("timeSource",meshcore?"message":"reception");
                     if(snr!=null)sample.put("snr",snr);if(rssi!=null)sample.put("rssi",rssi);
                     String device=(meshcore?"mc:":"")+ownId,json=sample.toString();
-                    storeUpdate(()->chatStore.saveSignal(device,target,json));
+                    String radio=meshcore?"mc":"mt",receiver=ownId,settings=sample.optString("settings");
+                    long heardSeconds=sample.getLong("time")/1000;
+                    storeUpdate(()->{
+                        chatStore.saveSignal(device,target,json);
+                        if(!mqtt&&!target.equals(receiver))chatStore.heard(radio,receiver,target,heardSeconds,settings);
+                    });
                     if(!loading)flushRadioStorage(()->{
-                        if(generation==currentGeneration&&pageReady&&!closing){web.evaluateJavascript("window.onSignalSampleSaved("+JSONObject.quote(key)+","+JSONObject.quote(target)+")",null);publishRadioUpdate();}
+                        if(generation==currentGeneration&&pageReady&&!closing){web.evaluateJavascript("window.onSignalSampleSaved("+JSONObject.quote(key)+","+JSONObject.quote(target)+")",null);publishRadioUpdate();requestRadioMapUpdate();}
                     });
                 } catch(JSONException ignored){}
             });
@@ -1060,7 +1207,8 @@ public final class MainActivity extends Activity {
                 if(captured!=null)entry.paths=captured.toString();
                 entry.id=chatStore.saveIncoming(meshcore?"mc":"mt",ownId,channel,entry.sender,
                     entry.text,entry.time,entry.receivedAt,"",hops,packetId,replyId,entry.paths);
-                saveIncomingMarker(channel,sender,text);
+                persistentIncoming(this,channel,"",entry,loading);
+                saveIncomingMarker(channel,sender,text,receivedAt);
                 chats.computeIfAbsent(channel, ignored -> new ArrayList<>()).add(entry);
                 unread = true;
                 showMessageNotification(this, sender, text);
@@ -1084,7 +1232,8 @@ public final class MainActivity extends Activity {
                 entry.hops=hops;entry.packetId=packetId;entry.replyId=replyId;entry.unread=true;
                 entry.id=chatStore.saveIncoming(meshcore?"mc":"mt",ownId,-1,id,text,entry.time,
                     entry.receivedAt,id,hops,packetId,replyId,entry.paths);
-                saveIncomingMarker(-1,id,text);
+                persistentIncoming(this,-1,id,entry,loading);
+                saveIncomingMarker(-1,id,text,receivedAt);
                 chatStore.heard(meshcore?"mc":"mt",ownId,id,receivedAt,meshcore?observedSettings(receivedAt):"");
                 directs.computeIfAbsent(id, ignored -> new ArrayList<>()).add(entry);
                 unread = true;
@@ -1226,40 +1375,55 @@ public final class MainActivity extends Activity {
                 if(meshcore||!loading||installingNodes)requestRadioMapUpdate();
             });
         }
-        private void saveIncomingMarker(int channel,String sender,String text) {
+        private void saveIncomingMarker(int channel,String sender,String text,long receivedAt) {
             if(!meshcore)return;
             MeshCoreMarker marker=MeshCoreMarker.parse(sender,text,channel>=0);
             if(marker==null)return;
             try {
+                long time=receivedAt>0?receivedAt*1000:System.currentTimeMillis();
+                if(!MapLocationHistory.recent(time,System.currentTimeMillis()))return;
+                String trackSender=channel<0?sender:marker.title.matches("Location @[0-9a-fA-F]{12}")?marker.title.substring(10).toLowerCase(java.util.Locale.ROOT):"";
+                boolean tracking=!trackSender.isEmpty()&&(marker.title.equals("Location")||marker.title.matches("Location @[0-9a-fA-F]{12}"));
                 String identity=new JSONArray().put(ownId).put(channel).put(marker.sender)
                         .put(marker.latitude).put(marker.longitude).put(marker.title).toString();
+                if(tracking)identity=new JSONArray().put(ownId).put(channel).put(trackSender).toString();
                 String id="mc-"+java.util.UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8));
                 String name=marker.sender;
                 NodeEntry contact=channel<0?knownNodes.get(name):null;
                 if(contact!=null&&!contact.name.isEmpty())name=contact.name;
                 JSONObject point=new JSONObject().put("type","Point")
                         .put("coordinates",new JSONArray().put(marker.longitude).put(marker.latitude));
-                JSONObject item=new JSONObject().put("id",id).put("kind","mark").put("title",marker.title)
+                JSONObject item=new JSONObject().put("id",id).put("kind","mark").put("title",tracking?"Location":marker.title)
                         .put("description","Shared by "+name+" · MeshCore").put("geometry",point)
-                        .put("radio","mc").put("device",ownId).put("channel",channel);
-                mapData.put(item,false);
+                        .put("radio","mc").put("device",ownId).put("channel",channel).put("created",time).put("edited",time);
+                if(tracking)mapData.sharedLocation("mc",ownId,id,trackSender,name,channel,marker.latitude,marker.longitude,time);
+                mapData.put(item,true);
                 sendMapData();
             }catch(JSONException error){debug("Invalid MeshCore marker ignored");}
         }
         @Override public void waypoint(String sender,long waypointId,String name,String description,double latitude,double longitude,boolean deleted) {
+            waypoint(sender,waypointId,name,description,latitude,longitude,deleted,System.currentTimeMillis()/1000,-1);
+        }
+        @Override public void waypoint(String sender,long waypointId,String name,String description,double latitude,double longitude,boolean deleted,long receivedAt,int channel) {
             int currentGeneration=generation;
             main.post(()->{
                 if(generation!=currentGeneration||meshcore||ownId.isEmpty())return;
                 String itemId="mt-"+sender.replace("!","")+"-"+Long.toHexString(waypointId);
                 if(deleted){mapData.delete(itemId);sendMapData();return;}
                 try{
+                    long time=receivedAt>0?receivedAt*1000:System.currentTimeMillis();
+                    if(!MapLocationHistory.recent(time,System.currentTimeMillis()))return;
+                    if(name.trim().equals("Location")){
+                        NodeEntry contact=knownNodes.get(sender);String label=contact==null||contact.name.isEmpty()?sender:contact.name;
+                        mapData.sharedLocation("mt",ownId,itemId,sender,label,channel,latitude,longitude,time);
+                    }
                     JSONObject item=new JSONObject().put("id",itemId).put("kind","mark")
                             .put("title",name.trim().isEmpty()?"Waypoint from "+sender:name.trim())
                             .put("description",description.trim().isEmpty()?"Shared by "+sender:description.trim()+" · Shared by "+sender)
                             .put("geometry",new JSONObject().put("type","Point").put("coordinates",new JSONArray().put(longitude).put(latitude)))
                             .put("radio","mt").put("device",ownId).put("enabled",true)
-                            .put("created",System.currentTimeMillis()).put("edited",System.currentTimeMillis());
-                    mapData.put(item,false);sendMapData();
+                            .put("created",time).put("edited",time);
+                    mapData.put(item,true);sendMapData();
                 }catch(JSONException error){debug("Invalid radio waypoint ignored");}
             });
         }
@@ -1403,11 +1567,14 @@ public final class MainActivity extends Activity {
         chatStore = new ChatStore(this);
         contactActions=new ContactActions(this,(event,value)->contactEvent(event,value));
         mapData = new MapData(chatStore);
+        mapSnapshotWorker.execute(()->{try{mapData.prune();}catch(Exception e){debug("Map retention deferred");}});
+        main.postDelayed(mapRetentionRunner,60000);
         satelliteCredentials = new SatelliteCredentials(this);
         mapPacks = new MapPacks(this);
         chatStore.markInterruptedSends();
         try{String pending=chatStore.pendingSettings();if(pending!=null){mergeSettings(new JSONObject(pending));chatStore.clearPendingSettings();}}catch(Exception error){debug("Backup settings recovery pending");}
         try {sendChain=new SendChain(getFilesDir());}catch(Exception error){debug("Cannot restore sending chain: "+error.getClass().getSimpleName());}
+        initPersistentJobs();
         main.postDelayed(chainRunner,1000);
         main.postDelayed(splitRunner,100);
         // Android 15+ draws apps edge to edge. Keep the entire web viewport inside
@@ -1437,8 +1604,8 @@ public final class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
                 new AlertDialog.Builder(MainActivity.this).setMessage(message)
-                        .setPositiveButton("OK", (dialog, which) -> result.confirm())
-                        .setNegativeButton("Cancel", (dialog, which) -> result.cancel())
+                        .setPositiveButton(ui("OK"), (dialog, which) -> result.confirm())
+                        .setNegativeButton(ui("Cancel"), (dialog, which) -> result.cancel())
                         .setOnCancelListener(dialog -> result.cancel()).show();
                 return true;
             }
@@ -1569,7 +1736,7 @@ public final class MainActivity extends Activity {
                 MessageNotifications.cancel(MainActivity.this);
                 getSystemService(android.app.NotificationManager.class).cancel(203);
                 publish();
-            }catch(JSONException error){nodeActionResult("Could not save notification silence");}
+            }catch(JSONException error){nodeActionResult(ui("Could not save notification silence"));}
         });}
         @JavascriptInterface public void clearNotificationSilence(String key){main.post(()->{
             JSONObject rules=notificationSilences();rules.remove(key);getPreferences(0).edit().putString("notification_silences",rules.toString()).apply();publish();
@@ -1593,7 +1760,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void showActionNotice(String title,String text) {
             main.post(() -> {
                 if(visible && !closing && !isFinishing())
-                    new AlertDialog.Builder(MainActivity.this).setTitle(title).setMessage(text).setPositiveButton("OK",null).show();
+                    new AlertDialog.Builder(MainActivity.this).setTitle(title).setMessage(text).setPositiveButton(ui("OK"),null).show();
             });
         }
         @JavascriptInterface public void openSavedChat(String radio,String id,int channel){main.post(()->{
@@ -1617,7 +1784,7 @@ public final class MainActivity extends Activity {
             });
         }
         @JavascriptInterface public void setRequestTimeout(String kind,int seconds){main.post(()->{
-            if(!java.util.Arrays.asList("signal","ping","trace").contains(kind)||seconds<5||seconds>600){nodeActionResult("Choose a timeout from 5 to 600 seconds");return;}
+            if(!java.util.Arrays.asList("signal","ping","trace").contains(kind)||seconds<5||seconds>600){nodeActionResult(ui("Choose a timeout from 5 to 600 seconds"));return;}
             getPreferences(0).edit().putInt("request_timeout_"+kind,seconds).apply();publish();
         });}
         @JavascriptInterface public void saveMemberConfig(String json){main.post(()->{
@@ -1626,7 +1793,7 @@ public final class MainActivity extends Activity {
                 JSONObject config=new JSONObject(json);
                 config.getBoolean("enabled");config.getJSONArray("contacts");config.getJSONObject("channels");
                 getPreferences(0).edit().putString("member_config",config.toString()).apply();publish();
-            }catch(JSONException error){nodeActionResult("Could not save member settings");}
+            }catch(JSONException error){nodeActionResult(ui("Could not save member settings"));}
         });}
         @JavascriptInterface public void disableMemberMode(){main.post(()->{
             try{
@@ -1634,10 +1801,38 @@ public final class MainActivity extends Activity {
                 config.put("enabled",false);
                 getPreferences(0).edit().putString("member_config",config.toString()).apply();
                 publish();
-            }catch(JSONException error){nodeActionResult("Could not disable member mode");}
+            }catch(JSONException error){nodeActionResult(ui("Could not disable member mode"));}
         });}
         @JavascriptInterface public void setMemberLanguage(String language){main.post(()->{
-            getPreferences(0).edit().putString("member_language","el".equals(language)?"el":"en").apply();publish();
+            String selected="el".equals(language)?"el":"en";
+            getPreferences(0).edit().putString("member_language",selected).putString("app_language",selected).apply();publish();
+        });}
+        @JavascriptInterface public void setAppLanguage(String language){setMemberLanguage(language);}
+        @JavascriptInterface public void persistentComposer(boolean busy){main.post(()->persistentComposing=busy);}
+        @JavascriptInterface public void startPersistent(String destination,String text,boolean location,int minutes,int expiryMinutes,int retries){main.post(()->{
+            try{
+                if(persistentJobs==null)throw new IllegalArgumentException("Persistent storage unavailable");
+                JSONObject target=new JSONObject(destination);RadioSession s=chainRadio(target);
+                if(s==null||s.protocol==null)throw new IllegalArgumentException("Connect the original radio first");
+                validatePersistentTarget(target,s,true);
+                String value=text.trim();
+                if(!location&&(value.isEmpty()||value.indexOf('\0')>=0||value.getBytes(StandardCharsets.UTF_8).length>s.protocol.textLimit(!target.optString("peer").isEmpty())))
+                    throw new IllegalArgumentException("Persistent message must fit one radio packet (maximum "+s.protocol.textLimit(!target.optString("peer").isEmpty())+" UTF-8 bytes)");
+                if(location&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){
+                    requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION},PERSISTENT_LOCATION_PERMISSION);
+                    throw new IllegalArgumentException("Allow precise location, then press Start again");
+                }
+                if(location&&!resumed)throw new IllegalArgumentException("Open the app to start location sharing");
+                persistentJobs.add(target,value,location,minutes*60000L,expiryMinutes*60000L,retries);
+                persistentComposing=false;contactEvent("onPersistentStarted",true);
+            }catch(Exception e){contactEvent("onPersistentError",e.getMessage()==null?"Destination unavailable":e.getMessage());}
+        });}
+        @JavascriptInterface public void persistentAction(String id,String action){main.post(()->{
+            try{
+                if(persistentJobs==null)return;
+                if("resume".equals(action)&&!resumed)throw new IllegalArgumentException("Open the app to resume");
+                persistentJobs.action(id,action);
+            }catch(Exception e){contactEvent("onPersistentError",e.getMessage());}
         });}
         @JavascriptInterface public void sendMemberLocation(String destinations,double lat,double lon){
             main.post(()->queueMemberMessage(destinations,"",new double[]{lat,lon}));
@@ -1673,7 +1868,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void setSettlingSeconds(int seconds){main.post(()->{if(seconds>=1&&seconds<=30)getPreferences(0).edit().putInt("send_settling_seconds",seconds).apply();publish();});}
         @JavascriptInterface public void setMeshCoreAttempts(int direct,int flood) {
             main.post(()->{
-                if(direct<1||direct>10||flood<1||flood>10){nodeActionResult("Choose 1–10 attempts for each route type");return;}
+                if(direct<1||direct>10||flood<1||flood>10){nodeActionResult(ui("Choose 1–10 attempts for each route type"));return;}
                 getPreferences(0).edit().putInt("mc_direct_attempts",direct).putInt("mc_flood_attempts",flood).apply();
                 for(RadioSession s:sessions.values())configureAttempts(s);publish();
             });
@@ -1693,7 +1888,7 @@ public final class MainActivity extends Activity {
                             mergeHistory(s,rows);publish();
                             if(pageReady)web.evaluateJavascript("window.onHistoryPage("+JSONObject.quote(key)+","+JSONObject.quote(peer)+","+channel+","+rows.size()+")",null);
                         });
-                    } catch(RuntimeException error) {main.post(()->{s.historyRequests.remove(request);nodeActionResult("Could not load older messages");if(pageReady&&!closing)web.evaluateJavascript("window.onHistoryPage("+JSONObject.quote(key)+","+JSONObject.quote(peer)+","+channel+",-1)",null);});}
+                    } catch(RuntimeException error) {main.post(()->{s.historyRequests.remove(request);nodeActionResult(ui("Could not load older messages"));if(pageReady&&!closing)web.evaluateJavascript("window.onHistoryPage("+JSONObject.quote(key)+","+JSONObject.quote(peer)+","+channel+",-1)",null);});}
                 });
             });
         }
@@ -1723,45 +1918,45 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void openCopernicusCredentialsHelp(){main.post(()->openMapHelp("https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Overview/Authentication.html"));}
         @JavascriptInterface public void logOffSatelliteAccount(){main.post(()->{
             satelliteDownloadCancelled=true;satelliteCredentials.setLoggedOff(true);sendSatelliteAccount();
-            nodeActionResult("Logged off Copernicus in this app");
+            nodeActionResult(ui("Logged off Copernicus in this app"));
         });}
         @JavascriptInterface public void useRememberedSatelliteAccount(){main.post(()->{
-            if(satelliteCredentials.load()==null){nodeActionResult("No Copernicus credentials are remembered");return;}
+            if(satelliteCredentials.load()==null){nodeActionResult(ui("No Copernicus credentials are remembered"));return;}
             satelliteCredentials.setLoggedOff(false);sendSatelliteAccount();
         });}
         @JavascriptInterface public void forgetSatelliteAccount(){main.post(()->{
             satelliteDownloadCancelled=true;satelliteCredentials.forget();sendSatelliteAccount();
-            nodeActionResult("Copernicus credentials forgotten on this phone");
+            nodeActionResult(ui("Copernicus credentials forgotten on this phone"));
         });}
         @JavascriptInterface public void estimateSatellite(String bounds){main.post(()->{
             try{JSONArray b=new JSONArray(bounds);CopernicusMaps.Plan p=CopernicusMaps.plan(b.getDouble(0),b.getDouble(1),b.getDouble(2),b.getDouble(3));
                 web.evaluateJavascript("window.onSatelliteEstimate("+p.json()+")",null);
-            }catch(Exception error){nodeActionResult("Satellite area: "+error.getMessage());}
+            }catch(Exception error){nodeActionResult(ui("Satellite area: ")+error.getMessage());}
         });}
         @JavascriptInterface public void downloadSatellite(String bounds,String from,String to,String title,String clientId,String clientSecret,boolean remember){main.post(()->{
-            if(satelliteDownloadRunning){nodeActionResult("A satellite download is already running");return;}
+            if(satelliteDownloadRunning){nodeActionResult(ui("A satellite download is already running"));return;}
             String actualId=clientId.trim(),actualSecret=clientSecret;
             if(actualId.isEmpty()&&actualSecret.isEmpty()){
                 SatelliteCredentials.Account saved=satelliteCredentials.loggedOff()?null:satelliteCredentials.load();
                 if(saved!=null){actualId=saved.id;actualSecret=saved.secret;}
             }
-            if(actualId.isEmpty()||actualSecret.isEmpty()){nodeActionResult("Enter both Copernicus credentials or log in with the remembered account");return;}
+            if(actualId.isEmpty()||actualSecret.isEmpty()){nodeActionResult(ui("Enter both Copernicus credentials or log in with the remembered account"));return;}
             final String downloadId=actualId,downloadSecret=actualSecret;
             final CopernicusMaps.Plan plan;try{JSONArray b=new JSONArray(bounds);plan=CopernicusMaps.plan(b.getDouble(0),b.getDouble(1),b.getDouble(2),b.getDouble(3));
                 if(plan.tiles.size()*300000L>mapPacks.freeSpace())throw new IllegalArgumentException("Not enough free phone space for the estimated satellite download");
-            }catch(Exception error){nodeActionResult("Satellite area: "+error.getMessage());return;}
+            }catch(Exception error){nodeActionResult(ui("Satellite area: ")+error.getMessage());return;}
             satelliteDownloadRunning=true;satelliteDownloadCancelled=false;
-            nodeActionResult("Downloading "+plan.tiles.size()+" Copernicus tiles. Keep the app open.");
+            nodeActionResult(ui("Downloading ")+plan.tiles.size()+ui(" Copernicus tiles. Keep the app open."));
             historyWorker.execute(()->{File pack=null;try{
                 pack=CopernicusMaps.download(getCacheDir(),plan,from,to,downloadId,downloadSecret,(done,total)->{
                     if(satelliteDownloadCancelled)throw new IllegalStateException("Cancelled by user");
                     if(done==1&&remember)try{satelliteCredentials.remember(downloadId,downloadSecret);main.post(()->sendSatelliteAccount());}
-                    catch(Exception error){main.post(()->nodeActionResult("Download continues, but the account could not be remembered"));}
+                    catch(Exception error){main.post(()->nodeActionResult(ui("Download continues, but the account could not be remembered")));}
                     if(done==1||done==total||done%25==0)main.post(()->{if(pageReady&&!closing)web.evaluateJavascript("window.onSatelliteProgress("+done+","+total+")",null);});
                 });
                 mapPacks.installCopernicus(pack,title,plan,from,to);
-                main.post(()->{if(!closing){sendMapData();nodeActionResult("Copernicus satellite area installed for offline use");}});
-            }catch(Exception error){main.post(()->{if(!closing)nodeActionResult("Satellite download failed: "+error.getMessage());});}
+                main.post(()->{if(!closing){sendMapData();nodeActionResult(ui("Copernicus satellite area installed for offline use"));}});
+            }catch(Exception error){main.post(()->{if(!closing)nodeActionResult(ui("Satellite download failed: ")+error.getMessage());});}
             finally{if(pack!=null)pack.delete();main.post(()->satelliteDownloadRunning=false);}});
         });}
         @JavascriptInterface public void cancelSatelliteDownload(){satelliteDownloadCancelled=true;}
@@ -1769,12 +1964,12 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void cancelMarkPosition(int token){main.post(()->{if(markLocationToken==token)clearMarkLocation();});}
         @JavascriptInterface public void saveMapItem(String json){main.post(()->{
             try{mapData.put(new JSONObject(json),false);sendMapData();}
-            catch(Exception error){nodeActionResult("Could not save map item: "+error.getMessage());}
+            catch(Exception error){nodeActionResult(ui("Could not save map item: ")+error.getMessage());}
         });}
         @JavascriptInterface public void deleteMapItem(String id){main.post(()->{mapData.delete(id);sendMapData();});}
         @JavascriptInterface public void toggleMapItem(String id,boolean enabled){main.post(()->{
             try{JSONArray items=mapData.items();for(int i=0;i<items.length();i++){JSONObject item=items.getJSONObject(i);if(id.equals(item.getString("id"))){item.put("enabled",enabled).put("edited",System.currentTimeMillis());mapData.put(item,false);sendMapData();return;}}}
-            catch(Exception error){nodeActionResult("Could not update map item: "+error.getMessage());}
+            catch(Exception error){nodeActionResult(ui("Could not update map item: ")+error.getMessage());}
         });}
         @JavascriptInterface public void importMapPack(String kind,String schema,String title,String sourceName,String captureDate){main.post(()->{
             if(!kind.equals("street")&&!kind.equals("satellite"))return;
@@ -1785,14 +1980,14 @@ public final class MainActivity extends Activity {
             try{startActivityForResult(intent,IMPORT_MAP_PACK);}catch(ActivityNotFoundException error){mapPackPickerOpen=false;clearPendingMapPack();mapPackImportStatus("Android file picker is unavailable.");}
         });}
         @JavascriptInterface public void downloadMapPack(String url,String title,String kind,String schema,String sourceName,String captureDate){main.post(()->{
-            if(!url.startsWith("https://")){nodeActionResult("Use an HTTPS map pack address");return;}
+            if(!url.startsWith("https://")){nodeActionResult(ui("Use an HTTPS map pack address"));return;}
             mapPackImportStatus("Downloading map pack… Keep the app open until it finishes.",true);
             historyWorker.execute(()->{try{JSONObject pack=mapPacks.download(url,title,kind,schema,sourceName,captureDate);main.post(()->mapPackInstalled(pack));}
                 catch(Exception error){main.post(()->mapPackImportStatus("Map download failed: "+error.getMessage()));}});
         });}
         @JavascriptInterface public void removeMapPack(String id){main.post(()->{
             try{mapPacks.remove(id);if(id.equals(getPreferences(0).getString("active_map_pack_id","")))getPreferences(0).edit().remove("active_map_pack_id").apply();sendMapData();}
-            catch(Exception error){nodeActionResult("Could not remove map pack: "+error.getMessage());}
+            catch(Exception error){nodeActionResult(ui("Could not remove map pack: ")+error.getMessage());}
         });}
         @JavascriptInterface public void setMapDisplayStyle(String style){main.post(()->{
             if(style.equals("full")||style.equals("dark"))getPreferences(0).edit().putString("map_display_style",style).apply();
@@ -1802,7 +1997,7 @@ public final class MainActivity extends Activity {
                 JSONObject pack=packs.optJSONObject(i);
                 if(pack!=null&&id.equals(pack.optString("id"))){getPreferences(0).edit().putString("active_map_pack_id",id).apply();return;}
             }
-            nodeActionResult("Offline map is no longer installed");sendMapData();
+            nodeActionResult(ui("Offline map is no longer installed"));sendMapData();
         });}
         @JavascriptInterface public void mapNodeAction(String key,String id,String action){main.post(()->MainActivity.this.nodeAction(session(key),id,action,""));}
         @JavascriptInterface public void senseMesh(String key,int channel){main.post(()->requestMapSense(key,channel));}
@@ -1817,11 +2012,11 @@ public final class MainActivity extends Activity {
         });}
         @JavascriptInterface public void saveLogItem(String json) {main.post(()->{
             try {chatStore.putLogItem(new JSONObject(json),false);sendLogItems();}
-            catch(Exception error){nodeActionResult("Could not save Log item: "+error.getMessage());}
+            catch(Exception error){nodeActionResult(ui("Could not save Log item: ")+error.getMessage());}
         });}
         @JavascriptInterface public void deleteLogItems(String json) {main.post(()->{
             try {chatStore.deleteLogItems(new JSONArray(json));sendLogItems();}
-            catch(Exception error){nodeActionResult("Could not delete Log items: "+error.getMessage());}
+            catch(Exception error){nodeActionResult(ui("Could not delete Log items: ")+error.getMessage());}
         });}
         @JavascriptInterface public int messagePartCount(String text,int limit) {
             try{return MessageChunks.split(text,limit).size();}
@@ -1833,7 +2028,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void sendAdvert(String key,String action) {
             main.post(() -> {
                 RadioSession s=sessions.get(key);
-                if(s==null||!s.connected||!s.meshcore||s.loading) {nodeActionResult("Choose a connected, fully loaded MC device");return;}
+                if(s==null||!s.connected||!s.meshcore||s.loading) {nodeActionResult(ui("Choose a connected, fully loaded MC device"));return;}
                 try {
                     byte[] command=s.protocol.advert(action); long token=s.protocol.lastRequestId(); int generation=s.generation;
                     s.send(command); showAdvertResult(s,action.equals("copy")?"Requesting advert link…":"Sending advert…",false);
@@ -1862,7 +2057,7 @@ public final class MainActivity extends Activity {
                     if (s != null && s.connected) for (Map.Entry<Integer,String> c : s.channelNames.entrySet())
                         channels.put(new JSONObject().put("index",c.getKey()).put("name",c.getValue()));
                     web.evaluateJavascript("window.onBackupChannels("+JSONObject.quote(key)+","+channels+")", null);
-                } catch (JSONException e) { nodeActionResult("Could not load channel names"); }
+                } catch (JSONException e) { nodeActionResult(ui("Could not load channel names")); }
             });
         }
         @JavascriptInterface public void connectBle(String id) {
@@ -1922,7 +2117,7 @@ public final class MainActivity extends Activity {
                 if(source==null||id==null||id.isEmpty())return;
                 String radio=source.meshcore?"mc":"mt";
                 for(RadioSession s:sessions.values())if(s.meshcore==source.meshcore&&id.equals(s.ownId)){
-                    nodeActionResult("Cannot forget your own connected device here");return;
+                    nodeActionResult(ui("Cannot forget your own connected device here"));return;
                 }
                 String senderName="";
                 if(source.meshcore){
@@ -1952,19 +2147,19 @@ public final class MainActivity extends Activity {
                         s.readThrough.remove("d:"+id);
                         loadSessionHistory(s);
                     }
-                    publish();sendMapData();sendContacts();nodeActionResult("Node forgotten on this phone");
-                }catch(Exception error){nodeActionResult("Could not forget node: "+error.getMessage());}
+                    publish();sendMapData();sendContacts();nodeActionResult(ui("Node forgotten on this phone"));
+                }catch(Exception error){nodeActionResult(ui("Could not forget node: ")+error.getMessage());}
             }));
         }
         @JavascriptInterface public void setNodeName(String radio,String id,String name) {
             main.post(()->{
                 if((!"mc".equals(radio)&&!"mt".equals(radio))||id==null||id.isEmpty()||name==null)return;
                 String value=name.trim();
-                if(value.length()>80){nodeActionResult("Use up to 80 characters for the name");return;}
+                if(value.length()>80){nodeActionResult(ui("Use up to 80 characters for the name"));return;}
                 String key="node_name_"+radio+":"+id;
                 SharedPreferences.Editor editor=getPreferences(0).edit();
                 if(value.isEmpty())editor.remove(key);else editor.putString(key,value);
-                if(!editor.commit()){nodeActionResult("Could not save node name");return;}
+                if(!editor.commit()){nodeActionResult(ui("Could not save node name"));return;}
                 publish();
             });
         }
@@ -2100,7 +2295,7 @@ public final class MainActivity extends Activity {
                 Intent intent=new Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                         .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,getPackageName())
                         .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID,MessageNotifications.CHANNEL);
-                try {startActivity(intent);}catch(ActivityNotFoundException unavailable){nodeActionResult("Android notification settings unavailable");}
+                try {startActivity(intent);}catch(ActivityNotFoundException unavailable){nodeActionResult(ui("Android notification settings unavailable"));}
             });
         }
         @JavascriptInterface public void setAudioEnabled(boolean enabled) {
@@ -2155,7 +2350,7 @@ public final class MainActivity extends Activity {
                     }
                     String version=getPackageManager().getPackageInfo(getPackageName(),0).versionName;
                     web.evaluateJavascript("window.onAbout("+JSONObject.quote(version)+","+JSONObject.quote(notices.toString())+")",null);
-                } catch(Exception error) {nodeActionResult("Could not load app notices");}
+                } catch(Exception error) {nodeActionResult(ui("Could not load app notices"));}
             });
         }
         @JavascriptInterface public void checkForUpdates() {main.post(()->{offerStartupUpdate=false;MainActivity.this.checkForUpdates();});}
@@ -2224,30 +2419,30 @@ public final class MainActivity extends Activity {
     private void chooseChannelCopyTarget(String radio,String id){
         try{if(new JSONObject(getPreferences(0).getString("member_config","{}")).optBoolean("enabled"))return;}catch(JSONException invalid){return;}
         RadioSession source=managedRadio(radio,id);
-        if(source==null||source.loading||source.protocol==null){nodeActionResult("Connect this radio and wait for loading to finish");return;}
-        if(source.channelNames.isEmpty()){nodeActionResult("No channels reported by this radio yet");return;}
+        if(source==null||source.loading||source.protocol==null){nodeActionResult(ui("Connect this radio and wait for loading to finish"));return;}
+        if(source.channelNames.isEmpty()){nodeActionResult(ui("No channels reported by this radio yet"));return;}
         List<RadioSession> targets=new ArrayList<>();
         for(RadioSession s:sessions.values())if(s!=source&&s.connected&&!s.loading&&s.protocol!=null&&s.meshcore==source.meshcore)targets.add(s);
-        if(targets.isEmpty()){nodeActionResult("Connect a second radio of the same network first");return;}
+        if(targets.isEmpty()){nodeActionResult(ui("Connect a second radio of the same network first"));return;}
         String[] labels=new String[targets.size()];for(int j=0;j<labels.length;j++)labels[j]=targets.get(j).ownName;
-        new AlertDialog.Builder(this).setTitle("Destination radio").setItems(labels,(dd,t)->chooseChannelToCopy(source,targets.get(t))).setNegativeButton("Cancel",null).show();
+        new AlertDialog.Builder(this).setTitle(ui("Destination radio")).setItems(labels,(dd,t)->chooseChannelToCopy(source,targets.get(t))).setNegativeButton(ui("Cancel"),null).show();
     }
     private void chooseChannelToCopy(RadioSession source,RadioSession target){
         List<Integer> slots=new ArrayList<>(source.channelNames.keySet());String[] labels=new String[slots.size()];
         for(int i=0;i<labels.length;i++)labels[i]=source.channelNames.get(slots.get(i));
-        new AlertDialog.Builder(this).setTitle("Choose channel to copy").setItems(labels,(d,n)->{
+        new AlertDialog.Builder(this).setTitle(ui("Choose channel to copy")).setItems(labels,(d,n)->{
             int slot=slots.get(n);String title=source.channelNames.get(slot);byte[] secret=source.protocol.channelAdmin().secrets.get(slot);
-            if(secret==null){nodeActionResult("Channel key not reported. Reconnect the source radio first");return;}
+            if(secret==null){nodeActionResult(ui("Channel key not reported. Reconnect the source radio first"));return;}
             final ChannelCopyPlan plan;
             try{plan=new ChannelCopyPlan(source.protocol.channelAdmin(),target.protocol.channelAdmin(),slot,title,source.generation,target.generation);}
             catch(IllegalArgumentException error){nodeActionResult(error.getMessage());return;}
-            new AlertDialog.Builder(this).setTitle("Copy "+title+"?").setMessage(source.ownName+" → "+target.ownName+". Only a reported empty slot will be used. Existing names are skipped; the primary channel and radio settings stay unchanged.")
-                .setNegativeButton("Cancel",null).setPositiveButton("Copy",(dialog,which)->{
+            new AlertDialog.Builder(this).setTitle(ui("Copy ")+title+"?").setMessage(source.ownName+" → "+target.ownName+ui(". Only a reported empty slot will be used. Existing names are skipped; the primary channel and radio settings stay unchanged."))
+                .setNegativeButton(ui("Cancel"),null).setPositiveButton(ui("Copy"),(dialog,which)->{
                     try{
-                        target.send(plan.prepare(source.protocol.channelAdmin(),target.protocol.channelAdmin(),source.connected&&!source.loading,target.connected&&!target.loading,source.generation,target.generation,source.channelNames.get(slot)));nodeActionResult("Copy submitted. Check destination channel management for radio verification.");
+                        target.send(plan.prepare(source.protocol.channelAdmin(),target.protocol.channelAdmin(),source.connected&&!source.loading,target.connected&&!target.loading,source.generation,target.generation,source.channelNames.get(slot)));nodeActionResult(ui("Copy submitted. Check destination channel management for radio verification."));
                     }catch(IllegalArgumentException error){nodeActionResult(error.getMessage());}
                 }).show();
-        }).setNegativeButton("Cancel",null).show();
+        }).setNegativeButton(ui("Cancel"),null).show();
     }
     private void sendNodeManagement(String radio,String id,String error){
         if(!pageReady||closing)return;
@@ -2261,7 +2456,7 @@ public final class MainActivity extends Activity {
                 .put("channels",channels).put("freeSlot",admin==null?-1:admin.freeSlot()).put("busy",admin!=null&&admin.active())
                 .put("blocked",admin!=null&&admin.blocked()).put("message",!error.isEmpty()?error:s==null?"Connect this radio to manage its channels.":s.loading?"Wait for radio loading to finish.":s.channelSetupMessage);
             web.evaluateJavascript("window.onNodeManagement("+data+")",null);
-        }catch(JSONException ignored){nodeActionResult("Could not load node management");}
+        }catch(JSONException ignored){nodeActionResult(ui("Could not load node management"));}
     }
     private void setNodeIgnoredOnRadio(RadioSession s,String id,boolean value){
         String message;
@@ -2295,7 +2490,7 @@ public final class MainActivity extends Activity {
                     .put("nodes",nodes));
             }
             web.evaluateJavascript("window.onIgnoredNodes?.("+new JSONObject().put("radios",radios).put("message",message)+")",null);
-        }catch(JSONException error){nodeActionResult("Could not load ignored nodes.");}
+        }catch(JSONException error){nodeActionResult(ui("Could not load ignored nodes."));}
     }
     private RadioSession newConnectionSession(String radio) {
         if(!"mt".equals(radio) && !"mc".equals(radio)) return null;
@@ -2320,7 +2515,7 @@ public final class MainActivity extends Activity {
         picker.putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,
                 saved.isEmpty()?RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION):Uri.parse(saved));
         try { startActivityForResult(picker,PICK_SOUND); }
-        catch(ActivityNotFoundException error) { nodeActionResult("System sound picker unavailable"); }
+        catch(ActivityNotFoundException error) { nodeActionResult(ui("System sound picker unavailable")); }
     }
     private boolean soundAllowed(String kind) {
         if (closing || notificationsSilenced("","")) return false;
@@ -2445,10 +2640,10 @@ public final class MainActivity extends Activity {
     private void removeKnown(String radio,String id) {
         ChatStore.KnownRadio item=chatStore.getRadio(radio,id);
         if(item==null) return;
-        new AlertDialog.Builder(this).setTitle("Remove "+item.name+"?")
-                .setMessage("This removes its saved messages and channel names from this phone.")
-                .setNegativeButton("Cancel",null)
-                .setPositiveButton("Remove",(dialog,which)->{
+        new AlertDialog.Builder(this).setTitle(ui("Remove ")+item.name+"?")
+                .setMessage(ui("This removes its saved messages and channel names from this phone."))
+                .setNegativeButton(ui("Cancel"),null)
+                .setPositiveButton(ui("Remove"),(dialog,which)->{
                     for(RadioSession s:new ArrayList<>(sessions.values())) if(id.equals(s.ownId) &&
                             radio.equals(s.meshcore?"mc":"mt")) disconnect(s);
                     chatStore.deleteRadio(radio,id);
@@ -2460,15 +2655,15 @@ public final class MainActivity extends Activity {
     private void eraseOlder(String radio,String id,int days) {
         if(chatStore.getRadio(radio,id)==null || days<1) return;
         long cutoff=System.currentTimeMillis()/1000L-days*86400L;
-        new AlertDialog.Builder(this).setTitle("Erase messages older than "+days+" days?")
-                .setMessage("Only messages for this node will be erased.")
-                .setNegativeButton("Cancel",null)
-                .setPositiveButton("Erase",(dialog,which)->{
+        new AlertDialog.Builder(this).setTitle(ui("Erase messages older than ")+days+" days?")
+                .setMessage(ui("Only messages for this node will be erased."))
+                .setNegativeButton(ui("Cancel"),null)
+                .setPositiveButton(ui("Erase"),(dialog,which)->{
                     int count=chatStore.eraseOlderThan(radio,id,cutoff);
                     for(RadioSession s:sessions.values()) if(id.equals(s.ownId) &&
                             radio.equals(s.meshcore?"mc":"mt")) loadSessionHistory(s);
                     viewSaved(radio,id); publish();
-                    nodeActionResult("Erased "+count+" messages");
+                    nodeActionResult(ui("Erased ")+count+" messages");
                 }).show();
     }
 
@@ -2480,7 +2675,7 @@ public final class MainActivity extends Activity {
             try {
                 List<ChatStore.Message> rows=chatStore.recent(s.meshcore?"mc":"mt",identity);
                 main.post(()->{if(!closing&&revision==s.historyRevision&&identity.equals(s.ownId)){mergeHistory(s,rows);publish();}});
-            } catch(RuntimeException error){main.post(()->nodeActionResult("Could not load message history"));}
+            } catch(RuntimeException error){main.post(()->nodeActionResult(ui("Could not load message history")));}
         });
     }
     private void mergeHistory(RadioSession s,List<ChatStore.Message> rows) {
@@ -2520,9 +2715,9 @@ public final class MainActivity extends Activity {
     private void clearDirect(String radio,String peer) {
         RadioSession s=session(radio);
         if(s==null || s.ownId.isEmpty() || peer==null) return;
-        new AlertDialog.Builder(this).setTitle("Clear DM history?")
-                .setMessage("Delete all direct messages with "+peer+" on this node?")
-                .setNegativeButton("Cancel",null).setPositiveButton("Clear",(dialog,which)->{
+        new AlertDialog.Builder(this).setTitle(ui("Clear DM history?"))
+                .setMessage(ui("Delete all direct messages with ")+peer+ui(" on this node?"))
+                .setNegativeButton(ui("Cancel"),null).setPositiveButton(ui("Clear"),(dialog,which)->{
                     chatStore.clearDirect(s.meshcore?"mc":"mt",s.ownId,peer);
                     loadSessionHistory(s); publish();
                 }).show();
@@ -2531,9 +2726,9 @@ public final class MainActivity extends Activity {
         RadioSession s=session(radio);
         if(s==null || s.ownId.isEmpty() || peer==null || days<1) return;
         long cutoff=System.currentTimeMillis()/1000L-days*86400L;
-        new AlertDialog.Builder(this).setTitle("Erase older DMs?")
-                .setMessage("Delete messages with "+peer+" older than "+days+" days?")
-                .setNegativeButton("Cancel",null).setPositiveButton("Erase",(dialog,which)->{
+        new AlertDialog.Builder(this).setTitle(ui("Erase older DMs?"))
+                .setMessage(ui("Delete messages with ")+peer+" older than "+days+" days?")
+                .setNegativeButton(ui("Cancel"),null).setPositiveButton(ui("Erase"),(dialog,which)->{
                     chatStore.eraseDirectOlderThan(s.meshcore?"mc":"mt",s.ownId,peer,cutoff);
                     loadSessionHistory(s); publish();
                 }).show();
@@ -2541,7 +2736,7 @@ public final class MainActivity extends Activity {
     private void exportChannelCsv(String key, int channel) {
         RadioSession s=sessions.get(key);
         if(s==null || !s.connected || s.ownId.isEmpty() || !s.channelNames.containsKey(channel)) {
-            nodeActionResult("Choose a connected device and a reported channel"); return;
+            nodeActionResult(ui("Choose a connected device and a reported channel")); return;
         }
         transferRadio=s.meshcore?"mc":"mt"; transferNode=s.ownId; transferChannel=channel;
         Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
@@ -2577,10 +2772,10 @@ public final class MainActivity extends Activity {
     private void chooseNodeExport() {
         List<ChatStore.KnownRadio> radios=new ArrayList<>(chatStore.radios());List<String> names=new ArrayList<>();
         for(ChatStore.KnownRadio radio:radios)names.add(radio.name+" · "+radio.radio+" · "+radio.id);
-        if(radios.isEmpty()){nodeActionResult("No saved nodes to export");return;}
-        new AlertDialog.Builder(this).setTitle("Export node backup").setItems(names.toArray(new String[0]),(d,w)->{
+        if(radios.isEmpty()){nodeActionResult(ui("No saved nodes to export"));return;}
+        new AlertDialog.Builder(this).setTitle(ui("Export node backup")).setItems(names.toArray(new String[0]),(d,w)->{
             ChatStore.KnownRadio radio=radios.get(w);exportNode(radio.radio,radio.id,"json");
-        }).setNegativeButton("Cancel",null).show();
+        }).setNegativeButton(ui("Cancel"),null).show();
     }
     private void exportAppBackup() {
         Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
@@ -2644,7 +2839,7 @@ public final class MainActivity extends Activity {
                     if(out==null)throw new IOException("Cannot open destination");
                     debugLog.export(out);
                 }
-                nodeActionResult("Debug log exported");return;
+                nodeActionResult(ui("Debug log exported"));return;
             }
             if(requestCode==EXPORT_CHANNEL_CSV || requestCode==EXPORT_CSV || requestCode==EXPORT_DM_CSV) {
                 byte[] bytes=(requestCode==EXPORT_DM_CSV?dmCsv(transferRadio,transferNode,transferPeer):
@@ -2652,15 +2847,15 @@ public final class MainActivity extends Activity {
                 try(OutputStream out=getContentResolver().openOutputStream(data.getData())) {
                     if(out==null)throw new IOException("Cannot open destination");out.write(bytes);
                 }
-                nodeActionResult("Exported node history as CSV");
+                nodeActionResult(ui("Exported node history as CSV"));
             }
         } catch(Exception error) {
-            new AlertDialog.Builder(this).setTitle("File transfer failed")
-                    .setMessage(error.getMessage()).setPositiveButton("OK",null).show();
+            new AlertDialog.Builder(this).setTitle(ui("File transfer failed"))
+                    .setMessage(error.getMessage()).setPositiveButton(ui("OK"),null).show();
         }
     }
     private void transferHistory(int requestCode,Uri uri) {
-        if(historyTransferRunning){nodeActionResult("Wait for the current history transfer to finish");return;}
+        if(historyTransferRunning){nodeActionResult(ui("Wait for the current history transfer to finish"));return;}
         final String radio=transferRadio,id=transferNode;
         final boolean exporting=requestCode==EXPORT_APP_JSON||requestCode==EXPORT_JSON;
         final boolean full=requestCode==EXPORT_APP_JSON||requestCode==IMPORT_APP_JSON;
@@ -2668,7 +2863,7 @@ public final class MainActivity extends Activity {
         try{for(Map.Entry<String,?> e:getPreferences(0).getAll().entrySet())settings.put(e.getKey(),e.getValue());if(full&&!settings.has("preset_messages"))settings.put("preset_messages",new JSONArray().put(new JSONObject().put("title","Status Update").put("text","Status:\nLocation:\nNext update:")).toString());}catch(JSONException error){nodeActionResult(error.getMessage());return;}
         historyTransferRunning=true;
         nodeActionResult(exporting?(full?"Preparing and checking full backup… Keep the app open.":"Exporting history…"):
-                full?"Checking backup archive before importing…":"Validating and importing history…");
+                full?ui("Checking backup archive before importing…"):ui("Validating and importing history…"));
         notificationText="";updateRunningNotification();
         historyWorker.execute(()->{
             try {
@@ -2678,7 +2873,7 @@ public final class MainActivity extends Activity {
                         if(stream==null)throw new IOException("Cannot open destination");
                         HistoryBackup.export(new java.io.OutputStreamWriter(stream,StandardCharsets.UTF_8),chatStore,radio,id,null);
                     }
-                    main.post(()->{if(!closing)nodeActionResult(full?"Backup exported and verified. Sound selections are included; sound files are not embedded.":"Backup exported. Sound selections are included; sound files are not embedded.");});
+                    main.post(()->{if(!closing)nodeActionResult(full?ui("Backup exported and verified. Sound selections are included; sound files are not embedded."):ui("Backup exported. Sound selections are included; sound files are not embedded."));});
                 }else {
                     // Copy once to private staging so both streaming passes see the same bytes.
                     java.io.File staged=java.io.File.createTempFile("history-import-",".json",getCacheDir());
@@ -2711,13 +2906,13 @@ public final class MainActivity extends Activity {
                             try {
                                 if(full){mergeSettings(headers.settings);chatStore.clearPendingSettings();}
                                 refreshImportedHistory();
-                                new AlertDialog.Builder(this).setTitle("Backup imported").setMessage("Added "+added[0]+" radios, "+added[1]+" channels and "+added[2]+" messages. Existing data was kept. Unavailable sound files must be selected again in Config.").setPositiveButton("OK",null).show();
-                            }catch(Exception error){nodeActionResult("History imported; settings recovery is pending: "+error.getMessage());}
+                                new AlertDialog.Builder(this).setTitle(ui("Backup imported")).setMessage(ui("Added ")+added[0]+" radios, "+added[1]+" channels and "+added[2]+ui(" messages. Existing data was kept. Unavailable sound files must be selected again in Config.")).setPositiveButton(ui("OK"),null).show();
+                            }catch(Exception error){nodeActionResult(ui("History imported; settings recovery is pending: ")+error.getMessage());}
                         });
                         }finally{if(backupArchive!=null)backupArchive.close();}
                     }finally{if(!staged.delete())debug("Import staging cleanup pending");}
                 }
-            }catch(Exception error){main.post(()->{if(!closing)new AlertDialog.Builder(this).setTitle("File transfer failed").setMessage(error.getMessage()).setPositiveButton("OK",null).show();});}
+            }catch(Exception error){main.post(()->{if(!closing)new AlertDialog.Builder(this).setTitle(ui("File transfer failed")).setMessage(error.getMessage()).setPositiveButton(ui("OK"),null).show();});}
             finally{main.post(()->{historyTransferRunning=false;notificationText="";if(!closing)updateRunningNotification();});}
         });
     }
@@ -2726,7 +2921,7 @@ public final class MainActivity extends Activity {
         try {
             try(OutputStream output=new java.io.BufferedOutputStream(new java.io.FileOutputStream(prepared))){exportFullArchive(output,settings);}
             BackupArchive.validate(prepared);
-            main.post(()->{if(!closing)nodeActionResult("Saving and verifying the completed backup… Keep the app open.");});
+            main.post(()->{if(!closing)nodeActionResult(ui("Saving and verifying the completed backup… Keep the app open."));});
             try(OutputStream output=getContentResolver().openOutputStream(uri,"wt")){
                 if(output==null)throw new IOException("Cannot open backup destination");
                 BackupArchive.copy(prepared,output);
@@ -2782,7 +2977,7 @@ public final class MainActivity extends Activity {
                 JSONObject properties=new JSONObject().put("id",item.getString("id")).put("kind",item.getString("kind")).put("title",item.getString("title")).put("description",item.optString("description","")).put("enabled",false);
                 JSONObject feature=new JSONObject().put("type","Feature").put("properties",properties).put("geometry",item.getJSONObject("geometry"));
                 try(OutputStream output=getContentResolver().openOutputStream(uri,"wt")){if(output==null)throw new IOException("Cannot open destination");output.write(feature.toString(2).getBytes(StandardCharsets.UTF_8));}
-                nodeActionResult("Map item exported. Share the file by Bluetooth, USB or storage card.");
+                nodeActionResult(ui("Map item exported. Share the file by Bluetooth, USB or storage card."));
             }else{
                 byte[] bytes;try(InputStream input=getContentResolver().openInputStream(uri);java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream()){
                     if(input==null)throw new IOException("Cannot open map item");byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(output.size()+n>120000)throw new IOException("Map item exceeds 120 KB");output.write(buffer,0,n);}bytes=output.toByteArray();
@@ -2791,9 +2986,9 @@ public final class MainActivity extends Activity {
                 JSONObject p=feature.getJSONObject("properties");String kind=p.optString("kind");
                 JSONObject item=new JSONObject().put("id",java.util.UUID.randomUUID().toString()).put("kind",kind).put("title",p.optString("title","Shared map item"))
                         .put("description",p.optString("description","")).put("geometry",feature.getJSONObject("geometry")).put("enabled",!kind.equals("geofence"));
-                mapData.put(item,false);sendMapData();nodeActionResult(kind.equals("geofence")?"Geofence imported off. Review its area, then enable alerts.":"Map item imported from file.");
+                mapData.put(item,false);sendMapData();nodeActionResult(kind.equals("geofence")?ui("Geofence imported off. Review its area, then enable alerts."):ui("Map item imported from file."));
             }
-        }catch(Exception error){nodeActionResult("Map item transfer failed: "+error.getMessage());}
+        }catch(Exception error){nodeActionResult(ui("Map item transfer failed: ")+error.getMessage());}
     }
     private void validateNodeBackup(JSONObject json) throws JSONException {
         if(json.optInt("version")<1||json.optInt("version")>2) throw new JSONException("Unsupported node backup version");
@@ -2864,7 +3059,7 @@ public final class MainActivity extends Activity {
     private void sendLogItems() {
         if(!pageReady||closing||web==null)return;
         try {web.evaluateJavascript("window.onLogItems("+chatStore.logItems().toString()+")",null);}
-        catch(Exception error){nodeActionResult("Could not load Log items: "+error.getMessage());}
+        catch(Exception error){nodeActionResult(ui("Could not load Log items: ")+error.getMessage());}
     }
     private void contactEvent(String event,Object value) {
         if(pageReady&&!closing&&web!=null)web.evaluateJavascript("window."+event+"?.("+(value instanceof String?JSONObject.quote((String)value):String.valueOf(value))+")",null);
@@ -2885,7 +3080,7 @@ public final class MainActivity extends Activity {
             SharedPreferences.Editor edit=prefs.edit().putString("favorite_contact_snapshot",after.toString());
             for(Map.Entry<String,Boolean> change:changes.entrySet())edit.putString("favorite_intent:"+change.getKey(),java.util.UUID.randomUUID()+":"+change.getValue());
             edit.apply();
-            if(!changes.isEmpty())nodeActionResult("Contact favorites queued for assigned nodes. Disconnected radios will update after reconnecting.");
+            if(!changes.isEmpty())nodeActionResult(ui("Contact favorites queued for assigned nodes. Disconnected radios will update after reconnecting."));
         }catch(Exception error){contactEvent("onContactError","Could not queue contact favorites: "+error.getMessage());}
     }
     private boolean favoritePending(String radio,String device,String id){
@@ -2940,6 +3135,11 @@ public final class MainActivity extends Activity {
         }catch(Exception e){contactEvent("onContactError","Could not load assigned nodes: "+e.getMessage());}
     }
     private boolean mapActive,mapRefreshPending,mapSnapshotInFlight,mapSnapshotAgain;
+    private final Runnable mapRetentionRunner=new Runnable(){public void run(){
+        if(closing)return;
+        if(mapActive)sendMapData();else mapSnapshotWorker.execute(()->{try{mapData.prune();}catch(Exception e){debug("Map retention deferred");}});
+        main.postDelayed(this,60000);
+    }};
     private final Runnable mapRefresher=()->{mapRefreshPending=false;if(mapActive)sendMapData();};
     private void requestRadioMapUpdate() {
         if(!mapActive||mapRefreshPending||closing)return;
@@ -2961,7 +3161,7 @@ public final class MainActivity extends Activity {
                     mapSnapshotInFlight=false;
                     if(closing)return;
                     if(result!=null&&pageReady&&web!=null)web.evaluateJavascript("window.onMapData("+result+")",null);
-                    else if(failure!=null)nodeActionResult("Could not load Map: "+failure);
+                    else if(failure!=null)nodeActionResult(ui("Could not load Map: ")+failure);
                     if(mapSnapshotAgain){mapSnapshotAgain=false;sendMapData();}
                 });
             });
@@ -3006,7 +3206,7 @@ public final class MainActivity extends Activity {
     private volatile boolean satelliteDownloadRunning,satelliteDownloadCancelled;
     private void openMapHelp(String url){
         try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}
-        catch(ActivityNotFoundException error){nodeActionResult("No browser is available to open Copernicus");}
+        catch(ActivityNotFoundException error){nodeActionResult(ui("No browser is available to open Copernicus"));}
     }
     private void sendSatelliteAccount(){
         if(!pageReady||closing||web==null)return;
@@ -3026,7 +3226,7 @@ public final class MainActivity extends Activity {
         debug("Ask positions · "+title+" · "+destination+" · "+detail);
         if(!closing&&!isFinishing()&&!isDestroyed())
             new AlertDialog.Builder(this).setTitle(title).setMessage(destination+"\n"+time+"\n\n"+detail)
-                    .setPositiveButton("OK",null).show();
+                    .setPositiveButton(ui("OK"),null).show();
     }
     private void finishMapSense(String title,String detail){
         main.removeCallbacks(mapSenseTimeout);
@@ -3038,7 +3238,7 @@ public final class MainActivity extends Activity {
         try{
             mapData.setGeofenceNodeExcluded(radio,node,excluded);
             publish();sendMapData();
-        }catch(Exception error){nodeActionResult("Could not change geofence alerts for this node");}
+        }catch(Exception error){nodeActionResult(ui("Could not change geofence alerts for this node"));}
     }
     private void showMapGeofenceAlerts(String radio,String device,String id,String name,NodePosition position){
         try{JSONArray alerts=mapData.geofenceChanges(radio,device,id,position);
@@ -3056,15 +3256,15 @@ public final class MainActivity extends Activity {
     private void requestMapSense(String key,int channel){
         RadioSession s=session(key);
         if(s==null||s.meshcore||!s.connected||s.loading||s.protocol==null||!s.channelNames.containsKey(channel)){
-            nodeActionResult("Choose a connected Meshtastic device and one of its reported channels");return;
+            nodeActionResult(ui("Choose a connected Meshtastic device and one of its reported channels"));return;
         }
-        long now=System.currentTimeMillis();if(now-lastMapSense<180000){nodeActionResult("Wait three minutes between mesh-wide position requests");return;}
+        long now=System.currentTimeMillis();if(now-lastMapSense<180000){nodeActionResult(ui("Wait three minutes between mesh-wide position requests"));return;}
         int generation=s.generation;
         String channelName=s.channelNames.get(channel);
         String destination=(s.ownName.isEmpty()?s.name:s.ownName)+" · "+channelName+" · Hop limit 3";
-        new AlertDialog.Builder(this).setTitle("Ask the mesh for positions?")
-                .setMessage(destination+"\n\nBroadcast one Meshtastic position request on this channel?")
-                .setNegativeButton("Cancel",null).setPositiveButton("Send request",(dialog,which)->{
+        new AlertDialog.Builder(this).setTitle(ui("Ask the mesh for positions?"))
+                .setMessage(destination+ui("\n\nBroadcast one Meshtastic position request on this channel?"))
+                .setNegativeButton(ui("Cancel"),null).setPositiveButton(ui("Send request"),(dialog,which)->{
                     if(s.generation!=generation||!s.connected||s.loading||s.protocol==null||!channelName.equals(s.channelNames.get(channel))){
                         showMapSenseResult("Request not sent",destination,"The selected radio or channel is no longer available.");return;
                     }
@@ -3143,7 +3343,7 @@ public final class MainActivity extends Activity {
     private void sendMapMark(String id,String key,int channel,String peer){
         RadioSession s=session(key);
         if(s==null||!s.connected||s.loading||s.protocol==null){
-            nodeActionResult("Choose a connected radio");return;
+            nodeActionResult(ui("Choose a connected radio"));return;
         }
         try{
             boolean direct=peer!=null&&!peer.isEmpty();
@@ -3170,8 +3370,8 @@ public final class MainActivity extends Activity {
                 return;
             }
             byte[] packet=((MeshtasticProtocol)s.protocol).waypointCommand(id,name,description,lat,lon,channel,peer);
-            s.sendTracked(packet);nodeActionResult("Mark sent to the Meshtastic radio. Mesh delivery is not guaranteed.");
-        }catch(Exception error){nodeActionResult("Could not send mark: "+error.getMessage());}
+            s.sendTracked(packet);nodeActionResult(ui("Mark sent to the Meshtastic radio. Mesh delivery is not guaranteed."));
+        }catch(Exception error){nodeActionResult(ui("Could not send mark: ")+error.getMessage());}
     }
     private int mergeSettings(JSONObject settings) throws JSONException {
         SharedPreferences preferences=getPreferences(0);
@@ -3259,7 +3459,8 @@ public final class MainActivity extends Activity {
             JSONObject data = new JSONObject().put("mt",encoded.get(selectedMt)).put("mc",encoded.get(selectedMc))
                     .put("left",encoded.get(chatLeft)).put("right",encoded.get(chatRight));
             JSONObject memberConfig=new JSONObject(getPreferences(0).getString("member_config","{}"));
-            data.put("memberConfig",memberConfig).put("memberLanguage",getPreferences(0).getString("member_language","en"));
+            data.put("memberConfig",memberConfig).put("memberLanguage",AppLanguage.language(this)).put("appLanguage",AppLanguage.language(this));
+            data.put("persistentJobs",persistentJobs==null?new JSONArray():persistentJobs.jobs);
             JSONArray memberRadios=new JSONArray();
             if(memberConfig.optBoolean("enabled"))for(RadioSession s:sessions.values())if(s.connected&&!s.loading){
                 if(!encoded.containsKey(s))encoded.put(s,sessionJson(s));
@@ -3483,16 +3684,16 @@ public final class MainActivity extends Activity {
 
     private void sendReaction(String key,long messageId,String number) {
         RadioSession s=sessions.get(key);
-        if(s==null||s.meshcore||!s.connected||s.loading||s.protocol==null){nodeActionResult("Connect the corresponding Meshtastic radio first");return;}
+        if(s==null||s.meshcore||!s.connected||s.loading||s.protocol==null){nodeActionResult(ui("Connect the corresponding Meshtastic radio first"));return;}
         ChatStore.Message original=null;
         for(ChatStore.Message m:chatStore.load("mt",s.ownId))if(m.id==messageId){original=m;break;}
-        if(original==null||original.reaction||original.packetId==0){nodeActionResult("Original packet reference unavailable for this message");return;}
+        if(original==null||original.reaction||original.packetId==0){nodeActionResult(ui("Original packet reference unavailable for this message"));return;}
         int channel=original.channel;
         if(!original.peer.isEmpty()) {
             NodeEntry contact=s.knownNodes.get(original.peer);
-            if(contact==null){nodeActionResult("Wait for this contact to load");return;}
+            if(contact==null){nodeActionResult(ui("Wait for this contact to load"));return;}
             channel=contact.channel;
-        } else if(!s.channelNames.containsKey(channel)){nodeActionResult("Wait for this channel to load");return;}
+        } else if(!s.channelNames.containsKey(channel)){nodeActionResult(ui("Wait for this channel to load"));return;}
         try {
             byte[] payload=s.protocol.sendReaction(original.peer,channel,number,original.packetId);
             ChatEntry entry=new ChatEntry("You",number,true);entry.reaction=true;entry.replyId=original.packetId;entry.packetId=s.protocol.lastRequestId();
@@ -3506,9 +3707,9 @@ public final class MainActivity extends Activity {
     private void sendMessage(RadioSession session,int channel,String text) {sendMessage(session,channel,text,0);}
     private void sendMessage(RadioSession session, int channel, String text,long replyId) {
         if (session == null) return;
-        if (!session.connected || session.protocol == null) { nodeActionResult("Connect the radio first"); return; }
-        if (session.ownId.isEmpty() || session.loading) { nodeActionResult("Wait for the radio to finish loading"); return; }
-        if (!session.channelNames.containsKey(channel)) { nodeActionResult("Wait for this radio's channel names"); return; }
+        if (!session.connected || session.protocol == null) { nodeActionResult(ui("Connect the radio first")); return; }
+        if (session.ownId.isEmpty() || session.loading) { nodeActionResult(ui("Wait for the radio to finish loading")); return; }
+        if (!session.channelNames.containsKey(channel)) { nodeActionResult(ui("Wait for this radio's channel names")); return; }
         text = text == null ? "" : text.trim();
         if (text.isEmpty()) return;
         if(text.getBytes(StandardCharsets.UTF_8).length>session.protocol.textLimit(false)) {
@@ -3546,14 +3747,14 @@ public final class MainActivity extends Activity {
                 return;
             }
         }
-        if (session.ownId.isEmpty() || session.loading) { nodeActionResult("Wait for the radio to finish loading"); return; }
+        if (session.ownId.isEmpty() || session.loading) { nodeActionResult(ui("Wait for the radio to finish loading")); return; }
         NodeEntry entry = session.knownNodes.get(id);
-        if (entry == null || !session.connected) { nodeActionResult("Connect the radio and reload this contact first"); return; }
+        if (entry == null || !session.connected) { nodeActionResult(ui("Connect the radio and reload this contact first")); return; }
         String key = (session.meshcore ? "mc:" : "mt:") + session.ownId + ":" + id;
         try {
             if ("favorite".equals(action)) {
-                if(!session.radioFavorites.containsKey(id)){nodeActionResult("Wait for the radio's favorite state to load");return;}
-                if(id.equals(session.favoriteInFlight)){nodeActionResult("Wait for this favorite update to finish");return;}
+                if(!session.radioFavorites.containsKey(id)){nodeActionResult(ui("Wait for the radio's favorite state to load"));return;}
+                if(id.equals(session.favoriteInFlight)){nodeActionResult(ui("Wait for this favorite update to finish"));return;}
                 SharedPreferences prefs=getPreferences(0);
                 String pending=prefs.getString("favorite_pending:"+key,"");
                 boolean next=pending.isEmpty()?!session.radioFavorites.get(id):!pending.endsWith(":true");
@@ -3561,7 +3762,7 @@ public final class MainActivity extends Activity {
                 prefs.edit().putString("favorite_pending:"+key,java.util.UUID.randomUUID()+":"+next)
                     .putString("favorite_seen:"+key,intent).putBoolean("favorite_migrated:"+key,true).apply();
                 session.favoritePumpAt=0;pumpFavorites(session);
-                publish();nodeActionResult("Favorite change queued; waiting for radio confirmation.");return;
+                publish();nodeActionResult(ui("Favorite change queued; waiting for radio confirmation."));return;
             }
             if ("share".equals(action)) {
                 String details = session.name + " · " + entry.name + " · " + entry.id + " · " + entry.role;
@@ -3572,21 +3773,21 @@ public final class MainActivity extends Activity {
                 startActivity(Intent.createChooser(share, "Share node info")); return;
             }
             if ("dm".equals(action) && (text == null || text.trim().isEmpty())) {
-                nodeActionResult("Enter a direct message first"); return;
+                nodeActionResult(ui("Enter a direct message first")); return;
             }
             if("dm".equals(action)&&text.getBytes(StandardCharsets.UTF_8).length>session.protocol.textLimit(true)) {
                 startSplit(session,id,-1,text,0);return;
             }
             if (session.meshcore && "req".equals(action) &&
                     !(entry.role.equals("Repeater") || entry.role.equals("Sensor"))) {
-                nodeActionResult("Status requests are for MeshCore repeaters and sensors"); return;
+                nodeActionResult(ui("Status requests are for MeshCore repeaters and sensors")); return;
             }
             boolean isTrace="tr".equals(action)||"trace-path".equals(action)||"ping".equals(action);
             boolean mtTrace=!session.meshcore&&"tr".equals(action);
             long traceWait=mtTracerouteAllowance.remaining(SystemClock.elapsedRealtime());
-            if(mtTrace&&traceWait>0){nodeActionResult("Meshtastic traceroute is available again in "+((traceWait+999)/1000)+" seconds. All destinations share this 30-second cooldown.");return;}
-            if(isTrace&&session.meshcore&&session.pendingTrace!=0) { nodeActionResult("Wait for the current trace to finish"); return; }
-            if(mtTrace&&session.ble==null&&session.usb==null){nodeActionResult("Reconnect the Meshtastic radio first");return;}
+            if(mtTrace&&traceWait>0){nodeActionResult(ui("Meshtastic traceroute is available again in ")+((traceWait+999)/1000)+ui(" seconds. All destinations share this 30-second cooldown."));return;}
+            if(isTrace&&session.meshcore&&session.pendingTrace!=0) { nodeActionResult(ui("Wait for the current trace to finish")); return; }
+            if(mtTrace&&session.ble==null&&session.usb==null){nodeActionResult(ui("Reconnect the Meshtastic radio first"));return;}
             byte[] payload = session.protocol.nodeCommand(action, id, text == null ? "" : text, entry.channel);
             if(isTrace) {
                 long token=session.protocol.lastRequestId(); int generation=session.generation;
@@ -3629,12 +3830,12 @@ public final class MainActivity extends Activity {
             if(session.meshcore&&!isTrace&&!"dm".equals(action)) {
                 long token=session.protocol.lastRequestId(); int generation=session.generation;
                 main.postDelayed(() -> {if(session.generation==generation&&session.protocol.requestPending(token)) {
-                    session.protocol.expireRequest(token);nodeActionResult("reset-path".equals(action)?"Path reset unconfirmed for "+entry.name+": no response from the radio.":"No response from radio to the command",session.key);
+                    session.protocol.expireRequest(token);nodeActionResult("reset-path".equals(action)?ui("Path reset unconfirmed for ")+entry.name+ui(": no response from the radio."):ui("No response from radio to the command"),session.key);
                 }},15000);
             }
             publish();
-            if("reset-path".equals(action))nodeActionResult("Resetting path for "+entry.name+"…",session.key);
-            else if(!isTrace&&!"dm".equals(action)) nodeActionResult(("signal".equals(action) ? "Node statistics request" : action.toUpperCase()) + " sent to radio for " + entry.name);
+            if("reset-path".equals(action))nodeActionResult(ui("Resetting path for ")+entry.name+"…",session.key);
+            else if(!isTrace&&!"dm".equals(action)) nodeActionResult(("signal".equals(action) ? "Node statistics request" : action.toUpperCase()) + ui(" sent to radio for ") + entry.name);
         } catch (IllegalArgumentException | ActivityNotFoundException error) {
             if(!session.meshcore&&"tr".equals(action)) {
                 long token=session.protocol.lastRequestId();mtTracerouteAllowance.submissionFailed(session.key,token);
@@ -3646,7 +3847,7 @@ public final class MainActivity extends Activity {
 
     private void chainError(Exception error) {
         try {if(sendChain!=null)sendChain.data.put("paused",true);}catch(JSONException ignored){}
-        nodeActionResult("Sending paused: "+error.getMessage());
+        nodeActionResult(ui("Sending paused: ")+error.getMessage());
     }
     private JSONObject chainTarget(RadioSession s,String peer,int channel,String label) throws JSONException {
         return new JSONObject().put("radio",s.meshcore?"mc":"mt").put("nodeId",s.ownId).put("peer",peer).put("channel",channel)
@@ -3667,7 +3868,7 @@ public final class MainActivity extends Activity {
             SplitSend job=saveQueuedParts(s,peer,channel,replyId,parts);
             attachQueuedParts(s,job);
             s.splitSends.add(job);composeQueued(s,peer,text.trim());publish();tickSplit(s);
-        }catch(Exception error){nodeActionResult("Cannot split message: "+error.getMessage());}
+        }catch(Exception error){nodeActionResult(ui("Cannot split message: ")+error.getMessage());}
     }
     private SplitSend saveQueuedParts(RadioSession s,String peer,int channel,long replyId,List<String> parts){
         SplitSend job=new SplitSend(peer,channel,replyId);
@@ -3840,11 +4041,11 @@ public final class MainActivity extends Activity {
         TextView body=label(failed.text,17,0xffc9d1d9,false);body.setTextIsSelectable(true);content.addView(body);
         content.addView(label(job.problemReason+"\n\nRetry resends this part before continuing. Missing confirmation does not prove non-delivery; a retry may create a duplicate. If disconnected, reconnect the original radio to continue. Cancel stops the remaining parts of this message.",14,Color.GRAY,false));
         ScrollView scroll=new ScrollView(this);scroll.addView(content);
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Split message needs attention").setView(scroll).setCancelable(false)
-            .setNegativeButton("Cancel",(d,w)->{
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(ui("Split message needs attention")).setView(scroll).setCancelable(false)
+            .setNegativeButton(ui("Cancel"),(d,w)->{
                 for(int i=index+1;i<job.entries.size();i++){ChatEntry entry=job.entries.get(i);entry.delivery="failed: Remaining split parts cancelled by you";chatStore.setDelivery(entry.id,entry.delivery);}
                 s.splitSends.remove(job);publish();
-            }).setPositiveButton("Retry",null).create();
+            }).setPositiveButton(ui("Retry"),null).create();
         splitFailureDialog=dialog;dialog.setOnDismissListener(d->splitFailureDialog=null);dialog.show();
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             try {
@@ -3856,7 +4057,7 @@ public final class MainActivity extends Activity {
                 }
                 job.next=index;job.waitingSince=0;job.token=0;job.problemIndex=-1;job.retryRequested=true;job.pacing.retry(SystemClock.elapsedRealtime(),splitIntervalMs());
                 dialog.dismiss();publish();
-            }catch(Exception error){nodeActionResult("Cannot retry split part: "+error.getMessage());}
+            }catch(Exception error){nodeActionResult(ui("Cannot retry split part: ")+error.getMessage());}
         });
     }
     private RadioSession chainRadio(JSONObject item) {
@@ -3869,7 +4070,7 @@ public final class MainActivity extends Activity {
         return false;
     }
     private void chooseMultiSend() {
-        if(!getPreferences(0).getBoolean("multi_send_enabled",false)){nodeActionResult("Enable Send to multiple in Config first");return;}
+        if(!getPreferences(0).getBoolean("multi_send_enabled",false)){nodeActionResult(ui("Enable Send to multiple in Config first"));return;}
         if(multiSendCooldownRemaining()>0){nodeActionResult(multiSendCooldownMessage());return;}
         if(chainUnfinished()){showChain();return;}
         new MultiSendComposer().show();
@@ -3900,16 +4101,16 @@ public final class MainActivity extends Activity {
     private void showDestinationSets() {
         LinearLayout content=vertical();
         ScrollView scroll=new ScrollView(this);scroll.addView(content);
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Destination sets").setView(scroll).setPositiveButton("Close",null).create();
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(ui("Destination sets")).setView(scroll).setPositiveButton(ui("Close"),null).create();
         content.addView(label("Save named groups of channels and DMs. Connect their radios to create or edit destinations. Sets are included in App Backup.",14,Color.GRAY,false));
-        Button create=new Button(this);create.setText("Create destination set");content.addView(create);
+        Button create=new Button(this);create.setText(ui("Create destination set"));content.addView(create);
         for(Map.Entry<String,JSONObject> entry:destinationSets().entrySet()) {
             JSONObject set=entry.getValue();Button button=new Button(this);button.setText(set.optString("name"));content.addView(button);
             button.setOnClickListener(v->new AlertDialog.Builder(this).setTitle(set.optString("name"))
                 .setItems(new String[]{"Edit destinations / name","Delete set"},(d,w)->{
                     if(w==0){dialog.dismiss();new MultiSendComposer(true,entry.getKey(),set).show();}
-                    else new AlertDialog.Builder(this).setMessage("Delete destination set “"+set.optString("name")+"”?").setNegativeButton("Cancel",null)
-                        .setPositiveButton("Delete",(a,b)->{getPreferences(0).edit().remove(entry.getKey()).apply();dialog.dismiss();showDestinationSets();}).show();
+                    else new AlertDialog.Builder(this).setMessage(ui("Delete destination set “")+set.optString("name")+"”?").setNegativeButton(ui("Cancel"),null)
+                        .setPositiveButton(ui("Delete"),(a,b)->{getPreferences(0).edit().remove(entry.getKey()).apply();dialog.dismiss();showDestinationSets();}).show();
                 }).show());
         }
         create.setOnClickListener(v->{dialog.dismiss();new MultiSendComposer(true,null,null).show();});dialog.show();
@@ -3932,17 +4133,17 @@ public final class MainActivity extends Activity {
             try{
                 String initial=new JSONArray().put(new JSONObject().put("title","Status Update").put("text","Status:\nLocation:\nNext update:")).toString();
                 JSONArray saved=new JSONArray(getPreferences(0).getString("preset_messages",initial));
-                if(saved.length()==0){error.setText("No message templates saved. Add one in Config → Message Templates.");return;}
+                if(saved.length()==0){error.setText(ui("No message templates saved. Add one in Config → Message Templates."));return;}
                 String[] names=new String[saved.length()];
                 for(int i=0;i<saved.length();i++){JSONObject item=saved.optJSONObject(i);names[i]=item==null?"Message "+(i+1):item.optString("title","Message "+(i+1));}
-                new AlertDialog.Builder(MainActivity.this).setTitle("Message Templates").setItems(names,(dialog,index)->{
+                new AlertDialog.Builder(MainActivity.this).setTitle(ui("Message Templates")).setItems(names,(dialog,index)->{
                     JSONObject item=saved.optJSONObject(index);String template=item==null?saved.optString(index):item.optString("text");
                     int start=Math.max(0,message.getSelectionStart()),end=Math.max(start,message.getSelectionEnd());
                     String before=message.getText().subSequence(0,start).toString(),after=message.getText().subSequence(end,message.length()).toString();
                     String insert=(before.isEmpty()||Character.isWhitespace(before.charAt(before.length()-1))?"":" ")+template+(after.isEmpty()||Character.isWhitespace(after.charAt(0))?"":" ");
                     message.getText().replace(start,end,insert);message.setSelection(start+insert.length());error.setText("");
-                }).setNegativeButton("Cancel",null).show();
-            }catch(JSONException failure){error.setText("Could not read message templates.");}
+                }).setNegativeButton(ui("Cancel"),null).show();
+            }catch(JSONException failure){error.setText(ui("Could not read message templates."));}
         }
         RadioSession current(){int i=radioPicker.getSelectedItemPosition();return i>=0&&i<radios.size()?radios.get(i):null;}
         void show() {
@@ -3956,18 +4157,18 @@ public final class MainActivity extends Activity {
                     for(NodeEntry n:nodes)if(!n.id.equals(s.ownId)&&(s.meshcore?(n.role.equals("User")||n.role.equals("Room server")):n.id.matches("![0-9a-fA-F]{8}")&&!n.id.equals("!00000000")&&!n.id.equals("!ffffffff")))
                         targets.put("dm:"+n.id,chainTarget(s,n.id,-1,n.name).put("display",n.name+" · "+n.id));
                 }
-                if(radios.isEmpty()){nodeActionResult("Connect a radio and wait for it to finish loading");return;}
+                if(radios.isEmpty()){nodeActionResult(ui("Connect a radio and wait for it to finish loading"));return;}
                 LinearLayout layout=vertical();layout.setBackgroundColor(panelColor);layout.setPadding(dp(16),dp(8),dp(16),dp(8));
-                setName=new EditText(MainActivity.this);setName.setSingleLine(true);setName.setHint("Destination set name");styleField(setName);
+                setName=new EditText(MainActivity.this);setName.setSingleLine(true);setName.setHint(ui("Destination set name"));styleField(setName);
                 if(editingSet)layout.addView(setName);
                 else {
-                    Button savedSets=new Button(MainActivity.this);savedSets.setText("Add saved destination set");styleButton(savedSets);layout.addView(savedSets);
+                    Button savedSets=new Button(MainActivity.this);savedSets.setText(ui("Add saved destination set"));styleButton(savedSets);layout.addView(savedSets);
                     savedSets.setOnClickListener(v->{
                         List<JSONObject> sets=new ArrayList<>(destinationSets().values());List<String> labels=new ArrayList<>();for(JSONObject set:sets)labels.add(set.optString("name"));
-                        if(sets.isEmpty()){error.setText("Create a destination set in Config → Sending options first.");return;}
-                        new AlertDialog.Builder(MainActivity.this).setTitle("Add destination set").setItems(labels.toArray(new String[0]),(d,w)->{
+                        if(sets.isEmpty()){error.setText(ui("Create a destination set in Config → Sending options first."));return;}
+                        new AlertDialog.Builder(MainActivity.this).setTitle(ui("Add destination set")).setItems(labels.toArray(new String[0]),(d,w)->{
                             try{loadSet(sets.get(w));render();updateSummary();error.setText("");}catch(Exception failure){error.setText(failure.getMessage());}
-                        }).setNegativeButton("Cancel",null).show();
+                        }).setNegativeButton(ui("Cancel"),null).show();
                     });
                 }
                 layout.addView(heading("Select radio"));
@@ -3977,21 +4178,21 @@ public final class MainActivity extends Activity {
                     @Override public View getDropDownView(int position,View convertView,android.view.ViewGroup parent){TextView item=(TextView)super.getDropDownView(position,convertView,parent);item.setTextColor(textColor);item.setBackgroundColor(fieldColor);item.setPadding(dp(10),dp(12),dp(10),dp(12));return item;}
                 };radioPicker.setAdapter(adapter);radioPicker.setBackground(fieldBackground());layout.addView(radioPicker);
                 layout.addView(heading("Select channel or DM"));
-                LinearLayout types=horizontal();channelButton=new Button(MainActivity.this);channelButton.setText("Channel");dmButton=new Button(MainActivity.this);dmButton.setText("DM · Select Nodes");styleButton(channelButton);styleButton(dmButton);types.addView(channelButton,new LinearLayout.LayoutParams(0,-2,1));types.addView(dmButton,new LinearLayout.LayoutParams(0,-2,1));layout.addView(types);
-                search=new EditText(MainActivity.this);search.setSingleLine(true);search.setHint("Search nodes by name or ID");styleField(search);layout.addView(search);
+                LinearLayout types=horizontal();channelButton=new Button(MainActivity.this);channelButton.setText(ui("Channel"));dmButton=new Button(MainActivity.this);dmButton.setText(ui("DM · Select Nodes"));styleButton(channelButton);styleButton(dmButton);types.addView(channelButton,new LinearLayout.LayoutParams(0,-2,1));types.addView(dmButton,new LinearLayout.LayoutParams(0,-2,1));layout.addView(types);
+                search=new EditText(MainActivity.this);search.setSingleLine(true);search.setHint(ui("Search nodes by name or ID"));styleField(search);layout.addView(search);
                 list=vertical();ScrollView options=new ScrollView(MainActivity.this);options.addView(list);layout.addView(options,new LinearLayout.LayoutParams(-1,dp(200)));
-                Button save=new Button(MainActivity.this);save.setText("Save destinations");styleButton(save);layout.addView(save);
+                Button save=new Button(MainActivity.this);save.setText(ui("Save destinations"));styleButton(save);layout.addView(save);
                 summary=label("",12,mutedColor,false);summary.setPadding(0,dp(8),0,dp(8));layout.addView(summary);
                 LinearLayout messageHeading=horizontal();messageHeading.addView(heading("Message"),new LinearLayout.LayoutParams(0,-2,1));
-                Button templates=new Button(MainActivity.this);templates.setText("Templates");styleButton(templates);messageHeading.addView(templates);layout.addView(messageHeading);
-                message=new EditText(MainActivity.this);message.setHint("Message for this chain");message.setMinLines(2);styleField(message);layout.addView(message);
+                Button templates=new Button(MainActivity.this);templates.setText(ui("Templates"));styleButton(templates);messageHeading.addView(templates);layout.addView(messageHeading);
+                message=new EditText(MainActivity.this);message.setHint(ui("Message for this chain"));message.setMinLines(2);styleField(message);layout.addView(message);
                 templates.setOnClickListener(v->chooseTemplate());
-                parallel=new android.widget.CheckBox(MainActivity.this);parallel.setText("Send through different radios simultaneously");parallel.setTextColor(textColor);parallel.setButtonTintList(android.content.res.ColorStateList.valueOf(accentColor));layout.addView(parallel);
+                parallel=new android.widget.CheckBox(MainActivity.this);parallel.setText(ui("Send through different radios simultaneously"));parallel.setTextColor(textColor);parallel.setButtonTintList(android.content.res.ColorStateList.valueOf(accentColor));layout.addView(parallel);
                 if(editingSet){messageHeading.setVisibility(View.GONE);message.setVisibility(View.GONE);parallel.setVisibility(View.GONE);}
                 layout.addView(label("Save channels and DMs for each radio, then select another radio. Saved sets can be combined with manual selections.",12,mutedColor,false));
                 error=new TextView(MainActivity.this);error.setTextColor(0xffff8b80);layout.addView(error);
                 ScrollView scroll=new ScrollView(MainActivity.this);scroll.setFillViewport(true);scroll.addView(layout);
-                AlertDialog dialog=new AlertDialog.Builder(MainActivity.this).setTitle(editingSet?"Destination set":"Send to multiple").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton(editingSet?"Save set":"Send Chain",null).create();
+                AlertDialog dialog=new AlertDialog.Builder(MainActivity.this).setTitle(editingSet?ui("Destination set"):ui("Send to multiple")).setView(scroll).setNegativeButton(ui("Cancel"),null).setPositiveButton(editingSet?ui("Save set"):ui("Send Chain"),null).create();
                 channelButton.setOnClickListener(v->{direct=false;render();});dmButton.setOnClickListener(v->{direct=true;render();});
                 radioPicker.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int position,long id){search.setText("");render();}});
                 search.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){render();}public void afterTextChanged(android.text.Editable e){}});
@@ -3999,8 +4200,9 @@ public final class MainActivity extends Activity {
                 dialog.setOnShowListener(d->{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(accentColor);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(accentColor);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{if(editingSet)saveSet(dialog);else send(dialog);});});
                 if(initialSet!=null){setName.setText(initialSet.optString("name"));loadSet(initialSet);}
                 render();updateSummary();dialog.show();
+                if(!editingSet){persistentNativeComposer=true;dialog.setOnDismissListener(d->persistentNativeComposer=false);}
                 dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-            }catch(Exception failure){nodeActionResult("Cannot open destination selection: "+failure.getMessage());}
+            }catch(Exception failure){nodeActionResult(ui("Cannot open destination selection: ")+failure.getMessage());}
         }
         void loadSet(JSONObject set) throws Exception {
             JSONArray targets=set.getJSONArray("targets");List<String[]> resolved=new ArrayList<>();
@@ -4052,7 +4254,7 @@ public final class MainActivity extends Activity {
                 JSONObject target=choices.get(radio.getKey()).get(id);total++;
                 text.append("\n").append(target.optString("label")).append(id.startsWith("dm:")?" · DM":" · channel");
             }
-            summary.setText("Saved destinations: "+total+" / 5"+text+(selection.hasUnsaved()?"\nUnsaved changes — press Save Destinations for each edited radio.":""));
+            summary.setText(ui("Saved destinations: ")+total+" / 5"+text+(selection.hasUnsaved()?"\nUnsaved changes — press Save Destinations for each edited radio.":""));
         }
         void send(AlertDialog dialog) {
             try {
@@ -4125,7 +4327,7 @@ public final class MainActivity extends Activity {
                 startMultiSendCooldown();
                 sendChain.data.put("completionNotified",true);sendChain.save();
                 publish();
-                new AlertDialog.Builder(this).setMessage("Chain Completed Successfully\n\nSend to multiple is now paused for 5 minutes. Ordinary Chat messages remain available.").setPositiveButton("OK",null).show();
+                new AlertDialog.Builder(this).setMessage(ui("Chain Completed Successfully\n\nSend to multiple is now paused for 5 minutes. Ordinary Chat messages remain available.")).setPositiveButton(ui("OK"),null).show();
             }
             if(multiSendCooldownRemaining()>0)return;
             if(sendChain.paused()||now<nextChainSend)return;
@@ -4184,12 +4386,12 @@ public final class MainActivity extends Activity {
         }catch(Exception error){item.put("state","unconfirmed").put("detail",error.getMessage());sendChain.data.put("paused",true);sendChain.save();throw error;}
     }
     private void showChain() {
-        if(sendChain==null){nodeActionResult("Sending storage is unavailable");return;}
+        if(sendChain==null){nodeActionResult(ui("Sending storage is unavailable"));return;}
         if(sendChain.items().length()==0) {
-            new AlertDialog.Builder(this).setTitle("Send to multiple")
-                .setMessage("No saved sending chain.")
-                .setPositiveButton("New multi-send",(d,w)->chooseMultiSend())
-                .setNegativeButton("Close",null).show();return;
+            new AlertDialog.Builder(this).setTitle(ui("Send to multiple"))
+                .setMessage(ui("No saved sending chain."))
+                .setPositiveButton(ui("New multi-send"),(d,w)->chooseMultiSend())
+                .setNegativeButton(ui("Close"),null).show();return;
         }
         try {
             LinearLayout content=vertical();StringBuilder summary=new StringBuilder(sendChain.paused()?"Paused\n":"Running\n");
@@ -4198,28 +4400,28 @@ public final class MainActivity extends Activity {
             }
             TextView details=new TextView(this);details.setText(summary);content.addView(details);
             LinearLayout activeBubbles=vertical();content.addView(activeBubbles);
-            Button nextPart=new Button(this);nextPart.setText("Send Next");content.addView(nextPart);
+            Button nextPart=new Button(this);nextPart.setText(ui("Send Next"));content.addView(nextPart);
             TextView information=label("i",20,Color.rgb(233,173,65),true);
             information.setGravity(Gravity.CENTER);information.setTypeface(android.graphics.Typeface.SERIF,android.graphics.Typeface.BOLD);
             information.setContentDescription("Sending controls information");information.setFocusable(true);
             android.graphics.drawable.GradientDrawable infoCircle=new android.graphics.drawable.GradientDrawable();
             infoCircle.setShape(android.graphics.drawable.GradientDrawable.OVAL);infoCircle.setColor(Color.rgb(39,48,66));infoCircle.setStroke(dp(1),Color.rgb(233,173,65));
             information.setBackground(infoCircle);LinearLayout.LayoutParams infoSize=new LinearLayout.LayoutParams(dp(36),dp(36));infoSize.setMargins(dp(6),dp(6),dp(6),dp(6));content.addView(information,infoSize);
-            Button previousPart=new Button(this);previousPart.setText("Send again the previous");content.addView(previousPart);
-            information.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Sending controls").setMessage("Send Next ends the current MeshCore channel observation after radio acceptance, keeps the pause before the next message, and continues automatically. For MeshCore DMs and Meshtastic it resumes pending work but waits for active retries or acknowledgment timeouts; it does not cancel radio transmissions. Resending the previous part may create a duplicate and pauses afterward.").setPositiveButton("OK",null).show());
-            Button pause=new Button(this);pause.setText(sendChain.paused()?"Continue pending messages":"Pause after this message");content.addView(pause);
-            Button retry=new Button(this);retry.setText("Review unsuccessful messages");content.addView(retry);
-            Button fresh=new Button(this);fresh.setText("New multi-send");content.addView(fresh);
-            Button cancelChain=new Button(this);cancelChain.setText("Cancel Chain");content.addView(cancelChain);
+            Button previousPart=new Button(this);previousPart.setText(ui("Send again the previous"));content.addView(previousPart);
+            information.setOnClickListener(v->new AlertDialog.Builder(this).setTitle(ui("Sending controls")).setMessage(ui("Send Next ends the current MeshCore channel observation after radio acceptance, keeps the pause before the next message, and continues automatically. For MeshCore DMs and Meshtastic it resumes pending work but waits for active retries or acknowledgment timeouts; it does not cancel radio transmissions. Resending the previous part may create a duplicate and pauses afterward.")).setPositiveButton(ui("OK"),null).show());
+            Button pause=new Button(this);pause.setText(sendChain.paused()?ui("Continue pending messages"):ui("Pause after this message"));content.addView(pause);
+            Button retry=new Button(this);retry.setText(ui("Review unsuccessful messages"));content.addView(retry);
+            Button fresh=new Button(this);fresh.setText(ui("New multi-send"));content.addView(fresh);
+            Button cancelChain=new Button(this);cancelChain.setText(ui("Cancel Chain"));content.addView(cancelChain);
             content.addView(label("Cancel remaining stops queued messages only. The active message and its retries may finish. Use Stop retries to stop future MeshCore DM attempts.",14,Color.GRAY,false));
             content.addView(label("Cancel Chain removes this saved queue. Chat messages remain; transmissions already handed to a radio may finish.",14,Color.GRAY,false));
             fresh.setVisibility(sendChain.data.optBoolean("multiple")?View.VISIBLE:View.GONE);
-            Button stopContinue=new Button(this);stopContinue.setText("Stop retries and continue");content.addView(stopContinue);
-            Button stopLater=new Button(this);stopLater.setText("Stop retries and retry later");content.addView(stopLater);
+            Button stopContinue=new Button(this);stopContinue.setText(ui("Stop retries and continue"));content.addView(stopContinue);
+            Button stopLater=new Button(this);stopLater.setText(ui("Stop retries and retry later"));content.addView(stopLater);
             ScrollView scroll=new ScrollView(this);scroll.addView(content);
-            AlertDialog dialog=new AlertDialog.Builder(this).setTitle(sendChain.data.optBoolean("multiple")?"Send to multiple · progress":"Split message · progress").setView(scroll).setPositiveButton("Close",null)
-                .setNeutralButton("Refresh",(d,w)->showChain()).setNegativeButton("Cancel remaining",(d,w)->{
-                    try{int cancelled=sendChain.cancelRemaining();showChain();new AlertDialog.Builder(this).setTitle("Remaining messages cancelled").setMessage(cancelled+" queued messages cancelled. The current transmission and its retries may finish. Nothing already transmitted can be recalled.").setPositiveButton("OK",null).show();}catch(Exception error){chainError(error);}
+            AlertDialog dialog=new AlertDialog.Builder(this).setTitle(sendChain.data.optBoolean("multiple")?ui("Send to multiple · progress"):ui("Split message · progress")).setView(scroll).setPositiveButton(ui("Close"),null)
+                .setNeutralButton(ui("Refresh"),(d,w)->showChain()).setNegativeButton(ui("Cancel remaining"),(d,w)->{
+                    try{int cancelled=sendChain.cancelRemaining();showChain();new AlertDialog.Builder(this).setTitle(ui("Remaining messages cancelled")).setMessage(cancelled+ui(" queued messages cancelled. The current transmission and its retries may finish. Nothing already transmitted can be recalled.")).setPositiveButton(ui("OK"),null).show();}catch(Exception error){chainError(error);}
                 }).create();
             pause.setOnClickListener(v->{try{sendChain.data.put("paused",!sendChain.paused()).put("stepOnce",false);sendChain.save();dialog.dismiss();showChain();}catch(Exception error){chainError(error);}});
             cancelChain.setOnClickListener(v->{
@@ -4239,9 +4441,9 @@ public final class MainActivity extends Activity {
             previousPart.setOnClickListener(v->{
                 JSONObject previous=sendChain.previousFinished(),original=sendChain.data;if(previous==null)return;
                 try{sendChain.pause();}catch(Exception error){chainError(error);return;}
-                new AlertDialog.Builder(MainActivity.this).setTitle("Send again the previous part?")
-                    .setMessage(previous.optString("label")+" · part "+previous.optInt("part")+"/"+previous.optInt("parts")+"\n\n"+previous.optString("text")+"\n\nThis creates another message on the same radio and destination. The recipient may already have it.")
-                    .setNegativeButton("Cancel",null).setPositiveButton("Send again",(d,w)->{try{if(multiSendCooldownRemaining()>0){nodeActionResult(multiSendCooldownMessage());return;}if(sendChain.data==original)sendChain.repeatPrevious(previous);}catch(Exception error){chainError(error);}}).show();
+                new AlertDialog.Builder(MainActivity.this).setTitle(ui("Send again the previous part?"))
+                    .setMessage(previous.optString("label")+ui(" · part ")+previous.optInt("part")+"/"+previous.optInt("parts")+"\n\n"+previous.optString("text")+ui("\n\nThis creates another message on the same radio and destination. The recipient may already have it."))
+                    .setNegativeButton(ui("Cancel"),null).setPositiveButton("Send again",(d,w)->{try{if(multiSendCooldownRemaining()>0){nodeActionResult(multiSendCooldownMessage());return;}if(sendChain.data==original)sendChain.repeatPrevious(previous);}catch(Exception error){chainError(error);}}).show();
             });
             retry.setOnClickListener(v->reviewChainFailures());fresh.setOnClickListener(v->{dialog.dismiss();chooseMultiSend();});
             stopContinue.setOnClickListener(v->chooseStopChain(false));stopLater.setOnClickListener(v->chooseStopChain(true));
@@ -4251,7 +4453,7 @@ public final class MainActivity extends Activity {
                 boolean manual=sendChain.data.optBoolean("stepOnce"),enabled=multiSendCooldownRemaining()==0&&(!sendChain.data.optBoolean("multiple")||getPreferences(0).getBoolean("multi_send_enabled",false));
                 fresh.setEnabled(enabled);pause.setEnabled(enabled);retry.setEnabled(enabled);
                 nextPart.setEnabled(enabled&&!manual&&sendChain.hasPending());previousPart.setEnabled(enabled&&!manual&&sendChain.previousFinished()!=null);
-                pause.setText(sendChain.paused()?"Continue pending messages":"Pause after this message");
+                pause.setText(sendChain.paused()?ui("Continue pending messages"):ui("Pause after this message"));
                 boolean hasActive=false;for(int i=0;i<sendChain.items().length();i++)hasActive|=sendChain.items().optJSONObject(i).optString("state").equals("active");
                 StringBuilder live=new StringBuilder(!hasActive&&!sendChain.hasPending()?"Finished\n":sendChain.paused()?"Paused (active transmissions may finish)\n":"Running\n");boolean canStop=false;
                 activeBubbles.removeAllViews();
@@ -4286,17 +4488,17 @@ public final class MainActivity extends Activity {
     private void chooseStopChain(boolean later) {
         List<JSONObject> active=new ArrayList<>();List<String> labels=new ArrayList<>();
         for(int i=0;i<sendChain.items().length();i++){JSONObject item=sendChain.items().optJSONObject(i);if(item.optString("state").equals("active")&&item.optString("radio").equals("mc")&&!item.optString("peer").isEmpty()){active.add(item);labels.add(item.optString("label"));}}
-        new AlertDialog.Builder(this).setTitle("Stop future attempts for which DM?").setItems(labels.toArray(new String[0]),(d,w)->{
+        new AlertDialog.Builder(this).setTitle(ui("Stop future attempts for which DM?")).setItems(labels.toArray(new String[0]),(d,w)->{
             try{JSONObject item=active.get(w);RadioSession s=chainRadio(item);if(s!=null&&s.protocol instanceof MeshCoreProtocol)((MeshCoreProtocol)s.protocol).stopFutureAttempts(item.optLong("token"));item.put("defer",later);sendChain.save();}catch(Exception error){chainError(error);}
-        }).setNegativeButton("Cancel",null).show();
+        }).setNegativeButton(ui("Cancel"),null).show();
     }
     private void reviewChainFailures() {
         List<JSONObject> failed=new ArrayList<>();List<String> labels=new ArrayList<>();
         for(int i=0;i<sendChain.items().length();i++){JSONObject item=sendChain.items().optJSONObject(i);String status=item.optString("state");if(status.equals("unconfirmed")||status.equals("deferred")){failed.add(item);labels.add(item.optString("label")+" · part "+item.optInt("part")+" · "+item.optString("detail"));}}
         boolean[] selected=new boolean[failed.size()];
-        new AlertDialog.Builder(this).setTitle("Choose messages to retry (duplicates are possible)")
-            .setMultiChoiceItems(labels.toArray(new String[0]),selected,(d,w,checked)->selected[w]=checked).setNegativeButton("Cancel",null)
-            .setPositiveButton("Resend selected",(d,w)->{try{boolean any=false;for(int i=0;i<selected.length;i++)if(selected[i]){sendChain.retry(failed.get(i));any=true;}if(any){sendChain.data.put("paused",false).put("stepOnce",false);sendChain.save();}}catch(Exception error){chainError(error);}}).show();
+        new AlertDialog.Builder(this).setTitle(ui("Choose messages to retry (duplicates are possible)"))
+            .setMultiChoiceItems(labels.toArray(new String[0]),selected,(d,w,checked)->selected[w]=checked).setNegativeButton(ui("Cancel"),null)
+            .setPositiveButton(ui("Resend selected"),(d,w)->{try{boolean any=false;for(int i=0;i<selected.length;i++)if(selected[i]){sendChain.retry(failed.get(i));any=true;}if(any){sendChain.data.put("paused",false).put("stepOnce",false);sendChain.save();}}catch(Exception error){chainError(error);}}).show();
     }
     private void composeQueued(RadioSession s,String peer,String text) {
         if(pageReady) web.evaluateJavascript("window.onComposeQueued("+JSONObject.quote(s.key)+","+JSONObject.quote(peer)+","+JSONObject.quote(text)+")",null);
@@ -4307,15 +4509,15 @@ public final class MainActivity extends Activity {
     }
     private void messageAction(String key,long id,String action) {
         RadioSession s=sessions.get(key);
-        if(s==null||s.ownId.isEmpty()) {nodeActionResult("This radio session is no longer available");return;}
+        if(s==null||s.ownId.isEmpty()) {nodeActionResult(ui("This radio session is no longer available"));return;}
         String radio=s.meshcore?"mc":"mt";
         ChatStore.Message message=null;
         for(ChatStore.Message item:chatStore.load(radio,s.ownId)) if(item.id==id) {message=item;break;}
-        if(message==null) {nodeActionResult("Message no longer exists");return;}
+        if(message==null) {nodeActionResult(ui("Message no longer exists"));return;}
         final ChatStore.Message saved=message;
         if(action.equals("delete")) {
-            new AlertDialog.Builder(this).setTitle("Delete this message?").setMessage("This removes only the local copy on this phone.")
-                    .setNegativeButton("Cancel",null).setPositiveButton("Delete",(dialog,which)->{
+            new AlertDialog.Builder(this).setTitle(ui("Delete this message?")).setMessage(ui("This removes only the local copy on this phone."))
+                    .setNegativeButton(ui("Cancel"),null).setPositiveButton(ui("Delete"),(dialog,which)->{
                         chatStore.deleteMessage(radio,s.ownId,id);
                         for(Map.Entry<Long,ChatEntry> tracked:s.trackedMessages.entrySet())
                             if(tracked.getValue().id==id) s.protocol.expireRequest(tracked.getKey());
@@ -4326,15 +4528,15 @@ public final class MainActivity extends Activity {
             for(Map.Entry<Long,ChatEntry> tracked:s.trackedMessages.entrySet()) {
                 if(tracked.getValue().id==id&&s.protocol.automaticDeliveryPending(tracked.getKey())) {
                     if(s.protocol instanceof MeshCoreProtocol)((MeshCoreProtocol)s.protocol).stopFutureAttempts(tracked.getKey());
-                    nodeActionResult("Future retries stopped; waiting for the current attempt's response window");
+                    nodeActionResult(ui("Future retries stopped; waiting for the current attempt's response window"));
                 }
             }
         } else if(action.equals("retry")&&saved.own) {
             for(Map.Entry<Long,ChatEntry> tracked:s.trackedMessages.entrySet())
                 if(tracked.getValue().id==id&&s.protocol.automaticDeliveryPending(tracked.getKey())) {
-                    nodeActionResult("This message is still retrying. Stop retries first.");return;
+                    nodeActionResult(ui("This message is still retrying. Stop retries first."));return;
                 }
-            if(!s.connected) {nodeActionResult("Reconnect this radio before retrying");return;}
+            if(!s.connected) {nodeActionResult(ui("Reconnect this radio before retrying"));return;}
             if(saved.peer.isEmpty()) sendMessage(s,saved.channel,saved.text,saved.replyId);
             else nodeAction(s,saved.peer,"dm",saved.text);
         }
@@ -4348,7 +4550,7 @@ public final class MainActivity extends Activity {
         try {
             JSONObject result=traceBase(s,token,target).put("pending",true);
             if(pageReady) web.evaluateJavascript("window.onTraceResult("+result+")",null);
-        } catch(JSONException error) {nodeActionResult("Could not display trace");}
+        } catch(JSONException error) {nodeActionResult(ui("Could not display trace"));}
     }
     private JSONArray traceNodes(RadioSession s,List<String> ids,List<Integer> snrs) throws JSONException {
         JSONArray result=new JSONArray();
@@ -4380,7 +4582,7 @@ public final class MainActivity extends Activity {
                     .put("backward",traceNodes(s,trace.backward,trace.backwardSnr));
             s.lastTrace=result; publish();
             if(pageReady) web.evaluateJavascript("window.onTraceResult("+result+")",null);
-        } catch(JSONException error) {nodeActionResult("Could not display trace route");}
+        } catch(JSONException error) {nodeActionResult(ui("Could not display trace route"));}
     }
     private String readNotice(java.io.InputStream input) throws java.io.IOException {
         java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();byte[] buffer=new byte[8192];int count;
@@ -4440,8 +4642,8 @@ public final class MainActivity extends Activity {
         cardParams.topMargin = dp(16); parent.addView(card, cardParams);
         card.addView(statusView);
         LinearLayout row = horizontal(); card.addView(row);
-        Button ble = new Button(this); ble.setText("Bluetooth"); row.addView(ble, new LinearLayout.LayoutParams(0, -2, 1));
-        Button usb = new Button(this); usb.setText("USB serial"); row.addView(usb, new LinearLayout.LayoutParams(0, -2, 1));
+        Button ble = new Button(this); ble.setText(ui("Bluetooth")); row.addView(ble, new LinearLayout.LayoutParams(0, -2, 1));
+        Button usb = new Button(this); usb.setText(ui("USB serial")); row.addView(usb, new LinearLayout.LayoutParams(0, -2, 1));
         ble.setOnClickListener(view -> connectBle(session));
         usb.setOnClickListener(view -> connectUsb(session));
     }
@@ -4450,8 +4652,8 @@ public final class MainActivity extends Activity {
         messagesPage = vertical(); messagesPage.setPadding(dp(12), dp(4), dp(12), dp(8)); pages.addView(messagesPage);
         messagesPage.addView(label("Messages", 22, DARK, true));
         LinearLayout familyRow = horizontal(); messagesPage.addView(familyRow);
-        Button mtTab = new Button(this); mtTab.setText("Meshtastic"); familyRow.addView(mtTab, new LinearLayout.LayoutParams(0, -2, 1));
-        Button mcTab = new Button(this); mcTab.setText("MeshCore"); familyRow.addView(mcTab, new LinearLayout.LayoutParams(0, -2, 1));
+        Button mtTab = new Button(this); mtTab.setText(ui("Meshtastic")); familyRow.addView(mtTab, new LinearLayout.LayoutParams(0, -2, 1));
+        Button mcTab = new Button(this); mcTab.setText(ui("MeshCore")); familyRow.addView(mcTab, new LinearLayout.LayoutParams(0, -2, 1));
         mtTab.setOnClickListener(view -> select(mt)); mcTab.setOnClickListener(view -> select(mc));
         chatTitle = label("Meshtastic channels", 17, DARK, true); messagesPage.addView(chatTitle);
         channels = new Spinner(this); messagesPage.addView(channels);
@@ -4464,9 +4666,9 @@ public final class MainActivity extends Activity {
         chatHint = label("Connect a radio and select a channel to start chatting.", 13, GREEN, false);
         messagesPage.addView(chatHint);
         LinearLayout composer = horizontal(); messagesPage.addView(composer);
-        compose = new EditText(this); compose.setSingleLine(true); compose.setHint("Write a channel message");
+        compose = new EditText(this); compose.setSingleLine(true); compose.setHint(ui("Write a channel message"));
         composer.addView(compose, new LinearLayout.LayoutParams(0, -2, 1));
-        Button send = new Button(this); send.setText("Send"); composer.addView(send);
+        Button send = new Button(this); send.setText(ui("Send")); composer.addView(send);
         send.setOnClickListener(view -> sendMessage());
         refreshChannels(0);
     }
@@ -4475,8 +4677,8 @@ public final class MainActivity extends Activity {
         nodesPage = vertical(); nodesPage.setPadding(dp(16), dp(8), dp(16), dp(16)); pages.addView(nodesPage);
         nodesPage.addView(label("Nodes and contacts", 22, DARK, true));
         LinearLayout row = horizontal(); nodesPage.addView(row);
-        Button mtTab = new Button(this); mtTab.setText("Meshtastic"); row.addView(mtTab, new LinearLayout.LayoutParams(0, -2, 1));
-        Button mcTab = new Button(this); mcTab.setText("MeshCore"); row.addView(mcTab, new LinearLayout.LayoutParams(0, -2, 1));
+        Button mtTab = new Button(this); mtTab.setText(ui("Meshtastic")); row.addView(mtTab, new LinearLayout.LayoutParams(0, -2, 1));
+        Button mcTab = new Button(this); mcTab.setText(ui("MeshCore")); row.addView(mcTab, new LinearLayout.LayoutParams(0, -2, 1));
         mtTab.setOnClickListener(view -> select(mt)); mcTab.setOnClickListener(view -> select(mc));
         ScrollView scroll = new ScrollView(this); nodesPage.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         nodeText = label("Connect a radio to load nodes or contacts.", 15, DARK, false);
@@ -4545,7 +4747,7 @@ public final class MainActivity extends Activity {
                 bubble.addView(label(entry.text, 16, DARK, false));
             }
         }
-        chatHint.setText(selected.connected ? "Channel " + channel + " · messages are sent through the radio" : "Connect " + selected.name + " on the Radios tab to send.");
+        chatHint.setText(selected.connected ? ui("Channel ") + channel + ui(" · messages are sent through the radio") : ui("Connect ") + selected.name + ui(" on the Radios tab to send."));
         chatScroll.post(() -> chatScroll.fullScroll(View.FOCUS_DOWN));
     }
 
@@ -4593,7 +4795,7 @@ public final class MainActivity extends Activity {
         if(chosen!=null){openUsbDriver(session,chosen);return;}
         String[] names = new String[drivers.size()];
         for (int i = 0; i < drivers.size(); i++) names[i] = drivers.get(i).getDevice().getDeviceName();
-        new AlertDialog.Builder(this).setTitle("Choose " + session.name + " USB radio").setItems(names, (dialog, which) -> {
+        new AlertDialog.Builder(this).setTitle(ui("Choose ") + session.name + ui(" USB radio")).setItems(names, (dialog, which) -> {
             UsbSerialDriver driver = drivers.get(which);
             openUsbDriver(session,driver);
         }).setOnCancelListener(dialog->{session.loading=false;session.close();session.updateStatus("Connection cancelled");}).show();
@@ -4613,8 +4815,8 @@ public final class MainActivity extends Activity {
         }
     }
     private void connectAllAvailable() {
-        if(connectingAvailable){nodeActionResult("Discovering available radios already");return;}
-        if(awaitingUsbSession!=null){nodeActionResult("Finish the current USB permission request first");publish();return;}
+        if(connectingAvailable){nodeActionResult(ui("Discovering available radios already"));return;}
+        if(awaitingUsbSession!=null){nodeActionResult(ui("Finish the current USB permission request first"));publish();return;}
         connectingAvailable=true;availableRun++;retryingAvailable=false;availableDiscoveryError="";
         expectedAvailableUsb.clear();expectedAvailableBle.clear();publish();availableUsb.clear();availableBle.clear();
         availableUsb.addAll(com.hoho.android.usbserial.driver.UsbSerialProber.getDefaultProber().findAllDrivers((UsbManager)getSystemService(USB_SERVICE)));
@@ -4661,7 +4863,7 @@ public final class MainActivity extends Activity {
         };
         try{scan.startScan(null,new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),callback);}
         catch(SecurityException|IllegalStateException error){availableDiscoveryError="Bluetooth discovery could not start";finishAvailableConnections();return;}
-        nodeActionResult("Searching for known Bluetooth radios for 8 seconds…");
+        nodeActionResult(ui("Searching for known Bluetooth radios for 8 seconds…"));
         main.postDelayed(()->{
             try{scan.stopScan(callback);}catch(SecurityException|IllegalStateException ignored){}
             if(closing||!connectingAvailable||run!=availableRun)return;
@@ -4707,14 +4909,14 @@ public final class MainActivity extends Activity {
         }
         publish();if(closing)return;
         if(failed.length()==0&&availableDiscoveryError.isEmpty()) {
-            nodeActionResult(expectedAvailableUsb.isEmpty()&&expectedAvailableBle.isEmpty()?"No available USB or known Bluetooth radios found.":"All discovered available radios are connected.");return;
+            nodeActionResult(expectedAvailableUsb.isEmpty()&&expectedAvailableBle.isEmpty()?ui("No available USB or known Bluetooth radios found."):ui("All discovered available radios are connected."));return;
         }
         boolean discoveryFailed=!availableDiscoveryError.isEmpty();
         if(discoveryFailed)failed.append('\n').append(availableDiscoveryError).append(". Bluetooth availability could not be fully checked.");
         int run=availableRun;
-        new AlertDialog.Builder(this).setTitle("Some devices could not connect")
-            .setMessage(failed.toString()+"\nRetry the failed connections? Connected devices will stay connected.")
-            .setNegativeButton("Cancel",null).setPositiveButton("Retry",(d,w)->{
+        new AlertDialog.Builder(this).setTitle(ui("Some devices could not connect"))
+            .setMessage(failed.toString()+ui("\nRetry the failed connections? Connected devices will stay connected."))
+            .setNegativeButton(ui("Cancel"),null).setPositiveButton(ui("Retry"),(d,w)->{
                 if(closing||connectingAvailable||run!=availableRun)return;
                 if(discoveryFailed){connectAllAvailable();return;}
                 connectingAvailable=true;availableRun++;retryingAvailable=true;
@@ -4809,7 +5011,7 @@ public final class MainActivity extends Activity {
         String[] names = discovered.keySet().toArray(new String[0]);
         String returnState = session.scanReturnState;
         session.updateStatus("Choose a radio");
-        new AlertDialog.Builder(this).setTitle("Choose " + session.name + " BLE radio")
+        new AlertDialog.Builder(this).setTitle(ui("Choose ") + session.name + ui(" BLE radio"))
                 .setItems(names, (dialog, which) -> connectDevice(session,devices[which]))
                 .setOnCancelListener(dialog -> session.updateStatus(returnState))
                 .show();
@@ -4951,6 +5153,9 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        main.removeCallbacks(mapRetentionRunner);
+        main.removeCallbacks(persistentRunner);
+        stopPersistentLocation();
         main.removeCallbacks(advanceSoundQueue);
         pendingTones.clear();
         if (activeTone!=null) {

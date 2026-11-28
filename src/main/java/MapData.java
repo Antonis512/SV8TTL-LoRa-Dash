@@ -15,6 +15,10 @@ final class MapData {
     MapData(ChatStore store){this.store=store;}
     private SQLiteDatabase db(){return store.getWritableDatabase();}
     static boolean valid(double lat,double lon){return NodePosition.valid(lat,lon);}
+    void prune(){MapLocationHistory.prune(db(),System.currentTimeMillis());}
+    void sharedLocation(String radio,String device,String stream,String sender,String label,int channel,double lat,double lon,long time){
+        MapLocationHistory.record(db(),radio,device,stream,sender,label,channel,lat,lon,time,System.currentTimeMillis());
+    }
     void node(String radio,String device,String id,String name,String role,double lat,double lon,boolean fresh) {
         node(radio,device,id,name,role,new NodePosition(lat,lon,0,0,fresh?System.currentTimeMillis():0,0,"legacy"),fresh);
     }
@@ -112,7 +116,7 @@ final class MapData {
         if(imported)try(Cursor c=db().rawQuery("SELECT edited FROM map_items WHERE id=?",new String[]{id})){if(c.moveToFirst()&&c.getLong(0)>=edited)return;}
         ContentValues v=new ContentValues();v.put("id",id);v.put("kind",kind);v.put("title",title);v.put("description",item.optString("description","").substring(0,Math.min(2000,item.optString("description","").length())));v.put("geometry",geometry.toString());v.put("enabled",item.optBoolean("enabled",true)?1:0);v.put("radio",item.optString("radio",""));v.put("device",item.optString("device",""));v.put("channel",item.optInt("channel",-1));v.put("created",created);v.put("edited",edited);db().insertWithOnConflict("map_items",null,v,SQLiteDatabase.CONFLICT_REPLACE);
     }
-    void delete(String id){db().delete("map_items","id=?",new String[]{id});db().delete("map_geofence_state","item=?",new String[]{id});}
+    void delete(String id){db().delete("map_items","id=?",new String[]{id});db().delete("map_geofence_state","item=?",new String[]{id});db().delete("map_shared_positions","stream=?",new String[]{id});}
     static String geofenceNodeKey(String radio,String node) {
         String key=node.toLowerCase(java.util.Locale.ROOT);
         return "mc".equals(radio)&&key.matches("[0-9a-f]{64}")?key.substring(0,12):key;
@@ -139,6 +143,8 @@ final class MapData {
     JSONArray geofenceChanges(String radio,String device,String node,NodePosition position) throws JSONException {
         double lat=position.latitude,lon=position.longitude,radius=position.uncertaintyRadius(radio);
         JSONArray changes=new JSONArray();if(!position.canTriggerGeofence(radio))return changes;
+        long sampleTime=position.time()>0?position.time():position.receivedTime;
+        if(sampleTime>0&&!MapLocationHistory.recent(sampleTime,System.currentTimeMillis()))return changes;
         SQLiteDatabase database=db();database.beginTransaction();
         try { boolean excluded=geofenceNodeExcluded(radio,node);JSONArray fences=items();for(int i=0;i<fences.length();i++){JSONObject item=fences.getJSONObject(i);if(!item.getString("kind").equals("geofence")||!item.getBoolean("enabled"))continue;
             JSONObject geometry=item.getJSONObject("geometry");if(!geometry.optString("type").equals("Polygon"))continue;
@@ -180,12 +186,13 @@ final class MapData {
     private static void validatePoint(JSONArray point) throws JSONException {
         if(point.length()!=2||!valid(point.getDouble(1),point.getDouble(0)))throw new JSONException("Invalid map coordinates");
     }
-    JSONObject snapshot() throws JSONException {return new JSONObject().put("nodes",nodes()).put("positions",positions("","","",0,0)).put("heard",heardEvents()).put("items",items()).put("alerts",alerts()).put("geofenceNodes",geofenceNodeSettings());}
+    JSONObject snapshot() throws JSONException {prune();return new JSONObject().put("nodes",nodes()).put("positions",positions("","","",0,0)).put("sharedPositions",MapLocationHistory.read(db())).put("heard",heardEvents()).put("items",items()).put("alerts",alerts()).put("geofenceNodes",geofenceNodeSettings());}
     JSONObject backup() throws JSONException {
+        prune();
         JSONArray fences=new JSONArray();try(Cursor c=db().rawQuery("SELECT item,radio,device,node,inside FROM map_geofence_state",null)){
             while(c.moveToNext())fences.put(new JSONObject().put("item",c.getString(0)).put("radio",c.getString(1)).put("device",c.getString(2)).put("node",c.getString(3)).put("inside",c.getInt(4)));
         }
-        return new JSONObject().put("nodes",nodes()).put("positions",positions("","","",0,0,null)).put("heard",heardEvents(false)).put("items",items()).put("fenceState",fences).put("alerts",alerts()).put("geofenceNodes",geofenceNodeSettings());
+        return new JSONObject().put("nodes",nodes()).put("positions",positions("","","",0,0,null)).put("sharedPositions",MapLocationHistory.read(db())).put("heard",heardEvents(false)).put("items",items()).put("fenceState",fences).put("alerts",alerts()).put("geofenceNodes",geofenceNodeSettings());
     }
     void mergeBackup(JSONObject data) throws JSONException {
         if(data==null)return;SQLiteDatabase db=db();
@@ -214,6 +221,7 @@ final class MapData {
         }
         for(int i=0;i<items.length();i++)put(items.getJSONObject(i),true);
         if(fs!=null)for(int i=0;i<fs.length();i++){JSONObject f=fs.getJSONObject(i);ContentValues v=new ContentValues();v.put("item",f.getString("item"));v.put("radio",f.getString("radio"));v.put("device",f.getString("device"));v.put("node",f.getString("node"));v.put("inside",f.optInt("inside",0)==2?2:f.optInt("inside",0)!=0?1:0);db.insertWithOnConflict("map_geofence_state",null,v,SQLiteDatabase.CONFLICT_IGNORE);}
+        MapLocationHistory.merge(db,data.optJSONArray("sharedPositions"));prune();
     }
     private static boolean validIdentity(String radio,String device,String node){return (radio.equals("mc")||radio.equals("mt"))&&device.length()>0&&device.length()<160&&node.length()>0&&node.length()<160;}
 }

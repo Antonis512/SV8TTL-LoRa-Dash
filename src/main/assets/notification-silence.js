@@ -15,8 +15,8 @@ function renderSilenceTargets(){
 function applySilence(){
   const scope=el('silence-scope').value,target=scope==='all'?'':el('silence-target').value;
   const minutes=el('silence-duration').value==='timed'?Number(el('silence-minutes').value):0;
-  if(scope!=='all'&&!target){el('silence-status').textContent='Choose a contact or node first.';return;}
-  if(!Number.isInteger(minutes)||minutes<0||minutes>525600||(el('silence-duration').value==='timed'&&minutes===0)){el('silence-status').textContent='Enter 1–525600 minutes.';return;}
+  if(scope!=='all'&&!target){el('silence-status').textContent=tr('Choose a contact or node first.');return;}
+  if(!Number.isInteger(minutes)||minutes<0||minutes>525600||(el('silence-duration').value==='timed'&&minutes===0)){el('silence-status').textContent=tr('Enter 1–525600 minutes.');return;}
   const label=scope==='all'?'All notifications':el('silence-target').selectedOptions[0].textContent;
   AndroidBridge.setNotificationSilence(scope,target,label,minutes);
 }
@@ -25,7 +25,7 @@ function renderSilenceRules(rules){
   for(const [key,rule] of Object.entries(rules)){
     if(rule.until!==-1&&rule.until<=Date.now())continue;
     const row=node('p','help',rule.label+' · '+(rule.until===-1?'until restored':'until '+signalDate(rule.until))+' ');
-    const button=node('button','silence-action','Restore alerts');button.type='button';button.onclick=()=>AndroidBridge.clearNotificationSilence(key);row.appendChild(button);host.appendChild(row);
+    const button=node('button','silence-action',tr('Restore alerts'));button.type='button';button.onclick=()=>AndroidBridge.clearNotificationSilence(key);row.appendChild(button);host.appendChild(row);
   }
-  el('silence-status').textContent=host.children.length?'Active silences shown below.':'No active silences.';
+  el('silence-status').textContent=host.children.length?tr('Active silences shown below.'):tr('No active silences.');
 }

@@ -1,5 +1,10 @@
 # Contacts — 0.10.21 local preview
 
+## 28 November 2026 — group dropdown
+
+The Contacts list uses a Group dropdown with All groups, No group and each saved group. Choose one group to filter available contacts. Changing this filter does not change assignments. The Map retains its separate group-filter behavior. Labels follow the interface language selected in Config.
+
+
 ## 20 November 2026 — MT Ignore/Unignore
 
 Connected MT nodes offer Ignore/Unignore in the shared node actions used by Nodes, Chat and assigned-node cards. These commands update the receiving radio, using its admin session key and waiting for its matching acknowledgment. Rejection, timeout or disconnect does not optimistically change the displayed state. MC has no equivalent control.

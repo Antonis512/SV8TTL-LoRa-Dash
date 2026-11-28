@@ -62,7 +62,7 @@ const server = http.createServer((request,response) => {
       mapView.jumpTo({center:[first.lon,first.lat],zoom:12});
     });
     await page.waitForFunction(()=>mapView.queryRenderedFeatures(mapView.project(mapView.getCenter()),{layers:['map-position-precision-fill']}).length===1);
-    assert.equal(await page.locator('.map-precision-stack').textContent(),'3');
+    assert.equal(await page.locator('.map-precision-stack .map-node-count').textContent(),'+2');
     const mapBox=()=>page.locator('#offline-map').boundingBox();
     const before=await mapBox();
     await page.getByRole('button',{name:'Maximize map'}).click();
@@ -81,7 +81,7 @@ const server = http.createServer((request,response) => {
     });
     await page.waitForFunction(()=>mapView.queryRenderedFeatures(mapView.project([23.72,37.98]),{layers:['map-position-precision-fill']}).length===2);
     const stack=page.locator('.map-precision-stack');
-    assert.equal(await stack.textContent(),'3');
+    assert.equal(await stack.locator('.map-node-count').textContent(),'+2');
     assert(await stack.evaluate(marker=>{
       const center=mapView.project([23.72,37.98]);
       return marker.getBoundingClientRect().bottom<mapView.getContainer().getBoundingClientRect().top+center.y;

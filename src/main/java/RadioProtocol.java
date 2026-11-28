@@ -50,6 +50,7 @@ interface RadioProtocol {
         default void heardPath(long requestId,String[] path,int snr,int rssi) {}
         default void channelPath(int channel,long timestamp,String text,String[] path,int snr,int rssi) {}
         default void waypoint(String sender,long waypointId,String name,String description,double latitude,double longitude,boolean deleted) {}
+        default void waypoint(String sender,long waypointId,String name,String description,double latitude,double longitude,boolean deleted,long receivedAt,int channel) {waypoint(sender,waypointId,name,description,latitude,longitude,deleted);}
 
     }
     default long lastRequestId() { return 0; }
@@ -673,7 +674,7 @@ final class MeshtasticProtocol implements RadioProtocol {
             }
             double latitude=lat/1e7,longitude=lon/1e7;
             if(id!=0&&(expires==1||MapData.valid(latitude,longitude))){
-                events.waypoint(sender,id,name,description,latitude,longitude,expires==1);
+                events.waypoint(sender,id,name,description,latitude,longitude,expires==1,receivedAt,channel);
                 if(expires!=1&&from!=myNode&&(to==myNode||to==0xffffffffL)){
                     String title=name.trim().replace('|',' ').replace('\n',' ').replace('\r',' ');
                     String location=String.format(java.util.Locale.ROOT,"m:%.7f,%.7f|%s|poi",latitude,longitude,title.isEmpty()?"Location":title);
@@ -763,7 +764,7 @@ final class MeshtasticProtocol implements RadioProtocol {
             } else if (r.field == 3) role = (int)r.number();
             else r.skip();
         }
-        if(name.isEmpty())channelAdmin.secrets.remove(index);else channelAdmin.secrets.put(index,channelSecret);
+        if(role==0)channelAdmin.secrets.remove(index);else channelAdmin.secrets.put(index,channelSecret);
         channelAdmin.observe(index,role==0?"":name.isEmpty()?"Default":name);
         if (role != 0) {
             if(configuring){configChannelIds.add(index);configChannels=configChannelIds.size();}

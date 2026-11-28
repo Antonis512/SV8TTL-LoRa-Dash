@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="overmesh-lite.css">
   <link rel="stylesheet" href="android.css">
+  <link rel="stylesheet" href="persistent.css">
   <link rel="stylesheet" href="maplibre-gl.css">
   <link rel="stylesheet" href="map.css">
   <link rel="stylesheet" href="contacts.css">
@@ -22,7 +23,7 @@
 
 <main id="tab-chat" class="tab-panel">
   <section id="member-chat" hidden>
-    <div id="member-controls"><div class="member-languages"><span data-member-text="translate"></span><button type="button" lang="en" aria-label="English" onclick="memberLanguage('en')">🇬🇧</button><button type="button" lang="el" aria-label="Ελληνικά" onclick="memberLanguage('el')">🇬🇷</button></div>
+    <div id="member-controls"><div class="member-languages"><span data-member-text="translate"></span><button type="button" lang="en" data-language-fixed aria-label="English" onclick="memberLanguage('en')">🇬🇧</button><button type="button" lang="el" data-language-fixed aria-label="Ελληνικά" onclick="memberLanguage('el')">🇬🇷</button></div>
     <button id="member-connect" onclick="connectAllAvailable()" data-member-text="connect"></button>
     <label><span data-member-text="device"></span><select id="member-radio" onchange="memberChangeRadio()"></select></label>
     <p class="help" data-member-text="singleDestination"></p>
@@ -225,6 +226,7 @@
       <button type="button" onclick="showSettingsPage('backup')"><strong>App backup</strong><span>Export or merge radios, messages, Log and templates</span></button>
       <button type="button" onclick="showSettingsPage('channel-backup')"><strong>Channel backup</strong><span>Export channel chat as CSV</span></button>
       <button type="button" onclick="AndroidBridge.exportDebugLog()"><strong>Export debug log</strong><span>App diagnostics · up to 10 MB · excludes message bodies and keys</span></button>
+      <fieldset id="language-frame" data-language-fixed><legend>Language (Γλώσσα)</legend><button type="button" id="select-language" onclick="openLanguagePicker()"><strong>Select Language (Επιλογή γλώσσας)</strong><span id="current-language">English</span></button></fieldset>
       <button type="button" onclick="checkForUpdates()"><strong>Check for Updates</strong><span>Get the latest SV8TTL LoRa Dash from GitHub</span></button>
       <button type="button" onclick="showSettingsPage('about')"><strong>About</strong><span>Beta edition, credits and licenses</span></button>
     </div>
@@ -444,7 +446,11 @@
   <button class="nav-btn" data-tab="log" onclick="switchTab('log')"><span class="nav-icon">≡</span><span>Log</span></button>
   <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')"><span class="nav-icon">⊞</span><span>Config</span></button>
 </nav>
+<dialog id="language-picker" data-language-fixed><h2>Select Language<br>Επιλογή γλώσσας</h2><label><input type="radio" name="app-language" value="en" checked>English</label><label><input type="radio" name="app-language" value="el">Ελληνικά</label><div class="actions"><button type="button" onclick="this.closest('dialog').close()">Cancel / Ακύρωση</button><button type="button" onclick="saveAppLanguage()">Apply / Εφαρμογή</button></div></dialog>
+<script src="greek.js"></script><script src="language.js"></script>
 <script src="diagnostics.js"></script><script src="chat-interactions.js"></script><script src="radio-presets.js"></script><script src="android.js"></script><script src="message-search.js"></script><script src="log.js"></script><script src="contacts.js"></script><script src="member-mode.js"></script><script src="usage-history.js"></script><script src="notification-silence.js"></script><script src="signal-history.js"></script><script src="maplibre-gl.js"></script><script src="pmtiles.js"></script><script src="protomaps-basemaps.js"></script><script src="map-full-style.js"></script><script src="map.js"></script>
+<script src="map-tracks.js"></script>
+<script src="persistent.js"></script>
 </body>
 </html>
 

@@ -29,7 +29,7 @@ function openUsageHistory() {
     target.add(new Option(name,id));
   }
   if(devices.has(previousTarget))target.value=previousTarget;
-  if(!devices.size)list.textContent='Connect a Meshtastic or MeshCore radio to start recording.';
+  if(!devices.size)list.textContent=tr('Connect a Meshtastic or MeshCore radio to start recording.');
   usageInitialized=true;refreshUsage();
 }
 function usageRange() {
@@ -39,9 +39,9 @@ function usageRange() {
 function refreshUsage() {
   const result=el('usage-results'),range=usageRange();
   result.replaceChildren();
-  if(!range){result.textContent='Choose a valid start and end time.';return;}
+  if(!range){result.textContent=tr('Choose a valid start and end time.');return;}
   const inputs=[...el('usage-devices').querySelectorAll('input:checked')];
-  if(!inputs.length){result.textContent='Select a device to view its records.';return;}
+  if(!inputs.length){result.textContent=tr('Select a device to view its records.');return;}
   if(el('usage-mode').value==='graph')drawUsageGraph(result,inputs,range);
   else for(const input of inputs){
     const section=document.createElement('section');result.append(section);
@@ -69,14 +69,14 @@ function drawUsageTable(section,input,range,page) {
 function drawUsageGraph(result,inputs,[start,end]) {
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.setAttribute('viewBox','0 0 480 185');svg.setAttribute('role','img');
-  svg.setAttribute('aria-label','Radio utilization by time, from 0 to 100 percent; gaps indicate missing data');
+  svg.setAttribute('aria-label',tr('Radio utilization by time, from 0 to 100 percent; gaps indicate missing data'));
   const add=(tag,attrs,label)=>{
     const item=document.createElementNS(svg.namespaceURI,tag);
     for(const [key,value] of Object.entries(attrs))item.setAttribute(key,value);
     if(label)item.textContent=label;
     svg.append(item);
   };
-  result.append(svg,node('p','help','MT: solid AirUtil TX, dashed ChUtil. MC: solid TX, dashed RX utilization, calculated between airtime reports. Points show interval averages; gaps indicate missing data. MC needs two consecutive reports; older firmware may not provide airtime.'));
+  result.append(svg,node('p','help',tr('MT: solid AirUtil TX, dashed ChUtil. MC: solid TX, dashed RX utilization, calculated between airtime reports. Points show interval averages; gaps indicate missing data. MC needs two consecutive reports; older firmware may not provide airtime.')));
   const x=time=>40+430*(time-start)/(end-start),y=value=>145-1.35*value;
   for(const level of [0,25,50,75,100]){
     add('line',{x1:40,x2:470,y1:y(level),y2:y(level),stroke:'currentColor',opacity:.2});
@@ -87,7 +87,7 @@ function drawUsageGraph(result,inputs,[start,end]) {
   inputs.forEach((input,index)=>{
     const rows=JSON.parse(AndroidBridge.usageHistory(input.value,start,end,true,0));
     const color='hsl('+((175+index*137.5)%360)+' 72% 44%)';
-    const legend=node('div','',input.parentElement.textContent+(rows.length?'':' · No records'));
+    const legend=node('div','',input.parentElement.textContent+(rows.length?'':tr(' · No records')));
     legend.style.borderLeft='5px solid '+color;legend.style.paddingLeft='0.5em';result.append(legend);
     for(const metric of [1,2]){
       let path='',previous=null;
@@ -106,11 +106,11 @@ function deleteUsageRecords(all) {
   const target=el('usage-delete-device'),range=all?[0,Number.MAX_SAFE_INTEGER]:usageRange();
   if(!target.value || !range)return;
   const period=all?'all recorded times':el('usage-start').value.replace('T',' ')+' through '+el('usage-end').value.replace('T',' ');
-  if(!confirm('Delete utilization records for '+target.selectedOptions[0].text+' for '+period+'?'))return;
+  if(!confirm(tr('Delete utilization records for ')+target.selectedOptions[0].text+' for '+period+'?'))return;
   AndroidBridge.deleteUsage(target.value,...range);
 }
 function usageDeleted(count) {
   if(!el('settings-window-usage').open)return;
   openUsageHistory();
-  el('usage-results').prepend(node('p','help',count+' utilization records deleted.'));
+  el('usage-results').prepend(node('p','help',count+tr(' utilization records deleted.')));
 }

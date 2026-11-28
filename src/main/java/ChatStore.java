@@ -37,7 +37,7 @@ final class ChatStore extends SQLiteOpenHelper {
         final String name;
         SavedChannel(int index, String name) { this.index=index; this.name=name; }
     }
-    ChatStore(Context context) { super(context, "chat-history.db", null, 22); setWriteAheadLoggingEnabled(true); }
+    ChatStore(Context context) { super(context, "chat-history.db", null, 23); setWriteAheadLoggingEnabled(true); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, radio TEXT NOT NULL, " +
                 "node_id TEXT NOT NULL DEFAULT '', channel INTEGER NOT NULL, sender TEXT NOT NULL, " +
@@ -52,6 +52,7 @@ final class ChatStore extends SQLiteOpenHelper {
         createSignalHistory(db);
         createLogTable(db);
         createMapTables(db);
+        MapLocationHistory.create(db);
         addMapPositionMetadata(db);
         ContactsStore.create(db);
         createGeofenceAlerts(db);
@@ -133,6 +134,7 @@ final class ChatStore extends SQLiteOpenHelper {
                 "channel INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY(radio,node_id,channel))");
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if(oldVersion<23)MapLocationHistory.create(db);
         if(oldVersion<20)createUsageHistory(db);
         if(oldVersion<21)addUsageSegments(db);
         if(oldVersion<22)createGeofenceNodeSettings(db);
@@ -264,6 +266,7 @@ final class ChatStore extends SQLiteOpenHelper {
                     new String[]{radio,peer,peer,senderName,senderName,senderName});
             db.delete("node_heard","radio=? AND peer=?",new String[]{radio,peer});
             db.delete("map_nodes","radio=? AND id=?",new String[]{radio,peer});
+            db.delete("map_shared_positions","radio=? AND sender=?",new String[]{radio,peer});
             for(String table:new String[]{"map_positions","map_heard","map_geofence_state"})
                 db.delete(table,"radio=? AND node=?",new String[]{radio,peer});
             db.delete("signal_history","peer=? AND "+("mc".equals(radio)?"node_id LIKE 'mc:%'":"node_id NOT LIKE 'mc:%'"),new String[]{peer});

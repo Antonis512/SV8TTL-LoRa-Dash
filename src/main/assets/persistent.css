@@ -1,0 +1,14 @@
+.persistent-controls{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:5px 0;flex-shrink:0}
+.persistent-controls button{min-height:40px;padding:6px 10px;font-size:12px;white-space:normal;border:1px solid var(--accent);border-radius:5px;background:var(--accent-dim);color:var(--accent);font-weight:700}
+.persistent-controls button.active{border-color:var(--accent);color:var(--accent);font-weight:700}
+.persistent-summary{text-align:left;font-size:11px;min-height:32px;margin:0 0 4px;flex-shrink:0;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--accent)}
+.persistent-dialog{box-sizing:border-box;width:min(440px,calc(100% - 20px));max-height:calc(100% - 24px);overflow:auto;padding:16px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:8px}
+.persistent-dialog label{display:block;margin-top:12px;margin-bottom:4px;font-size:13px}
+.persistent-dialog input,.persistent-dialog textarea{box-sizing:border-box;width:100%;font:inherit;padding:8px;min-height:40px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:5px}
+.persistent-dialog [hidden]{display:none!important}
+.persistent-dialog p{overflow-wrap:anywhere;white-space:pre-wrap}
+.persistent-job{border-top:1px solid var(--border);padding:12px 0;font-size:13px}
+.member-location-row{flex-wrap:wrap}
+.member-location-row .persistent-controls{margin-left:auto}
+#persistent-error{color:var(--red,#e66)}
+@media(max-height:480px){.composing .persistent-summary{display:none}.composing .persistent-controls{margin:2px 0}}

@@ -76,7 +76,7 @@ const path=require('node:path');
  await page.locator('#dm-context').click({position:{x:3,y:100}});
  assert.equal(await page.locator('#dm-context').isVisible(),false);
  await page.locator('#channel-mc-side .dm-contact').dispatchEvent('contextmenu');
- assert.equal(await page.locator('#dm-context button').filter({hasText:/^TR$/}).count(),1);
+ assert.equal(await page.locator('#dm-context button').filter({hasText:/^Path Discovery$/}).count(),1);
  await page.evaluate(()=>navigateBack());
  await page.evaluate(()=>selectDmPeer('mt','!abcdef12'));
  await page.locator('#dm-mt-side .dm-contact').dispatchEvent('contextmenu');
@@ -113,7 +113,7 @@ const path=require('node:path');
  }
  await page.setViewportSize({width:390,height:780});
  await page.evaluate(()=>{fixture.myNodes=[{radio:'mc',id:'0123456789abcdef'.repeat(4),name:'Field MeshCore',connected:true,detectedRadio:'mc'}];onRadioState(fixture);switchTab('settings');showSettingsPage('nodes');});
- const facts=await page.locator('#my-nodes-list .node-facts').evaluate(e=>({scroll:e.scrollWidth,width:e.clientWidth,height:e.clientHeight}));
+ const facts=await page.locator('#my-nodes-list .node-facts').filter({hasText:'Public key:'}).evaluate(e=>({scroll:e.scrollWidth,width:e.clientWidth,height:e.clientHeight}));
  assert.ok(facts.scroll<=facts.width+1&&facts.height>20,'MeshCore public key wraps inside the saved-radio card');
  await page.screenshot({path:'build/my-nodes-wrap-preview.png'});
  await page.evaluate(()=>{fixture.devices=[{radio:'mt',key:'mt1',id:'mtown',name:'MT Long name'}];onRadioState(fixture);switchTab('settings');showSettingsPage('channel-backup');});

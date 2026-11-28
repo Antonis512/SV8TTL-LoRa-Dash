@@ -96,3 +96,5 @@
 .map-node-stack-label{overflow:hidden;max-width:100%;white-space:nowrap}
 .map-node-dot.map-node-stack.old{opacity:1}
 .map-node-stack.old .map-node-stack-label{opacity:.55}
+.map-shared-location{display:flex;align-items:center;gap:5px;max-width:180px;min-height:32px;padding:3px 7px;border:1px solid var(--accent);border-radius:6px;background:var(--bg2);color:var(--accent);font-size:12px;box-shadow:0 1px 5px #0008}
+.map-shared-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

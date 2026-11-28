@@ -6,7 +6,7 @@ function updateMessageSearchToggle(kind){
   const button=el(kind+'-search-toggle');if(!button)return;
   button.disabled=!messageSearches.has(kind);
   button.setAttribute('aria-expanded',String(!!messageSearchExpanded[kind]));
-  button.setAttribute('aria-label',messageSearchExpanded[kind]?'Hide message search':'Show message search');
+  button.setAttribute('aria-label',messageSearchExpanded[kind]?tr('Hide message search'):tr('Show message search'));
 }
 function toggleMessageSearch(kind){
   if(!messageSearches.has(kind))return;
@@ -37,11 +37,11 @@ function buildMessageSearchBar(search){
   const host=el(messageSearchHosts[search.kind]);host.replaceChildren();
   const row=document.createElement('div');row.className='message-search-row';
   const input=document.createElement('input');input.type='search';input.className='form-input';input.maxLength=200;
-  input.placeholder='Search message body';input.setAttribute('aria-label','Search message body');input.value=search.query;
+  input.placeholder=tr('Search message body');input.setAttribute('aria-label',tr('Search message body'));input.value=search.query;
   input.oninput=()=>{search.query=input.value;clearTimeout(search.timer);search.timer=setTimeout(()=>requestMessageSearch(search),220);};
-  const senderButton=document.createElement('button');senderButton.type='button';senderButton.textContent='Senders';
+  const senderButton=document.createElement('button');senderButton.type='button';senderButton.textContent=tr('Senders');
   senderButton.onclick=()=>{const choices=host.querySelector('.message-search-senders');choices.hidden=!choices.hidden;};
-  const clearButton=document.createElement('button');clearButton.type='button';clearButton.textContent='Clear';
+  const clearButton=document.createElement('button');clearButton.type='button';clearButton.textContent=tr('Clear');
   clearButton.onclick=()=>{input.value='';search.query='';search.selected=new Set((search.senders||[]).map(s=>s.key));
     renderMessageSearchSenders(search);requestMessageSearch(search);};
   row.append(input,senderButton,clearButton);host.appendChild(row);
@@ -67,7 +67,7 @@ function renderMessageSearchSenders(search){
     if(sender.key!=='own'&&state){const slot=['left','right'].find(s=>state[s]?.ownId===search.id&&state[s]?.radio===search.radio);
       const contact=slot?state[slot].nodes?.find(n=>n.id===sender.name):null;if(contact?.name&&contact.name!==sender.name)display=contact.name+' · '+sender.name;}
     caption.textContent=display+' ('+sender.count+')';label.append(box,caption);choices.appendChild(label);}
-  host.querySelector('.message-search-row button').textContent='Senders'+(search.senders?' ('+search.selected.size+'/'+search.senders.length+')':'');
+  host.querySelector('.message-search-row button').textContent=tr('Senders')+(search.senders?' ('+search.selected.size+'/'+search.senders.length+')':'');
 }
 function requestMessageSearch(search,more=false){
   if(messageSearches.get(search.kind)!==search)return;
@@ -87,12 +87,12 @@ window.onMessageSearchPage=result=>{
 };
 window.onMessageSearchError=(scope,request,message)=>{
   for(const search of messageSearches.values())if(search.scope===scope&&search.request===request){search.loading=false;
-    el(messageSearchHosts[search.kind]).querySelector('.message-search-status').textContent=message;}
+    el(messageSearchHosts[search.kind]).querySelector('.message-search-status').textContent=tr(message);}
 };
 function showMessageSearchState(search){
   const host=el(messageSearchHosts[search.kind]);if(!host)return;
   const status=host.querySelector('.message-search-status');if(status)status.textContent=!messageSearchActive(search)?'':
-    search.loading?'Searching all saved messages…':search.results.length+' matching messages shown · newest first'+(search.more?' · more available':'');
+    search.loading?tr('Searching all saved messages…'):search.results.length+tr(' matching messages shown · newest first')+(search.more?tr(' · more available'):'');
   if(search.kind==='saved')renderSavedHistory();else if(search.kind==='dm')renderDmScreen();else renderChannelsScreen();
 }
 function renderMessageSearchResults(kind,list){
@@ -111,7 +111,7 @@ function renderMessageSearchResults(kind,list){
     }
     list.appendChild(bubble);
   }
-  if(!search.loading&&!search.results.length)list.appendChild(node('div','empty-panel','No messages match this search and sender selection.'));
-  if(search.more&&!search.loading){const more=node('button','history-older',kind==='saved'&&!search.query.trim()&&search.selected.size===search.senders.length?'Load older messages':'Load more matches');more.type='button';more.onclick=()=>requestMessageSearch(search,true);list.appendChild(more);}
+  if(!search.loading&&!search.results.length)list.appendChild(node('div','empty-panel',tr('No messages match this search and sender selection.')));
+  if(search.more&&!search.loading){const more=node('button','history-older',kind==='saved'&&!search.query.trim()&&search.selected.size===search.senders.length?tr('Load older messages'):tr('Load more matches'));more.type='button';more.onclick=()=>requestMessageSearch(search,true);list.appendChild(more);}
   return true;
 }

@@ -24,14 +24,14 @@ const assert=require('node:assert/strict');const {pathToFileURL}=require('node:u
  await page.evaluate(()=>onSavedNode(savedFixture));
  assert.equal(await page.locator('#settings-window-history').isVisible(),false,'Late response cannot reopen closed window');
  await page.evaluate(()=>{viewSavedMessages('mc','radio-a');onSavedNode(savedFixture);});
- await page.locator('#settings-window-history .settings-window-footer button').click();
+ await page.locator('#settings-window-history .window-x').click();
  assert.equal(await page.locator('#settings-window-history').isVisible(),false);
  // Available WebView viewport models gesture, three-button and keyboard-reduced content areas.
  for(const viewport of [{width:390,height:740},{width:390,height:708},{width:320,height:460},{width:780,height:340}]){
   await page.setViewportSize(viewport);
   for(const name of ['multi','split','attempts','history']){
    await page.evaluate(name=>{if(name==='history'){viewSavedMessages('mc','radio-a');onSavedNode(savedFixture);}else openSettingsWindow(name);},name);
-   const bounds=await page.locator('#settings-window-'+name).evaluate(d=>{const r=d.getBoundingClientRect(),x=d.querySelector('.window-x').getBoundingClientRect(),b=d.querySelector('.settings-window-footer button').getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,xTop:x.top,xBottom:x.bottom,closeTop:b.top,closeBottom:b.bottom};});
+   const bounds=await page.locator('#settings-window-'+name).evaluate(d=>{const r=d.getBoundingClientRect(),x=d.querySelector('.window-x').getBoundingClientRect(),b=(d.querySelector('.settings-window-footer button')||d.querySelector('.window-x')).getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,xTop:x.top,xBottom:x.bottom,closeTop:b.top,closeBottom:b.bottom};});
    assert.ok(bounds.left>=0&&bounds.right<=viewport.width&&bounds.top>=0&&bounds.bottom<=viewport.height,JSON.stringify({name,viewport,bounds}));
    assert.ok(bounds.xTop>=0&&bounds.xBottom<=viewport.height&&bounds.closeTop>=0&&bounds.closeBottom<=viewport.height,'Both close buttons stay reachable');
    await page.evaluate(name=>closeSettingsWindow(name),name);

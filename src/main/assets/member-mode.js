@@ -3,8 +3,8 @@ const memberWords={
   shareLocation:['Send my location','Αποστολή τοποθεσίας μου'],locating:['Getting phone location…','Αναζήτηση τοποθεσίας τηλεφώνου…'],
   viewLocation:['View on map','Προβολή στον χάρτη'],close:['Close','Κλείσιμο'],location:['Location','Τοποθεσία'],
   routeChanged:['Destination changed. Choose it again.','Ο προορισμός άλλαξε. Επιλέξτε τον ξανά.'],
-  myNodes:['My Nodes','Οι κόμβοι μου'],offline:['Disconnected','Αποσυνδεδεμένη'],online:['Connected','Συνδεδεμένη'],noSaved:['No saved radios.','Δεν υπάρχουν αποθηκευμένοι ασύρματοι.'],
-  discovering:['Discovering and connecting available radios…','Αναζήτηση και σύνδεση διαθέσιμων ασυρμάτων…'],
+  myNodes:['My Nodes','Οι κόμβοι μου'],offline:['Disconnected','Αποσυνδεδεμένη'],online:['Connected','Συνδεδεμένη'],noSaved:['No saved radios.','Δεν υπάρχουν αποθηκευμένοι κόμβοι.'],
+  discovering:['Discovering and connecting available radios…','Αναζήτηση και σύνδεση διαθέσιμων κόμβων…'],
   singleDestination:['Send to one channel or one contact at a time. Choosing another replaces your selection.','Στέλνετε σε ένα κανάλι ή σε μία επαφή κάθε φορά. Κάθε νέα επιλογή αντικαθιστά την προηγούμενη.'],
   singleRecipient:['Choose one contact and one of their nodes. Selecting another contact or node replaces the previous choice.','Επιλέξτε μία επαφή και έναν από τους κόμβους της. Αν επιλέξετε άλλη επαφή ή άλλον κόμβο, η νέα επιλογή αντικαθιστά την προηγούμενη.'],
   translate:['Translate:','Μετάφραση:'],connected:['connected','συνδεδεμένα'],direct:['DM','Προσωπικό μήνυμα'],mode:['Untrained Member Mode','Λειτουργία για μη εκπαιδευμένα μέλη'],
@@ -14,7 +14,7 @@ const memberWords={
   channels:['Send to a channel','Αποστολή σε κανάλι'],dm:['Send direct message to a contact','Αποστολή προσωπικού μηνύματος σε επαφή'],
   recipients:['Choose contact and node','Επιλέξτε επαφή και κόμβο'],approved:['Prepared contacts','Εγκεκριμένες επαφές'],
   setupChannels:['Channels available to the member','Κανάλια διαθέσιμα στο μέλος'],
-  setupHelp:['Select channels reported by each connected radio and contacts from your address book.','Επιλέξτε κανάλια από κάθε συνδεδεμένο ασύρματο και επαφές από τον κατάλογό σας.'],
+  setupHelp:['Select channels reported by each connected radio and contacts from your address book.','Επιλέξτε κανάλια από κάθε συνδεδεμένο κόμβο και επαφές από τον κατάλογό σας.'],
   noDevices:['No connected devices','Δεν υπάρχουν συνδεδεμένες συσκευές'],noChannels:['No designated channels available','Δεν υπάρχουν διαθέσιμα καθορισμένα κανάλια'],
   noPeople:['No prepared contacts available','Δεν υπάρχουν διαθέσιμες εγκεκριμένες επαφές'],noContacts:['Add people and assign their nodes in Contacts.','Προσθέστε επαφές και αντιστοιχίστε τους κόμβους τους στην καρτέλα Επαφές.'],
   noRoute:['No reachable assigned nodes','Κανένας διαθέσιμος αντιστοιχισμένος κόμβος'],reachable:['Reachable nodes','Διαθέσιμοι κόμβοι'],
@@ -28,7 +28,7 @@ const memberWords={
   queued:['Queued for sending','Σε αναμονή για αποστολή'],error:['Could not queue this message. Check the connected devices and destinations.','Δεν ήταν δυνατή η αποστολή. Ελέγξτε τις συνδεδεμένες συσκευές και τους προορισμούς.'],
   you:['You','Εσείς'],chat:['Chat','Συνομιλία'],config:['Config','Ρυθμίσεις'],noMessages:['No messages yet.','Δεν υπάρχουν ακόμη μηνύματα.']
 };
-const mtWord=k=>memberWords[k][state?.memberLanguage==='el'?1:0];
+const mtWord=k=>tr(memberWords[k][0]);
 let memberDraftConfig=null,memberKey='',memberReply=null,memberBusy=false,memberResult='',memberSentText='';
 let memberChannel='',memberContact='',memberPeer='';
 function clearMemberDestination(){memberChannel='';memberContact='';memberPeer='';memberReply=null;}
@@ -46,7 +46,7 @@ function syncMemberMode(changed){
   el('member-config-button').firstElementChild.textContent=mtWord(enabled?'disable':'mode');
   for(const [i,b] of [...document.querySelectorAll('.member-languages button')].entries())b.setAttribute('aria-pressed',(state.memberLanguage==='el')===(i===1));
   for(const [tab,key,normal] of [['chat','chat','Chat'],['settings','config','Config']])
-    document.querySelector('[data-tab="'+tab+'"] span:last-child').textContent=enabled?mtWord(key):normal;
+    document.querySelector('[data-tab="'+tab+'"] span:last-child').textContent=enabled?mtWord(key):tr(normal);
   if(el('member-recipients').open)renderMemberPeople();
   if(el('member-setup').open)renderMemberSetup();
   if(changed){
@@ -165,6 +165,7 @@ function memberToggleDM(){memberChangeRoutes();openMemberRecipients();}
 function memberChangeRadio(){memberKey=el('member-radio').value;clearMemberDestination();memberChangeRoutes();}
 function memberChangeRoutes(){memberReply=null;memberResult='';renderMemberChat();}
 function memberBudget(){
+  window.renderPersistentJobs?.();
   const target=memberTarget(),text=el('member-input').value.trim();
   const count=target&&text?AndroidBridge.messagePartCount(text,target.peer?target.device.directTextLimit:target.device.channelTextLimit):0;
   const max=state?.messageSplitEnabled===false?1:3;

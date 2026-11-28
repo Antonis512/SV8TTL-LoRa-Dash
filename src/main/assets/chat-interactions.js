@@ -64,13 +64,13 @@ function dialogCard(title) {
 function dialogAction(card,label,action) {
   const button=node('button','',label);button.type='button';button.onclick=action;card.appendChild(button);return button;
 }
-function cancelDialog(card) {dialogAction(card,'Cancel',()=>el('dm-context').hidden=true);}
+function cancelDialog(card) {dialogAction(card,tr('Cancel'),()=>el('dm-context').hidden=true);}
 
 function appendLocationPreview(body,identity){
   const marker=/^m:(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)\|([^|\r\n]+)\|poi$/u.exec(identity.text);
   if(!marker||Math.abs(Number(marker[1]))>90||Math.abs(Number(marker[2]))>180)return false;
   body.textContent=marker[3]+' · '+marker[1]+', '+marker[2]+' ';
-  const view=node('button','',state?.memberConfig?.enabled?mtWord('viewLocation'):'View on map');
+  const view=node('button','',state?.memberConfig?.enabled?mtWord('viewLocation'):tr('View on map'));
   view.type='button';
   view.onclick=event=>{
     event.stopPropagation();
@@ -96,12 +96,12 @@ function messageIdentity(radio,message,device=state[radio]) {
 }
 function deliveryLabel(value) {
   if(value&&value.startsWith('sending: ')) return value.slice(9);
-  if(value&&value.startsWith('unconfirmed: ')) return 'Delivery unconfirmed · '+value.slice(13);
+  if(value&&value.startsWith('unconfirmed: ')) return tr('Delivery unconfirmed · ')+value.slice(13);
   const labels={queued:'Queued for radio',sent_to_radio:'Sent to radio · awaiting acknowledgment',accepted:'Radio accepted · awaiting acknowledgment',
     sent_radio:'Sent by radio · delivery unconfirmed',sent:'Sent by radio · delivery unconfirmed',
     delivered_mesh:'Delivered to mesh',delivered:'Delivered to recipient',relayed:'Relayed · recipient unconfirmed',
     unconfirmed:'Delivery unconfirmed',failed:'Failed'};
-  return labels[value]||value;
+  return tr(labels[value]||value);
 }
 function appendMessageMeta(bubble,radio,message,channelMessage=false) {
   const meta=node('div','meta');
@@ -111,7 +111,7 @@ function appendMessageMeta(bubble,radio,message,channelMessage=false) {
   bubble.appendChild(meta);
 }
 function appendMessageDelivery(bubble,radio,message,channelMessage=false) {
-  if(message.own) bubble.appendChild(node('div','message-delivery',channelMessage&&radioType(radio)==='mc'&&['sent_radio','sent'].includes(message.delivery)?'Sent':deliveryLabel(message.delivery)));
+  if(message.own) bubble.appendChild(node('div','message-delivery',channelMessage&&radioType(radio)==='mc'&&['sent_radio','sent'].includes(message.delivery)?tr('Sent'):deliveryLabel(message.delivery)));
 }
 function bindMessageActions(bubble,radio,message,where) {
   const key=state[radio].key;
@@ -142,59 +142,59 @@ function replyToMessage(radio,message,where) {
   input.focus(); resizeComposer(input);
 }
 function showReplyPrompt(radio,message,where) {
-  const card=dialogCard('Reply');
+  const card=dialogCard(tr('Reply'));
   const identity=messageIdentity(radio,message);
   card.appendChild(node('p','',identity.name));
-  if(!message.own) dialogAction(card,'Reply',()=>replyToMessage(radio,message,where));
-  else card.appendChild(node('p','','This is your message.'));
-  if(identity.id&&!where.peer) dialogAction(card,'Direct message',()=>{el('dm-context').hidden=true;selectDmPeer(radio,identity.id);});
+  if(!message.own) dialogAction(card,tr('Reply'),()=>replyToMessage(radio,message,where));
+  else card.appendChild(node('p','',tr('This is your message.')));
+  if(identity.id&&!where.peer) dialogAction(card,tr('Direct message'),()=>{el('dm-context').hidden=true;selectDmPeer(radio,identity.id);});
   reactionMenu(card,radio,message);
   cancelDialog(card);
 }
 function showMessageMenu(radio,message,where) {
   const identity=messageIdentity(radio,message),key=state[radio].key;
-  const card=dialogCard('Message actions · '+namedNode(radio,identity.id,identity.name));
+  const card=dialogCard(tr('Message actions · ')+namedNode(radio,identity.id,identity.name));
   if(radioType(radio)==='mc'&&message.own&&!where.peer) {
     const count=Number.isInteger(message.heardRepeats)?message.heardRepeats:-1;
-    card.appendChild(node('p','',count<0?'Heard repeats are unavailable for this message.':
-      'Heard repeats: '+count+'. Copies your radio heard being rebroadcast; not a count of unique repeaters or recipient delivery.'));
+    card.appendChild(node('p','',count<0?tr('Heard repeats are unavailable for this message.'):
+      tr('Heard repeats: ')+count+tr('. Copies your radio heard being rebroadcast; not a count of unique repeaters or recipient delivery.')));
   }
   if(message.own) {
     const broadcast=radioType(radio)==='mc'&&!where.peer&&['sent','sent_radio'].includes(message.delivery);
-    card.appendChild(node('p','delivery-explanation',broadcast?'Sent':deliveryLabel(message.delivery)));
+    card.appendChild(node('p','delivery-explanation',broadcast?tr('Sent'):deliveryLabel(message.delivery)));
     let explanation='';
     if((message.delivery||'').startsWith('unconfirmed')) explanation='No final confirmation was received. The message may have arrived; retrying can create a duplicate.';
     else if(['queued','sent_to_radio','accepted'].includes(message.delivery)) explanation='Waiting for the radio or mesh acknowledgment. This is not a delivery confirmation.';
     else if(message.delivery==='delivered_mesh') explanation='The radio confirmed the broadcast reached the mesh. This does not confirm every recipient received it.';
     else if(message.delivery==='relayed') explanation='A relay was heard, but the recipient has not confirmed receipt.';
     else if(['sent','sent_radio'].includes(message.delivery)) explanation=broadcast?'The radio accepted the broadcast. Heard repeats show copies received back, not delivery to every recipient.':'The radio accepted the send. Remote delivery has not been confirmed.';
-    if(explanation) card.appendChild(node('p','',explanation));
+    if(explanation) card.appendChild(node('p','',tr(explanation)));
     const retrying=(message.delivery||'').startsWith('sending:');
     const pending=retrying||['queued','sent_to_radio','accepted'].includes(message.delivery);
-    if(retrying) dialogAction(card,'Stop retries',()=>{el('dm-context').hidden=true;AndroidBridge.messageAction(key,message.id,'cancel');});
-    if(!pending) dialogAction(card,radioType(radio)==='mc'?'Send Again':'Resend',()=>{el('dm-context').hidden=true;AndroidBridge.messageAction(key,message.id,'retry');});
+    if(retrying) dialogAction(card,tr('Stop retries'),()=>{el('dm-context').hidden=true;AndroidBridge.messageAction(key,message.id,'cancel');});
+    if(!pending) dialogAction(card,radioType(radio)==='mc'?tr('Send Again'):tr('Resend'),()=>{el('dm-context').hidden=true;AndroidBridge.messageAction(key,message.id,'retry');});
   }
   reactionMenu(card,radio,message);
-  dialogAction(card,'Copy Text',()=>{AndroidBridge.copyText(identity.text);el('dm-context').hidden=true;});
-  dialogAction(card,'Add to Log',()=>{
+  dialogAction(card,tr('Copy Text'),()=>{AndroidBridge.copyText(identity.text);el('dm-context').hidden=true;});
+  dialogAction(card,tr('Add to Log'),()=>{
     el('dm-context').hidden=true;
     const device=state[radio],ch=device.channels.find(c=>c.index===where.channel),peer=device.nodes.find(n=>n.id===where.peer);
     addMessageToLog({own:!!message.own,sender:identity.name,time:message.receivedAt>0?new Date(message.receivedAt).toLocaleString():message.time||'',network:radioType(radio).toUpperCase(),device:device.ownName||device.name||'',conversation:where.peer?'Direct message with '+(peer?.name||where.peer):ch?.name||'',status:message.own?deliveryLabel(message.delivery):'',text:identity.text});
   });
-  dialogAction(card,'Add to Message Templates',()=>{el('dm-context').hidden=true;openMessageTemplateEditor(identity.text);});
-  if(!message.own) dialogAction(card,'Reply',()=>replyToMessage(radio,message,where));
-  if(radioType(radio)==='mc'&&message.own&&!where.peer) dialogAction(card,'Heard Repeats',()=>showMessagePath(message,true,radio));
-  if(radioType(radio)==='mc'&&!message.own) dialogAction(card,'View Message Paths',()=>showMessagePath(message,false,radio));
-  if(identity.id&&!where.peer) dialogAction(card,'Direct message',()=>{el('dm-context').hidden=true;selectDmPeer(radio,identity.id);});
-  if(identity.id) dialogAction(card,'Node actions',()=>showMessageNodeActions(radio,identity.id));
-  else if(!message.own) card.appendChild(node('p','help',identity.ambiguous?'Several contacts use this name. Choose the intended contact from the user list.':'No matching contact is loaded for this sender.'));
-  dialogAction(card,'Delete Message',()=>{el('dm-context').hidden=true;AndroidBridge.messageAction(key,message.id,'delete');});
+  dialogAction(card,tr('Add to Message Templates'),()=>{el('dm-context').hidden=true;openMessageTemplateEditor(identity.text);});
+  if(!message.own) dialogAction(card,tr('Reply'),()=>replyToMessage(radio,message,where));
+  if(radioType(radio)==='mc'&&message.own&&!where.peer) dialogAction(card,tr('Heard Repeats'),()=>showMessagePath(message,true,radio));
+  if(radioType(radio)==='mc'&&!message.own) dialogAction(card,tr('View Message Paths'),()=>showMessagePath(message,false,radio));
+  if(identity.id&&!where.peer) dialogAction(card,tr('Direct message'),()=>{el('dm-context').hidden=true;selectDmPeer(radio,identity.id);});
+  if(identity.id) dialogAction(card,tr('Node actions'),()=>showMessageNodeActions(radio,identity.id));
+  else if(!message.own) card.appendChild(node('p','help',identity.ambiguous?tr('Several contacts use this name. Choose the intended contact from the user list.'):tr('No matching contact is loaded for this sender.')));
+  dialogAction(card,tr('Delete Message'),()=>{el('dm-context').hidden=true;AndroidBridge.messageAction(key,message.id,'delete');});
   cancelDialog(card);
 }
 function showMessagePath(message,own=false,radio='mc') {
-  const card=dialogCard(own?'Heard Repeats':'Message Paths');
+  const card=dialogCard(own?tr('Heard Repeats'):tr('Message Paths'));
   const paths=Array.isArray(message.paths)?message.paths:[];
-  if(!paths.length) card.appendChild(node('p','', 'No path details were captured for this message. Radio logs must arrive while connected; old history cannot supply missing paths.'));
+  if(!paths.length) card.appendChild(node('p','', tr('No path details were captured for this message. Radio logs must arrive while connected; old history cannot supply missing paths.')));
   for(const record of paths) {
     if(!record||!Array.isArray(record.path)||!record.path.every(hash=>typeof hash==='string')) continue;
     const row=node('div','trace-route');
@@ -206,23 +206,23 @@ function showMessagePath(message,own=false,radio='mc') {
         .map(n=>n.name?n.name+' ['+n.id.toLowerCase()+']':n.id.toLowerCase());
       return hash+' · multiple repeaters: '+labels.join(' / ');
     });
-    row.appendChild(node('p','',names.length?names.join(' → ')+' → Your radio':'Direct reception → Your radio'));
-    row.appendChild(node('small','', 'Received SNR '+(record.snr/4)+' dB · RSSI '+record.rssi+' dBm'));
+    row.appendChild(node('p','',names.length?names.join(' → ')+tr(' → Your radio'):tr('Direct reception → Your radio')));
+    row.appendChild(node('small','', tr('Received SNR ')+(record.snr/4)+tr(' dB · RSSI ')+record.rssi+' dBm'));
     card.appendChild(row);
   }
-  card.appendChild(node('p','help','A short path ID can match several repeaters. When names are listed together, the received path does not uniquely identify one of them.'));
-  if(own) card.appendChild(node('p','help','Each route is a rebroadcast heard by your companion. The last repeater in that route transmitted the copy your radio heard. Counts are receptions, not proof that every recipient received the message.'));
+  card.appendChild(node('p','help',tr('A short path ID can match several repeaters. When names are listed together, the received path does not uniquely identify one of them.')));
+  if(own) card.appendChild(node('p','help',tr('Each route is a rebroadcast heard by your companion. The last repeater in that route transmitted the copy your radio heard. Counts are receptions, not proof that every recipient received the message.')));
   cancelDialog(card);
 }
 
 function showAdvertActions(deviceKey) {
   const key=deviceKey;
   if(!key) return;
-  const card=dialogCard('Send Advert');
+  const card=dialogCard(tr('Send Advert'));
   for(const [label,action] of [['Zero Hop','zero'],['Flood Routed','flood'],['Copy to Clipboard','copy']]) {
     dialogAction(card,label,()=>AndroidBridge.sendAdvert(key,action));
   }
-  const done=dialogAction(card,'Cancel',()=>el('dm-context').hidden=true); done.id='advert-dismiss';
+  const done=dialogAction(card,tr('Cancel'),()=>el('dm-context').hidden=true); done.id='advert-dismiss';
   card.dataset.advertKey=key;
 }
 function showChatAdvert(side) {
@@ -235,30 +235,30 @@ window.onAdvertResult=function(key,message,success) {
   if(el('dm-context').hidden||card?.dataset.advertKey!==key) return;
   let result=card.querySelector('.advert-result');
   if(!result) {result=node('p','advert-result');card.appendChild(result);}
-  result.textContent=message;
-  if(success) {el('advert-dismiss').textContent='OK';card.querySelectorAll('button:not(#advert-dismiss)').forEach(b=>b.disabled=true);}
+  result.textContent=tr(message);
+  if(success) {el('advert-dismiss').textContent=tr('OK');card.querySelectorAll('button:not(#advert-dismiss)').forEach(b=>b.disabled=true);}
 };
 
 window.onTraceResult=function(result) {
   // A response is bound to the originating radio and request even if selectors change.
   activeTrace=result;
   const discovery=result.action==='discovery';
-  const card=dialogCard((discovery?'Path Discovery':result.action==='ping'?'Ping':'TR')+' · '+result.radio.toUpperCase()+' · '+result.name);
+  const card=dialogCard((discovery?tr('Path Discovery'):result.action==='ping'?tr('Ping'):'TR')+' · '+result.radio.toUpperCase()+' · '+result.name);
   card.classList.add('trace-card');card.dataset.requestId=result.requestId;
-  if(result.pending) card.appendChild(node('p','',discovery?'Discovering paths… waiting for the contact to reply.':result.action==='ping'?'Pinging… waiting for the radio’s reply.':'Tracing… waiting for the radio’s reply.'));
+  if(result.pending) card.appendChild(node('p','',discovery?tr('Discovering paths… waiting for the contact to reply.'):result.action==='ping'?tr('Pinging… waiting for the radio’s reply.'):tr('Tracing… waiting for the radio’s reply.')));
   else {
     if(result.note) card.appendChild(node('p','help',result.note));
     for(const [label,hops] of [['Outward route',result.forward||[]],['Return route',result.backward||[]]]) {
       const group=node('section','trace-direction');group.appendChild(node('h3','',label));
-      if(!hops.length) group.appendChild(node('p','','Not reported'));
+      if(!hops.length) group.appendChild(node('p','',tr('Not reported')));
       hops.forEach((hop,index)=>{
-        if(index) group.appendChild(node('div','trace-link',discovery?'↓':'↓ '+(Number.isFinite(hop.snr)?hop.snr+' dB':'SNR unavailable')));
+        if(index) group.appendChild(node('div','trace-link',discovery?'↓':'↓ '+(Number.isFinite(hop.snr)?hop.snr+' dB':tr('SNR unavailable'))));
         const row=node('div','trace-hop');row.append(node('strong','',hop.name),node('small','',hop.id));group.appendChild(row);
       });
       card.appendChild(group);
     }
   }
-  dialogAction(card,'Close',()=>el('dm-context').hidden=true);
+  dialogAction(card,tr('Close'),()=>el('dm-context').hidden=true);
 };
 function changeComposerFont(delta) {
   composerFontStep=Math.max(0,Math.min(6,composerFontStep+delta));
@@ -325,11 +325,11 @@ function updateMessageBudget(input) {
   let counter=el(input.id+'-budget');
   if(!counter) {
     counter=node('span','message-budget','');counter.id=input.id+'-budget';
-    input.parentElement.previousElementSibling.appendChild(counter);
+    (input.closest('#dm-center,#channels-center')?.querySelector('.composer-templates')||input.parentElement.previousElementSibling).appendChild(counter);
   }
-  counter.textContent=limit?`${used} / ${limit} bytes`+(used>limit?(!split?' · Message Split disabled':parts>3?' · Too long — maximum 3 split messages':parts>0?` · ${parts} / 3 split messages`:' · cannot split this character sequence'):''):'Waiting for radio limits';
+  counter.textContent=limit?trTemplate("${used} / ${limit} bytes",[used,limit])+(used>limit?(!split?tr(' · Message Split disabled'):parts>3?tr(' · Too long — maximum 3 split messages'):parts>0?` · ${parts} / 3 split messages`:tr(' · cannot split this character sequence')):''):tr('Waiting for radio limits');
   counter.classList.toggle('over-limit',used>limit||invalid);
-  counter.title='UTF-8 bytes: Greek letters and emoji can use more than one byte.';
+  counter.title=tr('UTF-8 bytes: Greek letters and emoji can use more than one byte.');
   const direct=input.id==='dm-input',radio=direct?dmSelection.radio:network,device=state&&state[radio];
   const ready=device&&device.connected&&!device.loading&&(direct?device.nodes.some(n=>n.id===dmSelection.peer&&nodeMessageable(radio,n)):device.channels.some(c=>c.index===channel[radio]));
   el(direct?'dm-reply':'chat-send').disabled=!ready||input.disabled||!used||!limit||(!split&&used>limit)||invalid;
@@ -372,31 +372,31 @@ function renderReplyPreview() {
   const reply=channelReply;
   preview.hidden=!reply||dmMode||reply.key!==state?.[network]?.key||reply.channel!==channel[network];
   if(preview.hidden) return;
-  preview.appendChild(node('span','','Reply to '+reply.name+': '+reply.text+(reply.packetId?'':' · original reference unavailable')));
+  preview.appendChild(node('span','',tr('Reply to ')+reply.name+': '+reply.text+(reply.packetId?'':tr(' · original reference unavailable'))));
   dialogAction(preview,'×',()=>{channelReply=null;renderReplyPreview();});
 }
 window.onAbout=function(version,notices) {
-  el('about-version').textContent='Beta edition · '+version;
+  el('about-version').textContent=tr('Beta edition · ')+version;
   el('about-notices').textContent=notices;
 };
 
 function reactionMenu(card,radio,message) {
   if(radioType(radio)!=='mt')return;
   const key=state[radio].key;
-  dialogAction(card,'Emoji',()=>{
+  dialogAction(card,tr('Emoji'),()=>{
     if(state[radio].key!==key)return;
-    const picker=dialogCard('Emoji');reactionChoices(picker,radio,message);cancelDialog(picker);
+    const picker=dialogCard(tr('Emoji'));reactionChoices(picker,radio,message);cancelDialog(picker);
   });
 }
 function reactionChoices(card,radio,message) {
   if(radioType(radio)!=='mt')return;
-  if(!message.packetId){card.appendChild(node('p','help','Reactions unavailable: original packet reference was not saved.'));return;}
-  card.appendChild(node('p','','React with thumbs up or a number'));
+  if(!message.packetId){card.appendChild(node('p','help',tr('Reactions unavailable: original packet reference was not saved.')));return;}
+  card.appendChild(node('p','',tr('React with thumbs up or a number')));
   const row=node('div','reaction-choices'),key=state[radio].key;
   for(const i of ['👍','0','1','2','3','4','5','6','7']) {
     const button=dialogAction(row,String(i),()=>{if(state[radio].key!==key)return;el('dm-context').hidden=true;AndroidBridge.react(key,message.id,String(i));});
     button.disabled=!state[radio].connected||state[radio].loading;
-    button.setAttribute('aria-label','React '+i);
+    button.setAttribute('aria-label',tr('React ')+i);
   }
   card.appendChild(row);
 }
@@ -423,23 +423,23 @@ function appendReactions(bubble,radio,message,entries) {
 }
 
 function showReactionSenders(radio,reactions,emoji){
-  const card=dialogCard('Reactions · '+emoji),seen=new Set();
+  const card=dialogCard(tr('Reactions · ')+emoji),seen=new Set();
   for(const r of reactions.filter(r=>r.text===emoji)){
     const id=r.own?'You':r.sender;if(seen.has(id))continue;seen.add(id);
     const name=r.own?'You':state[radio]?.nodes?.find(n=>n.id===r.sender)?.name||r.senderName||id;
     card.appendChild(node('p','reaction-sender',name+(name!==id?' · '+id:'')));
   }
-  dialogAction(card,'Close',()=>el('dm-context').hidden=true);
+  dialogAction(card,tr('Close'),()=>el('dm-context').hidden=true);
 }
 function showPingOptions(radio,entry){
-  const key=state[radio].key,card=dialogCard('Ping · '+(entry.name||entry.id));
-  card.appendChild(node('p','help','Zero-hop Ping tests a direct link. The repeater must be within radio range. Room servers must have repeating enabled.'));
-  for(const width of [1,2,4])dialogAction(card,'Ping · '+width+'-byte ID',()=>{
+  const key=state[radio].key,card=dialogCard(tr('Ping · ')+(entry.name||entry.id));
+  card.appendChild(node('p','help',tr('Zero-hop Ping tests a direct link. The repeater must be within radio range. Room servers must have repeating enabled.')));
+  for(const width of [1,2,4])dialogAction(card,tr('Ping · ')+width+tr('-byte ID'),()=>{
     if(state[radio].key!==key)return;
     const prefix=entry.id.slice(0,width*2).toLowerCase();
     const matches=state[radio].nodes.filter(n=>['Repeater','Room server'].includes(n.role)&&n.id.toLowerCase().startsWith(prefix));
     const send=()=>{el('dm-context').hidden=true;AndroidBridge.nodeAction(key,entry.id,'ping',String(width));};
-    if(matches.length>1){const warning=dialogCard('Ping ID matches multiple devices');warning.appendChild(node('p','',matches.map(n=>n.name||n.id).join(' / ')+'. A reply cannot identify which one answered.'));dialogAction(warning,'Send Ping',send);cancelDialog(warning);}else send();
+    if(matches.length>1){const warning=dialogCard(tr('Ping ID matches multiple devices'));warning.appendChild(node('p','',matches.map(n=>n.name||n.id).join(' / ')+tr('. A reply cannot identify which one answered.')));dialogAction(warning,tr('Send Ping'),send);cancelDialog(warning);}else send();
   });
   cancelDialog(card);
 }

@@ -1,5 +1,9 @@
 # Licensing and provenance for SV8TTL LoRa Dash
 
+## 28 November 2026 — 0.10.38 APK update publication
+
+The user requested fixing the unavailable app update, authorizing publication of the latest source as APK 0.10.38 (65) and its matching update manifest. This supersedes the source-only publication below. The existing application ID and signing certificate are preserved for in-place updates. Existing MIT attribution, provenance and dependency notices remain unchanged. This is an independent Android adaptation based on OverMesh Lite, not an official OverMesh release. Production signing and replacement licensing remain undecided; physical phone/radio verification remains pending.
+
 ## 28 November 2026 — source and manual publication authorized
 
 The user authorized updating the manuals and GitHub. This publishes the persistent-send, map-trail, signal-history, Contacts dropdown and Greek-interface source, tests and documentation. The published APK and update feed remain unchanged. README now describes app capabilities; its previous history and notices are preserved in PROJECT-HISTORY.md. Existing MIT attribution, dependency notices, application ID and signing configuration remain unchanged. Physical phone/radio verification remains pending.

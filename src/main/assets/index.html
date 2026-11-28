@@ -60,7 +60,7 @@
       <div id="chat-empty">Connect a radio in Config, then choose a channel.</div>
       <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div class="composer-templates"><button class="preset-picker-button" type="button" onclick="openPresetPicker('chat-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('chat-input').value)">Save template</button></div><div id="chat-input-bar">
         <textarea id="chat-input" class="form-input" placeholder="Message…" rows="1"></textarea>
-        <div class="composer-actions"><button id="chat-position" type="button" onpointerdown="event.preventDefault()" onclick="startChatLocation()">Send position</button><button id="chat-send" onclick="sendMsg()">Send</button></div>
+        <div class="composer-actions"><button id="chat-position" type="button" onpointerdown="event.preventDefault()" onclick="startChatLocation()">Send Psn</button><button id="chat-send" onclick="sendMsg()">Send</button></div>
       </div>
     </section>
     <aside class="chat-side" id="channel-mt-side"></aside>
@@ -72,7 +72,7 @@
       <div id="dm-message-search" class="message-search-bar" hidden></div>
       <div id="dm-chat-history"></div>
       <div id="dm-chat-status" aria-live="polite"></div>
-      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div class="composer-templates"><button class="preset-picker-button" type="button" onclick="openPresetPicker('dm-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('dm-input').value)">Save template</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><div class="composer-actions"><button id="dm-position" type="button" onpointerdown="event.preventDefault()" onclick="startChatLocation()">Send position</button><button id="dm-reply" onclick="replyDm()">Reply</button></div></div>
+      <div class="composer-font-tools"><span>Write</span><button type="button" aria-label="Smaller composer text" onclick="changeComposerFont(-1)">A−</button><span class="composer-font-value"></span><button type="button" aria-label="Larger composer text" onclick="changeComposerFont(1)">A+</button></div><div class="composer-templates"><button class="preset-picker-button" type="button" onclick="openPresetPicker('dm-input')">Templates</button><button type="button" onclick="openMessageTemplateEditor(el('dm-input').value)">Save template</button></div><div id="dm-compose"><textarea id="dm-input" class="form-input" rows="1" placeholder="Direct message…"></textarea><div class="composer-actions"><button id="dm-position" type="button" onpointerdown="event.preventDefault()" onclick="startChatLocation()">Send Psn</button><button id="dm-reply" onclick="replyDm()">Reply</button></div></div>
     </section>
     <aside class="dm-side" id="dm-mt-side"></aside>
   </div>
@@ -208,7 +208,7 @@
     </div>
     <div id="settings-home">
     <div class="settings-shortcuts">
-      <button id="config-connect-all" type="button" onclick="showSettingsPage('nodes')"><strong>Connect All Available</strong></button>
+      <button id="config-connect-all" type="button" onclick="showSettingsPage('nodes')"><strong>Connect known nodes</strong></button>
       <h2>Radios</h2>
       <button type="button" onclick="showSettingsPage('nodes')"><strong>My Nodes</strong><span>Connect and manage known radios</span></button>
       <button type="button" onclick="showSettingsPage('connections')"><strong>Add Radio Connections</strong><span>Add a radio using Bluetooth or USB</span></button>

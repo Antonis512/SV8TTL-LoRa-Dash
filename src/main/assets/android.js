@@ -1302,8 +1302,8 @@ function renderConnectAllState(busy){
   for(const id of ['connect-all-available','member-connect'])el(id).disabled=busy;
   el('connect-available-status').hidden=!busy;
   const member=!!state?.memberConfig?.enabled;
-  const label=member?mtWord('connect'):'Connect All Available';
-  el('config-connect-all').firstElementChild.textContent=label;
+  const label=member?mtWord('connect'):tr('Connect All Available');
+  el('config-connect-all').firstElementChild.textContent=tr('Connect known nodes');
   el('connect-all-available').textContent=busy?(member?mtWord('connecting'):tr('Connecting…')):label;
   el('nodes-title').textContent=member?mtWord('myNodes'):tr('My Nodes');
   el('nodes-back').textContent='← '+(member?mtWord('config'):tr('Config'));

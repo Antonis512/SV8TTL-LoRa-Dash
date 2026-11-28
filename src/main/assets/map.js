@@ -149,6 +149,7 @@ window.onMapData=data=>{
   }
   if(el('map-search-dialog').open)renderMapSearch();
   renderGeofenceHistory();
+  renderPassiveActivity();
   initMap();setMapMode(mapMode);renderMap();renderMapItems();el('map-send-mark')?.refreshTargets?.();
 };
 function mapFilterRows(){
@@ -536,6 +537,10 @@ function markInput(host,label,type){
   clear.setAttribute('aria-label',tr('Clear ')+label.toLowerCase());
   return input;
 }
+function renderPassiveActivity(){
+  const summary=el('map-passive-summary');
+  if(summary)summary.textContent=mapData.heard.length+tr(' saved hearing events · ')+mapData.positions.length+tr(' saved positions shown. Position updates can be less frequent than radio contact.');
+}
 function mapTool(name){
   cancelMarkPosition();
   mapToolName=name;resetDraft();drawMapItems();for(const b of document.querySelectorAll('.map-tool-nav button'))b.classList.toggle('active',b.textContent===({passive:'Passive activity',active:'Ask positions',route:'Radio path',mark:'Marks',overlay:'Overlays',geofence:'Geofences'}[name]));
@@ -543,7 +548,7 @@ function mapTool(name){
   const instruction=text=>host.appendChild(mapText('p',text));
   if(name==='passive'){
     instruction('1. Connect a radio. 2. Leave it listening. 3. Incoming messages and position reports build this phone’s history without transmitting. Use Heard from/to above to review it.');
-    host.appendChild(mapText('p',mapData.heard.length+tr(' saved hearing events · ')+mapData.positions.length+tr(' saved positions shown. Position updates can be less frequent than radio contact.')));
+    const summary=mapText('p','');summary.id='map-passive-summary';host.appendChild(summary);renderPassiveActivity();
   }else if(name==='active'){
     instruction('Choose a connected MT device and one of its channels, then tap Ask for positions. The radio broadcasts one position request with a hop limit of 3.');
     const device=mapSelect(host,tr('Connected MT device'),[]);device.id='map-sense-device';

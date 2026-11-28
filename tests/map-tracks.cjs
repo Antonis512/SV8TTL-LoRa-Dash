@@ -35,6 +35,18 @@ for(const [dx,dy] of [[100,0],[-100,0],[0,100],[0,-100],[100,100]]){
    window.sample={nodes:[],sharedPositions:[base,{...base,lat:37.99,time:now-120000},{...base,lat:37.98,time:now-240000},{...base,lat:30,time:now-31*86400000}],items:[]};
    onMapData(sample);clearMapFilters();
   });
+  // The passive panel exists before the asynchronous native snapshot arrives.
+  assert.match(await page.locator('#map-passive-summary').textContent(),/^0 saved hearing events · 0 saved positions/);
+  await page.evaluate(()=>{
+   const time=Date.now();
+   window.passiveSample={...sample,heard:[{radio:'mt',device:'receiver',node:'!12345678',time}],positions:[{radio:'mt',device:'receiver',node:'!12345678',lat:38,lon:23,time}]};
+   onMapData(passiveSample);
+  });
+  assert.match(await page.locator('#map-passive-summary').textContent(),/^1 saved hearing events · 1 saved positions/);
+  await page.evaluate(()=>onMapData({...passiveSample,heard:[...passiveSample.heard,{...passiveSample.heard[0],time:Date.now()}]}));
+  assert.match(await page.locator('#map-passive-summary').textContent(),/^2 saved hearing events · 1 saved positions/);
+  await page.evaluate(()=>onMapData(sample));
+  assert.match(await page.locator('#map-passive-summary').textContent(),/^0 saved hearing events · 0 saved positions/);
   assert.equal(await page.evaluate(()=>mapData.sharedPositions.length),3);
   assert.equal(await page.evaluate(()=>mapMarkers.length),1);
   assert.deepEqual(await page.evaluate(()=>mapMarkers[0].point),[23,38]);

@@ -4128,7 +4128,7 @@ public final class MainActivity extends Activity {
         GradientDrawable fieldBackground(){GradientDrawable shape=rounded(fieldColor);shape.setCornerRadius(dp(6));shape.setStroke(dp(1),borderColor);return shape;}
         void styleField(EditText input){input.setTextColor(textColor);input.setHintTextColor(mutedColor);input.setBackground(fieldBackground());input.setPadding(dp(10),dp(8),dp(10),dp(8));}
         void styleButton(Button button){button.setAllCaps(false);button.setTextColor(accentColor);button.setBackground(fieldBackground());button.setMinHeight(dp(40));}
-        TextView heading(String title){TextView view=label(title,14,accentColor,true);view.setPadding(0,dp(10),0,dp(5));return view;}
+        TextView heading(String title){TextView view=label(ui(title),14,accentColor,true);view.setPadding(0,dp(10),0,dp(5));return view;}
         void chooseTemplate(){
             try{
                 String initial=new JSONArray().put(new JSONObject().put("title","Status Update").put("text","Status:\nLocation:\nNext update:")).toString();

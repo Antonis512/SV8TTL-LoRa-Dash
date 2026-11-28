@@ -18,6 +18,18 @@ const {pathToFileURL}=require('node:url');const path=require('node:path');
   await page.getByRole('button',{name:'Apply / Εφαρμογή',exact:true}).click();
   assert.equal(await page.locator('html').getAttribute('lang'),'el');
   assert.equal(await page.locator('#current-language').textContent(),'Ελληνικά');
+  assert.equal(await page.locator('#config-connect-all strong').textContent(),'Σύνδεση γνωστών κόμβων');
+  assert.equal(await page.locator('#connect-all-available').textContent(),'Σύνδεση όλων των διαθέσιμων');
+  assert.equal(await page.locator('#new-multi-send').textContent(),'Μαζική αποστολή');
+  assert.equal(await page.locator('[data-persistent-kind="message"]').first().textContent(),'Εμμένον Μήνυμα');
+  assert.equal(await page.locator('[data-persistent-kind="location"]').first().textContent(),'Εμμένουσα αποστολή θέσης');
+  for(const width of [320,390]){
+   await page.setViewportSize({width,height:780});await page.evaluate(()=>{switchTab('chat');selectDmPeer('mt','!abcdef12');});
+   const row=await page.locator('#dm-center .persistent-chat-controls').evaluate(e=>[...e.children].map(b=>{const r=b.getBoundingClientRect();return {top:r.top,left:r.left,right:r.right,width:r.width};}));
+   assert.equal(row.length,3);assert(row.every(r=>r.width>0&&r.top===row[0].top&&r.left>=0&&r.right<=width));
+  }
+  await page.evaluate(()=>{switchTab('settings');showSettingsPage('home');});
+
   assert.equal(await page.locator('#chat-input').inputValue(),'Map Send ${test}');
   assert.equal(await page.locator('[data-tab="settings"] span').last().textContent(),'Ρυθμίσεις');
   assert.equal(await page.locator('#settings-home button[onclick="checkForUpdates()"] strong').textContent(),'Έλεγχος ενημερώσεων');

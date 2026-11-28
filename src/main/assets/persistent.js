@@ -11,9 +11,9 @@ function persistentButton(text,fn){const b=document.createElement('button');b.ty
 function installPersistentControls(){
  for(const [prefix,inputId,positionId] of [['chat','chat-input','chat-position'],['dm','dm-input','dm-position'],['member','member-input','member-location']]){
   const input=el(inputId),position=el(positionId);if(!input||!position)continue;
-  const row=document.createElement('div');row.className='persistent-controls';
-  for(const [location,label] of [[false,'P. Msg'],[true,'P. Location']]){
-   const b=persistentButton(label,()=>openPersistent(location,inputId));b.onpointerdown=e=>e.preventDefault();b.dataset.persistentKind=location?'location':'message';b.title=location?tr('Persistent location'):tr('Persistent message');row.append(b);
+  const row=document.createElement('div');row.className='persistent-controls persistent-chat-controls';
+  for(const [location,label] of [[false,'P. Msg'],[true,'P.Psn']]){
+   const b=persistentButton(tr(label),()=>openPersistent(location,inputId));b.onpointerdown=e=>e.preventDefault();b.dataset.persistentKind=location?'location':'message';b.title=location?tr('Persistent location'):tr('Persistent message');row.append(b);
   }
   if(prefix==='member')position.before(row);else input.parentNode.before(row);
   row.append(position);

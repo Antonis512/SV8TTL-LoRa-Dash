@@ -222,11 +222,11 @@ function renderContactEditorContent(){
   const actions=node('div','contact-toolbar');body.appendChild(actions);contactButton(actions,tr('Save Contact'),()=>saveContactDraft());contactButton(actions,tr('Cancel'),closeContactDialog);
 }
 function renderContactRepeats(body,c,key,title,defaultLabel){
-  const section=contactSection(body,title);for(const item of c[key]){
+  const section=contactSection(body,tr(title));for(const item of c[key]){
     const row=node('div','contact-repeat');contactInput(row,title+' label',item.label,v=>item.label=v);if(key==='custom')contactSelect(row,tr('Field type'),item.type||'text',[['text',tr('Text')],['number',tr('Number')],['date',tr('Date')],['url',tr('Link')]],v=>{item.type=v;renderContactEditor();});
     contactInput(row,title+' value',item.value,v=>item.value=v,key==='addresses'?'textarea':key==='custom'?(item.type||'text'):key==='phones'?'tel':key==='emails'?'email':'text');
     contactButton(row,tr('Remove'),()=>{c[key]=c[key].filter(x=>x!==item);renderContactEditor();});section.appendChild(row);
-  }contactButton(section,tr('Add ')+title.toLowerCase(),()=>{c[key].push({label:defaultLabel,value:'',...(key==='custom'?{type:'text'}:{})});renderContactEditor();});
+  }contactButton(section,tr('Add '+title.toLowerCase()),()=>{c[key].push({label:defaultLabel,value:'',...(key==='custom'?{type:'text'}:{})});renderContactEditor();});
 }
 window.onContactPhoto=result=>{if(contactEdit&&contactEdit.token===result.token){contactEdit.draft.photo=result.photo;renderContactEditor();}};
 function contactDuplicate(a,b){

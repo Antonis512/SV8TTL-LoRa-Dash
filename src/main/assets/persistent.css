@@ -12,3 +12,6 @@
 .member-location-row .persistent-controls{margin-left:auto}
 #persistent-error{color:var(--red,#e66)}
 @media(max-height:480px){.composing .persistent-summary{display:none}.composing .persistent-controls{margin:2px 0}}
+
+.persistent-chat-controls{flex-wrap:nowrap;align-items:stretch}
+.persistent-chat-controls button{flex:1 1 0;min-width:0;padding:6px 4px;overflow-wrap:anywhere}

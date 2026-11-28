@@ -31,6 +31,7 @@ function applyAppLanguage(language){
   if(current!==b.last)continue;
   b.last=tr(b.source);if(b.attr)b.node.setAttribute(b.attr,b.last);else b.node.textContent=b.last;
  }
+ for(const b of document.querySelectorAll('[data-persistent-kind]')){const location=b.dataset.persistentKind==='location';b.textContent=tr(location?'P.Psn':'P. Msg');b.title=tr(location?'Persistent location':'Persistent message');}
  const current=document.getElementById('current-language');if(current)current.textContent=appLanguage==='el'?'Ελληνικά':'English';
 }
 function openLanguagePicker(){document.querySelector('#language-picker input[value="'+appLanguage+'"]').checked=true;document.getElementById('language-picker').showModal();}
